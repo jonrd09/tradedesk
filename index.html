@@ -20,14 +20,14 @@
   --r:10px;--rl:16px;
 }
 *{box-sizing:border-box;margin:0;padding:0;}
-html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px;line-height:1.5;}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:16px;line-height:1.5;}
 ::-webkit-scrollbar{width:4px;height:4px;}
 ::-webkit-scrollbar-thumb{background:var(--border2);border-radius:4px;}
 .shell{display:grid;grid-template-rows:56px 1fr;height:100vh;overflow:hidden;}
 .topbar{background:var(--bg2);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:14px;padding:0 20px;}
 .logo{font-family:var(--mono);font-size:13px;font-weight:700;color:var(--blue);white-space:nowrap;}
 .logo span{color:var(--text2);font-weight:400;}
-.main{display:grid;grid-template-columns:300px 560px 1fr;overflow:hidden;height:100%;}
+.main{display:grid;grid-template-columns:460px 480px 1fr;overflow:hidden;height:100%;}
 .pills{display:flex;gap:6px;flex:1;overflow-x:auto;}
 .pill{display:flex;align-items:center;gap:8px;padding:5px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:20px;cursor:pointer;white-space:nowrap;transition:all .15s;font-size:13px;}
 .pill:hover{border-color:var(--blue);}
@@ -192,7 +192,31 @@ select.inp{cursor:pointer;}
 
   <!-- Calculadora Limit -->
   <div class="rsec">
-    <div class="rsec-title">Calculadora Limit de Ganancia</div>
+    <!-- Título + % ganancia en la misma línea -->
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+      <div class="rsec-title" style="margin:0;">Calculadora Limit de Ganancia</div>
+      <div style="display:flex;align-items:center;gap:4px;">
+        <input type="number" id="gainPct" value="35" min="5" max="500" step="5"
+          style="background:var(--bg4);border:1px solid var(--border);border-radius:var(--r);color:var(--text);padding:3px 8px;font-size:12px;font-family:var(--mono);width:52px;outline:none;text-align:center;"
+          oninput="saveGainPct();calcLimit()" title="% Ganancia objetivo">
+        <span style="font-size:10px;color:var(--text3);">%</span>
+      </div>
+    </div>
+    <!-- Rangos de precio de contratos -->
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:12px;">
+      <div style="background:var(--bg3);border-radius:var(--r);padding:8px 10px;border-left:2px solid #cc0000;">
+        <div style="font-size:9px;font-weight:700;color:#cc0000;font-family:var(--mono);margin-bottom:3px;">TSLA</div>
+        <div style="font-size:12px;font-weight:600;color:var(--text);font-family:var(--mono);">$80–$160</div>
+      </div>
+      <div style="background:var(--bg3);border-radius:var(--r);padding:8px 10px;border-left:2px solid #4285f4;">
+        <div style="font-size:9px;font-weight:700;color:#4285f4;font-family:var(--mono);margin-bottom:3px;">GOOG</div>
+        <div style="font-size:12px;font-weight:600;color:var(--text);font-family:var(--mono);">$60–$140</div>
+      </div>
+      <div style="background:var(--bg3);border-radius:var(--r);padding:8px 10px;border-left:2px solid #00a651;">
+        <div style="font-size:9px;font-weight:700;color:#00a651;font-family:var(--mono);margin-bottom:3px;">SPY</div>
+        <div style="font-size:12px;font-weight:600;color:var(--text);font-family:var(--mono);">$30–$45</div>
+      </div>
+    </div>
     <div class="inp-row">
       <div class="ig"><label class="ilbl">Precio comprado ($)</label><input class="inp" type="number" id="cBought" placeholder="ej. 1.45" step="0.01" oninput="calcLimit()"></div>
       <div class="ig"><label class="ilbl">Contratos</label><input class="inp" type="number" id="cQty" value="1" min="1" oninput="calcLimit()"></div>
@@ -202,13 +226,6 @@ select.inp{cursor:pointer;}
       <div class="ig"><label class="ilbl">Tipo</label><select class="inp" id="cType" onchange="calcLimit()"><option value="call">CALL</option><option value="put">PUT</option></select></div>
     </div>
     <div id="limitResult"></div>
-    <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:flex;align-items:center;gap:8px;">
-      <label style="font-size:10px;color:var(--text3);flex:1;">% Ganancia objetivo</label>
-      <input type="number" id="gainPct" value="35" min="5" max="500" step="5"
-        style="background:var(--bg4);border:1px solid var(--border);border-radius:var(--r);color:var(--text);padding:3px 8px;font-size:12px;font-family:var(--mono);width:60px;outline:none;text-align:center;"
-        oninput="saveGainPct();calcLimit()">
-      <span style="font-size:11px;color:var(--text3);">%</span>
-    </div>
   </div>
 
   <!-- Black-Scholes -->

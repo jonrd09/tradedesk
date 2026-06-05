@@ -213,7 +213,6 @@ select.inp{cursor:pointer;}
   </div>
   <div style="display:flex;align-items:center;gap:10px;margin-left:auto;">
     <span id="liveTag" style="font-size:10px;font-weight:600;color:var(--text3);">⟳ Cargando…</span>
-    <button onclick="loadLivePrices()" style="background:var(--blue-bg);border:1px solid var(--blue);border-radius:20px;color:var(--blue);padding:4px 12px;font-size:11px;font-weight:600;cursor:pointer;font-family:var(--sans);">↻</button>
     <span class="mkt-closed" id="mktStatus">● —</span>
     <span class="clock" id="clockEl">—</span>
   </div>
@@ -228,7 +227,6 @@ select.inp{cursor:pointer;}
   <div class="psec">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
       <div class="plbl" style="margin:0;">🚀 Momentum Scanner</div>
-      <button onclick="buildMomentum()" style="background:var(--blue-bg);border:1px solid var(--blue);border-radius:20px;color:var(--blue);padding:3px 10px;font-size:10px;font-weight:600;cursor:pointer;font-family:var(--sans);">↻</button>
     </div>
     <div style="font-size:10px;color:var(--text3);margin-bottom:10px;">GOOG · TSLA · NVDA · AAPL · MSFT · SPY · AVGO · MU</div>
     <div id="momentumArea">
@@ -249,7 +247,6 @@ select.inp{cursor:pointer;}
         <div class="card-title">Señales Activas</div>
         <div class="card-sub">E1 Alza · E2 Baja · E7 Imán Bajista · E8 Imán Alcista · 1H+15m · GOOG & TSLA</div>
       </div>
-      <button onclick="buildSignals()" style="background:var(--blue-bg);border:1px solid var(--blue);border-radius:20px;color:var(--blue);padding:4px 12px;font-size:11px;font-weight:600;cursor:pointer;font-family:var(--sans);">↻ Recalcular</button>
     </div>
     <div id="signalArea"></div>
   </div>
@@ -259,9 +256,9 @@ select.inp{cursor:pointer;}
 <!-- ══ RIGHT PANEL ══ -->
 <aside class="right-panel">
 
-  <!-- Limit 35% -->
+  <!-- Limit % Ganancia -->
   <div class="rsec">
-    <div class="rsec-title">Calculadora Limit 35% Ganancia</div>
+    <div class="rsec-title">Calculadora Limit de Ganancia</div>
     <div class="inp-row">
       <div class="ig"><label class="ilbl">Precio comprado ($)</label><input class="inp" type="number" id="cBought" placeholder="ej. 1.45" step="0.01" oninput="calcLimit()"></div>
       <div class="ig"><label class="ilbl">Contratos</label><input class="inp" type="number" id="cQty" value="1" min="1" oninput="calcLimit()"></div>
@@ -271,6 +268,18 @@ select.inp{cursor:pointer;}
       <div class="ig"><label class="ilbl">Tipo</label><select class="inp" id="cType" onchange="calcLimit()"><option value="call">CALL</option><option value="put">PUT</option></select></div>
     </div>
     <div id="limitResult"></div>
+    <!-- % ganancia configurable — discreto al fondo -->
+    <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border);">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <label style="font-size:10px;color:var(--text3);flex:1;">% Ganancia objetivo</label>
+        <div style="display:flex;align-items:center;gap:4px;">
+          <input type="number" id="gainPct" value="35" min="5" max="500" step="5"
+            style="background:var(--bg4);border:1px solid var(--border);border-radius:var(--r);color:var(--text2);padding:3px 8px;font-size:12px;font-family:var(--mono);width:60px;outline:none;text-align:center;"
+            oninput="saveGainPct(); calcLimit()" title="Cambia el % de ganancia objetivo">
+          <span style="font-size:11px;color:var(--text3);">%</span>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- Black-Scholes -->
@@ -731,7 +740,18 @@ function buildSignals() {
   area.innerHTML = html;
 }
 
-// ═══ LIMIT 35% ═══════════════════════════════════════════════════════════════
+// ═══ LIMIT % GANANCIA ════════════════════════════════════════════════════════
+function saveGainPct() {
+  const v = parseFloat(document.getElementById('gainPct')?.value) || 35;
+  localStorage.setItem('gainPct', v);
+}
+function loadGainPct() {
+  const saved = localStorage.getItem('gainPct');
+  const pct = saved ? parseFloat(saved) : 35;
+  const el = document.getElementById('gainPct');
+  if (el) el.value = pct;
+  return pct;
+}
 function calcLimit() {
   const bought=parseFloat(document.getElementById('cBought').value);
   const qty=parseInt(document.getElementById('cQty').value)||1;
@@ -739,13 +759,14 @@ function calcLimit() {
   const type=document.getElementById('cType').value;
   const el=document.getElementById('limitResult');
   if(!bought||bought<=0){el.innerHTML='';return;}
-  const lp=bought*1.35;
+  const gainPct = parseFloat(document.getElementById('gainPct')?.value) || 35;
+  const lp=bought*(1 + gainPct/100);
   const profC=(lp-bought)*100;
   const profT=profC*qty;
   const costT=bought*100*qty;
   el.innerHTML=`
     <div class="limit-box">
-      <div class="limit-lbl">Precio Límite de Venta — 35% ganancia</div>
+      <div class="limit-lbl">Precio Límite de Venta — ${gainPct}% ganancia</div>
       <div class="limit-price">$${lp.toFixed(2)}</div>
       <div class="limit-sub">Compraste $${bought.toFixed(2)} · ${type.toUpperCase()} · ${ticker}</div>
     </div>
@@ -1065,6 +1086,8 @@ function buildMomentum() {
 
 // ═══ INIT ════════════════════════════════════════════════════════════════════
 async function init() {
+  // Restore saved gain %
+  loadGainPct();
   // Restore Finnhub key from localStorage
   const _saved = localStorage.getItem('finnhub_key');
   if (_saved && _saved.length > 8) {

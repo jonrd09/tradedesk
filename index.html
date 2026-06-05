@@ -20,7 +20,7 @@
   --r:10px;--rl:16px;
 }
 *{box-sizing:border-box;margin:0;padding:0;}
-html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:16px;line-height:1.5;}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:25px;line-height:1.5;}
 ::-webkit-scrollbar{width:4px;height:4px;}
 ::-webkit-scrollbar-thumb{background:var(--border2);border-radius:4px;}
 .shell{display:grid;grid-template-rows:56px 1fr;height:100vh;overflow:hidden;}
@@ -142,6 +142,18 @@ select.inp{cursor:pointer;}
     <div class="pill" onclick="selectTicker('TSLA')" id="pill-TSLA">
       <span class="sym">TSLA</span><span class="prc" id="pill-p-TSLA">$419.59</span><span class="chg dn" id="pill-c-TSLA">-1.24%</span>
     </div>
+    <div class="pill" onclick="selectTicker('QQQ')" id="pill-QQQ">
+      <span class="sym">QQQ</span><span class="prc" id="pill-p-QQQ">$474.20</span><span class="chg up" id="pill-c-QQQ">+0.44%</span>
+    </div>
+    <div class="pill" onclick="selectTicker('SPY')" id="pill-SPY">
+      <span class="sym">SPY</span><span class="prc" id="pill-p-SPY">$594.52</span><span class="chg up" id="pill-c-SPY">+0.30%</span>
+    </div>
+    <div class="pill" onclick="selectTicker('IWM')" id="pill-IWM">
+      <span class="sym">IWM</span><span class="prc" id="pill-p-IWM">$208.45</span><span class="chg dn" id="pill-c-IWM">-0.41%</span>
+    </div>
+    <div class="pill" onclick="selectTicker('DIA')" id="pill-DIA">
+      <span class="sym">DIA</span><span class="prc" id="pill-p-DIA">$431.60</span><span class="chg up" id="pill-c-DIA">+0.75%</span>
+    </div>
   </div>
   <div style="display:flex;align-items:center;gap:10px;margin-left:auto;">
     <span id="liveTag" style="font-size:10px;font-weight:600;color:var(--text3);">⟳ Cargando…</span>
@@ -162,18 +174,7 @@ select.inp{cursor:pointer;}
     <div style="font-size:10px;color:var(--text3);margin-bottom:10px;">GOOG · TSLA · NVDA · AAPL · MSFT · SPY · AVGO · MU</div>
     <div id="momentumArea"><div style="text-align:center;padding:20px;color:var(--text2);font-size:12px;">⟳ Calculando…</div></div>
   </div>
-  <div class="psec">
-    <div class="plbl">Reglas de Trade · Hoy</div>
-    <div id="dayRules"></div>
-    <div style="margin-top:12px;display:flex;flex-direction:column;gap:7px;">
-      <div style="background:rgba(61,139,255,.07);border:1px solid rgba(61,139,255,.2);border-radius:10px;padding:10px 13px;display:flex;align-items:center;gap:10px;"><span style="font-size:16px;">📡</span><span style="font-size:12px;font-weight:600;">Saliendo de Bollinger</span></div>
-      <div style="background:rgba(167,139,250,.07);border:1px solid rgba(167,139,250,.2);border-radius:10px;padding:10px 13px;display:flex;align-items:center;gap:10px;"><span style="font-size:16px;">🧘</span><span style="font-size:12px;font-weight:600;">Paciencia</span></div>
-      <div style="background:rgba(0,209,122,.07);border:1px solid rgba(0,209,122,.2);border-radius:10px;padding:10px 13px;display:flex;align-items:center;gap:10px;"><span style="font-size:16px;">🗺️</span><span style="font-size:12px;font-weight:600;">Ver Panorama Completo</span></div>
-      <div style="background:rgba(0,209,122,.07);border:1px solid rgba(0,209,122,.2);border-radius:10px;padding:10px 13px;display:flex;align-items:center;gap:10px;"><span style="font-size:16px;">📊</span><span style="font-size:12px;font-weight:600;">Verificar Tendencias</span></div>
-      <div style="background:rgba(255,194,52,.07);border:1px solid rgba(255,194,52,.2);border-radius:10px;padding:10px 13px;display:flex;align-items:center;gap:10px;"><span style="font-size:16px;">❓</span><span style="font-size:12px;font-weight:600;">¿Me estoy apegando al plan?</span></div>
-      <div style="background:rgba(255,77,109,.07);border:1px solid rgba(255,77,109,.2);border-radius:10px;padding:10px 13px;display:flex;align-items:center;gap:10px;"><span style="font-size:16px;">🚫</span><span style="font-size:12px;font-weight:600;">El error de ayer NO lo cometeré HOY.</span></div>
-    </div>
-  </div>
+
 </aside>
 
 <!-- ══ CENTER ══ -->
@@ -195,11 +196,12 @@ select.inp{cursor:pointer;}
     <!-- Título + % ganancia en la misma línea -->
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
       <div class="rsec-title" style="margin:0;">Calculadora Limit de Ganancia</div>
-      <div style="display:flex;align-items:center;gap:4px;">
+      <div style="display:flex;align-items:center;gap:6px;">
+        <span style="font-size:11px;color:var(--text3);">% objetivo:</span>
         <input type="number" id="gainPct" value="35" min="5" max="500" step="5"
-          style="background:var(--bg4);border:1px solid var(--border);border-radius:var(--r);color:var(--text);padding:3px 8px;font-size:12px;font-family:var(--mono);width:52px;outline:none;text-align:center;"
+          style="background:var(--bg4);border:1px solid var(--blue);border-radius:var(--r);color:var(--green);padding:4px 8px;font-size:14px;font-family:var(--mono);width:64px;outline:none;text-align:center;font-weight:700;"
           oninput="saveGainPct();calcLimit()" title="% Ganancia objetivo">
-        <span style="font-size:10px;color:var(--text3);">%</span>
+        <span style="font-size:13px;color:var(--text2);">%</span>
       </div>
     </div>
     <!-- Rangos de precio de contratos -->
@@ -228,31 +230,22 @@ select.inp{cursor:pointer;}
     <div id="limitResult"></div>
   </div>
 
-  <!-- Black-Scholes -->
+  <!-- Reglas de Trade -->
   <div class="rsec">
-    <div class="rsec-title">Calculadora Black-Scholes</div>
-    <div class="inp-row">
-      <div class="ig"><label class="ilbl">Subyacente (S)</label><input class="inp" type="number" id="optS" value="369.27" oninput="calcBS()"></div>
-      <div class="ig"><label class="ilbl">Strike (K)</label><input class="inp" type="number" id="optK" value="375" oninput="calcBS()"></div>
+    <div class="plbl">Reglas de Trade · Hoy</div>
+    <div id="dayRules"></div>
+    <div style="margin-top:12px;display:flex;flex-direction:column;gap:7px;">
+      <div style="background:linear-gradient(135deg,rgba(61,139,255,.15),rgba(167,139,250,.15));border:1px solid rgba(61,139,255,.4);border-radius:10px;padding:12px 16px;text-align:center;">
+        <div style="font-family:var(--mono);font-size:15px;font-weight:700;color:var(--blue);letter-spacing:.08em;">⚡ RECUERDA SIEMPRE ⚡</div>
+      </div>
+      <div style="background:rgba(61,139,255,.07);border:1px solid rgba(61,139,255,.2);border-radius:10px;padding:10px 13px;display:flex;align-items:center;gap:10px;"><span style="font-size:16px;">📡</span><span style="font-size:12px;font-weight:600;">Saliendo de Bollinger</span></div>
+      <div style="background:rgba(167,139,250,.07);border:1px solid rgba(167,139,250,.2);border-radius:10px;padding:10px 13px;display:flex;align-items:center;gap:10px;"><span style="font-size:16px;">🧘</span><span style="font-size:12px;font-weight:600;">Paciencia</span></div>
+      <div style="background:rgba(0,209,122,.07);border:1px solid rgba(0,209,122,.2);border-radius:10px;padding:10px 13px;display:flex;align-items:center;gap:10px;"><span style="font-size:16px;">🗺️</span><span style="font-size:12px;font-weight:600;">Ver Panorama Completo</span></div>
+      <div style="background:rgba(0,209,122,.07);border:1px solid rgba(0,209,122,.2);border-radius:10px;padding:10px 13px;display:flex;align-items:center;gap:10px;"><span style="font-size:16px;">📊</span><span style="font-size:12px;font-weight:600;">Verificar Tendencias</span></div>
+      <div style="background:rgba(255,194,52,.07);border:1px solid rgba(255,194,52,.2);border-radius:10px;padding:10px 13px;display:flex;align-items:center;gap:10px;"><span style="font-size:16px;">❓</span><span style="font-size:12px;font-weight:600;">¿Me estoy apegando al plan?</span></div>
+      <div style="background:rgba(255,77,109,.07);border:1px solid rgba(255,77,109,.2);border-radius:10px;padding:10px 13px;display:flex;align-items:center;gap:10px;"><span style="font-size:16px;">🚫</span><span style="font-size:12px;font-weight:600;">El error de ayer NO lo cometeré HOY.</span></div>
     </div>
-    <div class="inp-row">
-      <div class="ig"><label class="ilbl">Días venc.</label><input class="inp" type="number" id="optT" value="7" oninput="calcBS()"></div>
-      <div class="ig"><label class="ilbl">Vol. impl. (%)</label><input class="inp" type="number" id="optV" value="30" oninput="calcBS()"></div>
-    </div>
-    <div class="inp-row">
-      <div class="ig"><label class="ilbl">BID</label><input class="inp" type="number" id="optBid" value="1.20" oninput="checkSpread()"></div>
-      <div class="ig"><label class="ilbl">ASK</label><input class="inp" type="number" id="optAsk" value="1.35" oninput="checkSpread()"></div>
-    </div>
-    <div id="spreadEl"></div>
-    <div class="ig" style="margin-top:8px;"><label class="ilbl">Tipo</label>
-      <select class="inp" id="optType" onchange="calcBS()"><option value="call">CALL</option><option value="put">PUT</option></select>
-    </div>
-    <div class="res-box">
-      <div class="res-row"><span class="res-lbl">Precio teórico</span><span class="res-val" id="bsPrice" style="color:var(--blue)">—</span></div>
-      <div class="res-row"><span class="res-lbl">Estado</span><span class="res-val" id="bsState">—</span></div>
-    </div>
-    <div class="gk-row" id="greeks"></div>
-    <div style="margin-top:12px;" id="dayReminder"></div>
+    <div style="margin-top:10px;" id="dayReminder"></div>
   </div>
 
   <!-- Noticias -->
@@ -276,6 +269,10 @@ select.inp{cursor:pointer;}
 const DEFAULTS = {
   GOOG:{name:'Alphabet Inc.',  price:369.27,change:13.59,pct:3.82, open:355.39,high:372.50,low:354.80,vol:'22.4M',cap:'$4.49T',idx:'NASDAQ'},
   TSLA:{name:'Tesla Inc.',     price:419.59,change:1.14, pct:0.27, open:419.59,high:426.35,low:416.46,vol:'35.3M',cap:'$1.34T',idx:'NASDAQ'},
+  QQQ: {name:'Nasdaq 100 ETF',  price:474.20,change:2.10, pct:0.44, open:472.10,high:475.80,low:471.50,vol:'42.1M',cap:'—',idx:'NASDAQ'},
+  SPY: {name:'S&P 500 ETF',     price:594.52,change:1.80, pct:0.30, open:592.70,high:595.40,low:591.00,vol:'62.3M',cap:'—',idx:'NYSE'},
+  IWM: {name:'Russell 2000 ETF',price:208.45,change:-0.85,pct:-0.41,open:209.30,high:210.10,low:207.90,vol:'28.5M',cap:'—',idx:'NYSE'},
+  DIA: {name:'Dow Jones ETF',   price:431.60,change:3.20, pct:0.75, open:428.40,high:432.50,low:428.00,vol:'18.2M',cap:'—',idx:'NYSE'},
 };
 const MOM_STOCKS = {
   GOOG:{name:'Alphabet', price:369.27}, TSLA:{name:'Tesla',   price:419.59},
@@ -396,11 +393,15 @@ async function loadLivePrices(){
   const tag=document.getElementById('liveTag');
   tag.textContent='⟳ Actualizando…';tag.style.color='var(--text3)';
   document.querySelectorAll('.pill').forEach(p=>p.style.opacity='0.5');
-  const [gq,tq]=await Promise.all([fetchQuote('GOOG'),fetchQuote('TSLA')]);
-  ['GOOG','TSLA'].forEach((sym,i)=>{
-    const q=i===0?gq:tq; if(!q) return;
+  const [gq,tq,qq,sq,iq,dq]=await Promise.all([
+    fetchQuote('GOOG'),fetchQuote('TSLA'),
+    fetchQuote('QQQ'),fetchQuote('SPY'),fetchQuote('IWM'),fetchQuote('DIA')
+  ]);
+  const quoteMap={'GOOG':gq,'TSLA':tq,'QQQ':qq,'SPY':sq,'IWM':iq,'DIA':dq};
+  ['GOOG','TSLA','QQQ','SPY','IWM','DIA'].forEach((sym)=>{
+    const q=quoteMap[sym]; if(!q) return;
     Object.assign(DEFAULTS[sym],q);
-    MOM_STOCKS[sym].price=q.price;
+    if(MOM_STOCKS[sym]) MOM_STOCKS[sym].price=q.price;
     const up=q.change>=0;
     const pp=document.getElementById('pill-p-'+sym);
     const pc=document.getElementById('pill-c-'+sym);
@@ -412,11 +413,8 @@ async function loadLivePrices(){
   const src=getKey().length>8?'Finnhub':'Yahoo';
   tag.textContent=`● Live·${src} · ${et.toLocaleTimeString('es-PR',{hour:'2-digit',minute:'2-digit',hour12:false})} ET`;
   tag.style.color='var(--green)';
-  document.getElementById('optS').value=DEFAULTS[currentTicker].price.toFixed(2);
-  document.getElementById('optK').value=(Math.round(DEFAULTS[currentTicker].price/5)*5+5).toFixed(0);
   buildSignals();
   buildMomentum();
-  calcBS();
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -437,9 +435,7 @@ function selectTicker(t){
   currentTicker=t;
   renderDayRules();
   renderNews();
-  document.getElementById('optS').value=DEFAULTS[t].price.toFixed(2);
-  document.getElementById('optK').value=(Math.round(DEFAULTS[t].price/5)*5+5).toFixed(0);
-  calcBS();
+
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -595,45 +591,12 @@ function calcLimit(){
   const el=document.getElementById('limitResult');
   if(!bought||bought<=0){el.innerHTML='';return;}
   const gainPct=parseFloat(document.getElementById('gainPct')?.value)||35;
-  const lp=+(bought*(1+gainPct/100)).toFixed(2);
+  const brokerFee=0.02;
+  const lp=+(bought*(1+gainPct/100)+brokerFee).toFixed(2);
   const profC=+((lp-bought)*100).toFixed(2);
   const profT=+(profC*qty).toFixed(2);
   const costT=+(bought*100*qty).toFixed(2);
-  el.innerHTML=`<div class="limit-box"><div class="limit-lbl">Precio Límite de Venta — ${gainPct}% ganancia</div><div class="limit-price">$${lp.toFixed(2)}</div><div style="font-size:11px;color:var(--text2);margin-top:4px;">Compraste $${bought.toFixed(2)} · ${type.toUpperCase()} · ${ticker}</div></div><div class="res-box"><div class="res-row"><span class="res-lbl">Precio comprado</span><span class="res-val">$${bought.toFixed(2)}</span></div><div class="res-row"><span class="res-lbl">Precio límite venta</span><span class="res-val" style="color:var(--green)">$${lp.toFixed(2)}</span></div><div class="res-row"><span class="res-lbl">Contratos</span><span class="res-val">${qty}</span></div><div class="res-row"><span class="res-lbl">Costo total</span><span class="res-val">$${costT.toFixed(2)}</span></div><div class="res-row"><span class="res-lbl">Ganancia por contrato</span><span class="res-val" style="color:var(--green)">+$${profC.toFixed(2)}</span></div><div class="res-row"><span class="res-lbl">Ganancia total</span><span class="res-val" style="color:var(--green);font-size:15px">+$${profT.toFixed(2)}</span></div></div>`;
-}
-
-// ═══════════════════════════════════════════════════════════════
-// BLACK-SCHOLES
-// ═══════════════════════════════════════════════════════════════
-function nCDF(x){const t=1/(1+.2316419*Math.abs(x)),d=.3989423*Math.exp(-x*x/2),p=d*t*(.3193815+t*(-.3565638+t*(1.7814779+t*(-1.821256+t*1.3302744))));return x>0?1-p:p;}
-function nPDF(x){return Math.exp(-x*x/2)/Math.sqrt(2*Math.PI);}
-function calcBS(){
-  const S=parseFloat(document.getElementById('optS').value)||0;
-  const K=parseFloat(document.getElementById('optK').value)||0;
-  const T=(parseFloat(document.getElementById('optT').value)||1)/365;
-  const v=(parseFloat(document.getElementById('optV').value)||30)/100;
-  const r=.0525,type=document.getElementById('optType').value;
-  if(!S||!K)return;
-  const d1=(Math.log(S/K)+(r+v*v/2)*T)/(v*Math.sqrt(T)),d2=d1-v*Math.sqrt(T);
-  let price,delta,rho;
-  if(type==='call'){price=S*nCDF(d1)-K*Math.exp(-r*T)*nCDF(d2);delta=nCDF(d1);rho=K*T*Math.exp(-r*T)*nCDF(d2)/100;}
-  else{price=K*Math.exp(-r*T)*nCDF(-d2)-S*nCDF(-d1);delta=nCDF(d1)-1;rho=-K*T*Math.exp(-r*T)*nCDF(-d2)/100;}
-  const gamma=nPDF(d1)/(S*v*Math.sqrt(T));
-  const theta=(-(S*nPDF(d1)*v)/(2*Math.sqrt(T))-r*K*Math.exp(-r*T)*(type==='call'?nCDF(d2):nCDF(-d2)))/365;
-  const vega=S*nPDF(d1)*Math.sqrt(T)/100;
-  const itm=type==='call'?(S>K?'IN THE MONEY ✓':'OUT OF THE MONEY'):(S<K?'IN THE MONEY ✓':'OUT OF THE MONEY');
-  document.getElementById('bsPrice').textContent='$'+price.toFixed(4);
-  document.getElementById('bsState').textContent=itm;
-  document.getElementById('bsState').style.color=(type==='call'?S>K:S<K)?'var(--green)':'var(--yellow)';
-  document.getElementById('greeks').innerHTML=[{s:'Δ',n:'Delta',v:delta.toFixed(4)},{s:'Γ',n:'Gamma',v:gamma.toFixed(4)},{s:'Θ',n:'Theta',v:theta.toFixed(4)},{s:'V',n:'Vega',v:vega.toFixed(4)},{s:'ρ',n:'Rho',v:rho.toFixed(4)}].map(g=>`<div class="gk"><div class="gk-sym">${g.s}</div><div class="gk-val">${g.v}</div><div class="gk-name">${g.n}</div></div>`).join('');
-  checkSpread();
-}
-function checkSpread(){
-  const bid=parseFloat(document.getElementById('optBid').value)||0;
-  const ask=parseFloat(document.getElementById('optAsk').value)||0;
-  if(!bid||!ask)return;
-  const sp=((ask-bid)/ask*100);
-  document.getElementById('spreadEl').innerHTML=sp>22?`<div class="spread-warn">⚠ Spread: ${sp.toFixed(1)}% — NO COMPRAR (>20%)</div>`:`<div class="spread-ok">✓ Spread: ${sp.toFixed(1)}% — Aceptable</div>`;
+  el.innerHTML=`<div class="limit-box"><div class="limit-lbl">Precio Límite de Venta — ${gainPct}% + $0.02 broker</div><div class="limit-price">$${lp.toFixed(2)}</div><div style="font-size:11px;color:var(--text2);margin-top:4px;">Compraste $${bought.toFixed(2)} · ${type.toUpperCase()} · ${ticker}</div></div><div class="res-box"><div class="res-row"><span class="res-lbl">Precio comprado</span><span class="res-val">$${bought.toFixed(2)}</span></div><div class="res-row"><span class="res-lbl">Ganancia ${gainPct}%</span><span class="res-val" style="color:var(--green)">+$${(bought*gainPct/100).toFixed(2)}</span></div><div class="res-row"><span class="res-lbl">Comisión broker</span><span class="res-val" style="color:var(--yellow)">+$0.02</span></div><div class="res-row"><span class="res-lbl">Precio límite venta</span><span class="res-val" style="color:var(--green);font-weight:700">$${lp.toFixed(2)}</span></div><div class="res-row"><span class="res-lbl">Contratos</span><span class="res-val">${qty}</span></div><div class="res-row"><span class="res-lbl">Ganancia total neta</span><span class="res-val" style="color:var(--green);font-size:15px">+$${profT.toFixed(2)}</span></div></div>`;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -659,9 +622,12 @@ async function init(){
   const saved=localStorage.getItem('finnhub_key');
   if(saved&&saved.length>8) window._fk=saved;
 
-  // Restore gain %
-  const gp=localStorage.getItem('gainPct');
-  if(gp){const el=document.getElementById('gainPct');if(el)el.value=gp;}
+  // Restore gain % — default always 35 unless user changed it
+  const gp = localStorage.getItem('gainPct');
+  const gainVal = (gp && parseFloat(gp) >= 5) ? parseFloat(gp) : 35;
+  const gpEl = document.getElementById('gainPct');
+  if (gpEl) gpEl.value = gainVal;
+  localStorage.setItem('gainPct', gainVal); // ensure saved value is valid
 
   // Show key modal if no key saved
   if(!getKey()||getKey().length<8){
@@ -673,7 +639,6 @@ async function init(){
   renderNews();
   buildMomentum();
   buildSignals();
-  calcBS();
 
   // Then fetch live prices
   if(getKey().length>8){

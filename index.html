@@ -395,6 +395,13 @@ async function fetchQuote(sym){
 const _candleCache = {};
 
 async function fetchCandles(sym, resolution, bars) {
+  // On weekends, skip API call — market is closed, no candle data available
+  const et  = new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+  const day = et.getDay(); // 0=Sun, 6=Sat
+  const h   = et.getHours();
+  const marketOpen = day>=1 && day<=5 && (h>9||(h===9&&et.getMinutes()>=30)) && h<16;
+  if(!marketOpen) return null; // use simulated data outside market hours
+
   const key = getKey();
   if (!key || key.length < 8) return null;
 

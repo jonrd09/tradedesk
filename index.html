@@ -510,40 +510,56 @@ function renderDayRules(){
 // ═══════════════════════════════════════════════════════════════
 async function buildMomentum(){
   const area=document.getElementById('momentumArea');
+  area.innerHTML=`<div style="text-align:center;padding:16px;color:var(--text2);font-size:12px;">⟳ Calculando momentum…</div>`;
   const results=[];
-  Object.entries(MOM_STOCKS).forEach(([sym,info])=>{
+
+  for(const [sym,info] of Object.entries(MOM_STOCKS)){
     const base=info.price;
-    const pDay=genCandles(base,60,.012);
+    // Try real candles, fall back to simulated
+    let pDay=null, p1h=null;
+    try{ [pDay,p1h]=await Promise.all([fetchCandles(sym,'D',60),fetchCandles(sym,'60',48)]); }catch(e){}
+    if(!pDay||pDay.length<20) pDay=genCandles(base,60,.012);
+    if(!p1h||p1h.length<10)  p1h =genCandles(base,48,.005);
+
     const ma20d=sma(pDay,20),ma40d=sma(pDay,40),ma100d=sma(pDay,Math.min(50,pDay.length-1));
     const bb_d=bollinger(pDay);
-    let p1h = p1h_m;
-    if (!p1h || p1h.length < 10) p1h = genCandles(base, 48, .005);
-    const ma20h=sma(p1h,20),ma40h=sma(p1h,40),ma100h=sma(p1h,Math.min(40,p1h.length-1)),ma200h=sma(p1h,Math.min(48,p1h.length-1));
-    const lastPd=pDay.slice(-1)[0],lMA20d=ma20d.filter(v=>v!=null).slice(-1)[0],pMA20d=ma20d.filter(v=>v!=null).slice(-2)[0];
-    const lMA40d=ma40d.filter(v=>v!=null).slice(-1)[0],pMA40d=ma40d.filter(v=>v!=null).slice(-2)[0],lMA100d=ma100d.filter(v=>v!=null).slice(-1)[0];
-    const lBBUp=bb_d.upper.filter(v=>v!=null).slice(-1)[0],lBBLow=bb_d.lower.filter(v=>v!=null).slice(-1)[0],lBBMid=bb_d.mid.filter(v=>v!=null).slice(-1)[0];
+    const ma20h=sma(p1h,20),ma40h=sma(p1h,40);
+    const ma100h=sma(p1h,Math.min(40,p1h.length-1)),ma200h=sma(p1h,Math.min(48,p1h.length-1));
+
+    const lastPd=pDay.slice(-1)[0];
+    const lMA20d=ma20d.filter(v=>v!=null).slice(-1)[0], pMA20d=ma20d.filter(v=>v!=null).slice(-2)[0];
+    const lMA40d=ma40d.filter(v=>v!=null).slice(-1)[0], pMA40d=ma40d.filter(v=>v!=null).slice(-2)[0];
+    const lMA100d=ma100d.filter(v=>v!=null).slice(-1)[0];
+    const lBBUp=bb_d.upper.filter(v=>v!=null).slice(-1)[0];
+    const lBBLow=bb_d.lower.filter(v=>v!=null).slice(-1)[0];
+    const lBBMid=bb_d.mid.filter(v=>v!=null).slice(-1)[0];
     const bbWd=lBBUp&&lBBLow?(lBBUp-lBBLow)/lBBMid*100:0;
-    const lastPh=p1h.slice(-1)[0],lMA100h=ma100h.filter(v=>v!=null).slice(-1)[0],lMA200h=ma200h.filter(v=>v!=null).slice(-1)[0];
+    const lastPh=p1h.slice(-1)[0];
+    const lMA100h=ma100h.filter(v=>v!=null).slice(-1)[0];
+    const lMA200h=ma200h.filter(v=>v!=null).slice(-1)[0];
+
     const bullR=[
-      {ok:lMA100d>lMA40d&&lastPd<lMA100d,text:'Venía bajista: precio entre MA100 y MA200'},
-      {ok:lMA20d>lMA40d&&pMA20d<=pMA40d, text:'MA20 cruza por arriba de MA40 (día)'},
+      {ok:lMA100d>lMA40d&&lastPd<lMA100d, text:'Venía bajista: precio entre MA100 y MA200'},
+      {ok:lMA20d>lMA40d&&pMA20d<=pMA40d,  text:'MA20 cruza por arriba de MA40 (día)'},
       {ok:lastPh>lMA100h&&lastPh>lMA200h, text:'Precio rompe MA100 y MA200 en hora'},
-      {ok:lastPd>lMA20d&&lastPd>lMA40d,  text:'Precio rompe MA20 y MA40 en día'},
-      {ok:bbWd>3,                          text:`Volatilidad Bollinger activa (${bbWd.toFixed(1)}%)`},
+      {ok:lastPd>lMA20d&&lastPd>lMA40d,   text:'Precio rompe MA20 y MA40 en día'},
+      {ok:bbWd>3,                           text:`Volatilidad Bollinger activa (${bbWd.toFixed(1)}%)`},
     ];
     const bearR=[
-      {ok:lMA100d<lMA40d&&lastPd>lMA100d,text:'Venía alcista: precio entre MA100 y MA200'},
-      {ok:lMA20d<lMA40d&&pMA20d>=pMA40d, text:'MA20 cruza por debajo de MA40 (día)'},
+      {ok:lMA100d<lMA40d&&lastPd>lMA100d, text:'Venía alcista: precio entre MA100 y MA200'},
+      {ok:lMA20d<lMA40d&&pMA20d>=pMA40d,  text:'MA20 cruza por debajo de MA40 (día)'},
       {ok:lastPh<lMA100h&&lastPh<lMA200h, text:'Precio rompe MA100 y MA200 en hora'},
-      {ok:lastPd<lMA20d&&lastPd<lMA40d,  text:'Precio rompe MA20 y MA40 en día'},
-      {ok:bbWd>3,                          text:`Volatilidad Bollinger activa (${bbWd.toFixed(1)}%)`},
+      {ok:lastPd<lMA20d&&lastPd<lMA40d,   text:'Precio rompe MA20 y MA40 en día'},
+      {ok:bbWd>3,                           text:`Volatilidad Bollinger activa (${bbWd.toFixed(1)}%)`},
     ];
-    const bp=bullR.filter(r=>r.ok).length,brp=bearR.filter(r=>r.ok).length;
+
+    const bp=bullR.filter(r=>r.ok).length, brp=bearR.filter(r=>r.ok).length;
     if(bp>=2||brp>=2){
       const type=bp>=brp?'call':'put';
       results.push({sym,name:info.name,price:base,type,reqs:bp>=brp?bullR:bearR,passed:Math.max(bp,brp)});
     }
-  } // end for sym
+  }
+
   results.sort((a,b)=>b.passed-a.passed);
   if(!results.length){
     area.innerHTML=`<div style="text-align:center;padding:20px;color:var(--text2);font-size:12px;"><div style="font-size:22px;margin-bottom:8px">📊</div><div>Sin Momentum detectado</div><div style="font-size:10px;margin-top:6px;color:var(--text3)">Ningún activo cumple los requisitos</div></div>`;
@@ -618,7 +634,8 @@ async function buildSignals(){
       {ok:farUp>2.5,                  tf:'1H', text:`Precio muy alejado de MA20 hacia arriba (${farUp.toFixed(1)}%)`},
       {ok:lastP15m>lUp15m,            tf:'15m',text:'Primera vela fuera del oscilador superior'},
       {ok:bbW15m>2,                   tf:'15m',text:`Volatilidad 15m activa (${bbW15m.toFixed(1)}%)`},
-    ]} // end for sym
+    ]});
+  } // end for sym
 
   const active=all.map(s=>({...s,passed:s.reqs.filter(r=>r.ok).length})).filter(s=>s.passed>=2).sort((a,b)=>b.passed-a.passed);
   if(!active.length){
@@ -698,15 +715,17 @@ async function init(){
     document.getElementById('keyModal').style.display='flex';
   }
 
-  // Render immediately with defaults
+  // Render UI shell immediately
   selectTicker('GOOG');
   renderNews();
-  buildMomentum();
-  buildSignals();
 
-  // Then fetch live prices
+  // Fetch live prices first, then build signals with real data
   if(getKey().length>8){
-    await loadLivePrices();
+    await loadLivePrices(); // this calls buildSignals + buildMomentum when done
+  } else {
+    // No key — use fallback data immediately
+    buildMomentum();
+    buildSignals();
   }
 
   // Auto-refresh every 5 min during market hours

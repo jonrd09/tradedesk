@@ -168,10 +168,10 @@ select.inp{cursor:pointer;}
 <!-- ══ LEFT ══ -->
 <aside class="left-panel">
   <div class="psec">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
-      <div class="plbl" style="margin:0;">🚀 Momentum Scanner</div>
+    <div style="text-align:center;margin-bottom:10px;">
+      <div style="font-size:20px;font-weight:700;color:#fff;letter-spacing:.03em;">🚀 Momentum Scanner</div>
     </div>
-    <div style="font-size:10px;color:var(--text3);margin-bottom:10px;">GOOG · TSLA · NVDA · AAPL · MSFT · SPY · AVGO · MU</div>
+    <div style="font-size:11px;color:var(--text3);margin-bottom:10px;text-align:center;">GOOG · TSLA · NVDA · AAPL · MSFT · SPY · AVGO · MU</div>
     <div id="momentumArea"><div style="text-align:center;padding:20px;color:var(--text2);font-size:12px;">⟳ Calculando…</div></div>
   </div>
 
@@ -180,9 +180,9 @@ select.inp{cursor:pointer;}
 <!-- ══ CENTER ══ -->
 <main class="center-panel">
   <div class="card">
-    <div style="margin-bottom:14px;">
-      <div style="font-size:13px;font-weight:600;">Señales Activas</div>
-      <div style="font-size:11px;color:var(--text2);margin-top:2px;">E1 Alza · E2 Baja · E7 Imán Bajista · E8 Imán Alcista · 1H+15m · GOOG & TSLA</div>
+    <div style="margin-bottom:14px;text-align:center;">
+      <div style="font-size:20px;font-weight:700;color:#fff;letter-spacing:.03em;">Señales Activas</div>
+      <div style="font-size:11px;color:var(--text2);margin-top:4px;">E1 Alza · E2 Baja · E7 Imán Bajista · E8 Imán Alcista · 1H+15m · GOOG & TSLA</div>
     </div>
     <div id="signalArea"><div style="text-align:center;padding:20px;color:var(--text2);font-size:12px;">⟳ Calculando señales…</div></div>
   </div>
@@ -193,10 +193,10 @@ select.inp{cursor:pointer;}
 
   <!-- Calculadora Limit -->
   <div class="rsec">
-    <!-- Título + % ganancia en la misma línea -->
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-      <div class="rsec-title" style="margin:0;">Calculadora Limit de Ganancia</div>
-      <div style="display:flex;align-items:center;gap:6px;">
+    <!-- Título centrado + % ganancia -->
+    <div style="text-align:center;margin-bottom:12px;position:relative;">
+      <div style="font-size:20px;font-weight:700;color:#fff;letter-spacing:.03em;">Calculadora de Contratos</div>
+      <div style="position:absolute;right:0;top:50%;transform:translateY(-50%);display:flex;align-items:center;gap:4px;">
         <span style="font-size:11px;color:var(--text3);">% objetivo:</span>
         <input type="number" id="gainPct" value="35" min="5" max="500" step="5"
           style="background:var(--bg4);border:1px solid var(--blue);border-radius:var(--r);color:var(--green);padding:4px 8px;font-size:14px;font-family:var(--mono);width:64px;outline:none;text-align:center;font-weight:700;"
@@ -389,6 +389,55 @@ async function fetchQuote(sym){
   return null;
 }
 
+// ═══════════════════════════════════════════════════════════════
+// REAL CANDLES — Finnhub /stock/candle
+// ═══════════════════════════════════════════════════════════════
+const _candleCache = {};
+
+async function fetchCandles(sym, resolution, bars) {
+  const key = getKey();
+  if (!key || key.length < 8) return null;
+
+  const cacheKey = `${sym}_${resolution}`;
+  const cached   = _candleCache[cacheKey];
+  const now      = Math.floor(Date.now()/1000);
+  if (cached && (now - cached.ts) < 300) return cached.data;
+
+  const to   = now;
+  const from = to - bars * (resolution==='60'?3600:resolution==='D'?86400:900) * 3;
+  const url  = `https://finnhub.io/api/v1/stock/candle?symbol=${sym}&resolution=${resolution}&from=${from}&to=${to}&token=${key}`;
+
+  try {
+    // Try direct first with short timeout
+    const r = await fetch(url, {signal: AbortSignal.timeout(4000)});
+    if (r.ok) {
+      const data = await r.json();
+      if (data && data.s === 'ok' && data.c && data.c.length >= 5) {
+        const closes = data.c.slice(-bars);
+        _candleCache[cacheKey] = {data: closes, ts: now};
+        return closes;
+      }
+    }
+  } catch(e) {}
+
+  try {
+    // Proxy fallback
+    const proxy = 'https://api.allorigins.win/get?url=' + encodeURIComponent(url);
+    const r2 = await fetch(proxy, {signal: AbortSignal.timeout(6000)});
+    if (r2.ok) {
+      const outer = await r2.json();
+      const data  = JSON.parse(outer.contents);
+      if (data && data.s === 'ok' && data.c && data.c.length >= 5) {
+        const closes = data.c.slice(-bars);
+        _candleCache[cacheKey] = {data: closes, ts: now};
+        return closes;
+      }
+    }
+  } catch(e) {}
+
+  return null; // Will fallback to genCandles
+}
+
 async function loadLivePrices(){
   const tag=document.getElementById('liveTag');
   tag.textContent='⟳ Actualizando…';tag.style.color='var(--text3)';
@@ -414,7 +463,8 @@ async function loadLivePrices(){
   tag.textContent=`● Live·${src} · ${et.toLocaleTimeString('es-PR',{hour:'2-digit',minute:'2-digit',hour12:false})} ET`;
   tag.style.color='var(--green)';
   buildSignals();
-  buildMomentum();
+  buildMomentum(); // both async — run in parallel
+
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -458,7 +508,7 @@ function renderDayRules(){
 // ═══════════════════════════════════════════════════════════════
 // MOMENTUM SCANNER
 // ═══════════════════════════════════════════════════════════════
-function buildMomentum(){
+async function buildMomentum(){
   const area=document.getElementById('momentumArea');
   const results=[];
   Object.entries(MOM_STOCKS).forEach(([sym,info])=>{
@@ -466,7 +516,8 @@ function buildMomentum(){
     const pDay=genCandles(base,60,.012);
     const ma20d=sma(pDay,20),ma40d=sma(pDay,40),ma100d=sma(pDay,Math.min(50,pDay.length-1));
     const bb_d=bollinger(pDay);
-    const p1h=genCandles(base,48,.005);
+    let p1h = p1h_m;
+    if (!p1h || p1h.length < 10) p1h = genCandles(base, 48, .005);
     const ma20h=sma(p1h,20),ma40h=sma(p1h,40),ma100h=sma(p1h,Math.min(40,p1h.length-1)),ma200h=sma(p1h,Math.min(48,p1h.length-1));
     const lastPd=pDay.slice(-1)[0],lMA20d=ma20d.filter(v=>v!=null).slice(-1)[0],pMA20d=ma20d.filter(v=>v!=null).slice(-2)[0];
     const lMA40d=ma40d.filter(v=>v!=null).slice(-1)[0],pMA40d=ma40d.filter(v=>v!=null).slice(-2)[0],lMA100d=ma100d.filter(v=>v!=null).slice(-1)[0];
@@ -492,7 +543,7 @@ function buildMomentum(){
       const type=bp>=brp?'call':'put';
       results.push({sym,name:info.name,price:base,type,reqs:bp>=brp?bullR:bearR,passed:Math.max(bp,brp)});
     }
-  });
+  } // end for sym
   results.sort((a,b)=>b.passed-a.passed);
   if(!results.length){
     area.innerHTML=`<div style="text-align:center;padding:20px;color:var(--text2);font-size:12px;"><div style="font-size:22px;margin-bottom:8px">📊</div><div>Sin Momentum detectado</div><div style="font-size:10px;margin-top:6px;color:var(--text3)">Ningún activo cumple los requisitos</div></div>`;
@@ -509,12 +560,25 @@ function buildMomentum(){
 // ═══════════════════════════════════════════════════════════════
 // SEÑALES E1 E2 E7 E8
 // ═══════════════════════════════════════════════════════════════
-function buildSignals(){
+async function buildSignals(){
   const area=document.getElementById('signalArea');
+  area.innerHTML=`<div style="text-align:center;padding:20px;color:var(--text2);font-size:13px;">⟳ Calculando señales…</div>`;
   const all=[];
-  ['GOOG','TSLA'].forEach(sym=>{
+
+  for (const sym of ['GOOG','TSLA']) {
     const base=DEFAULTS[sym].price,pct=DEFAULTS[sym].pct;
-    const p1h=genCandles(base,24,.005),p15m=genCandles(base,10,.0025);
+    // Try real candles with timeout, fall back to simulated immediately
+    let p1h=null, p15m=null;
+    try {
+      [p1h, p15m] = await Promise.all([
+        fetchCandles(sym, '60', 24),
+        fetchCandles(sym, '15', 10)
+      ]);
+    } catch(e) {}
+    const usingReal = !!(p1h && p15m);
+    if (!p1h)  p1h  = genCandles(base, 24, .005);
+    if (!p15m) p15m = genCandles(base, 10, .0025);
+    const dataLabel = usingReal ? '📡 Velas reales' : '⚠️ Simulado';
     const bb1h=bollinger(p1h),bb15m=bollinger(p15m);
     const ma40_1h=sma(p1h,Math.min(20,p1h.length-1));
     const rsi1h=calcRSI(p1h),rsi15m=calcRSI(p15m);
@@ -530,7 +594,7 @@ function buildSignals(){
     const lUp15m=bb15m.upper.filter(v=>v!=null).slice(-1)[0],lLow15m=bb15m.lower.filter(v=>v!=null).slice(-1)[0];
     const lRSI15m=rsi15m.filter(v=>v!=null).slice(-1)[0];
     const bbW15m=lUp15m&&lLow15m?(lUp15m-lLow15m)/lMid15m*100:0;
-    const meta={sym,price:base,pct,lRSI1h,lRSI15m,bbW1h,bbW15m};
+    const meta={sym,price:base,pct,lRSI1h,lRSI15m,bbW1h,bbW15m,dataLabel};
     all.push({...meta,code:'E1',name:'Cambio de Tendencia al ALZA',type:'call',reqs:[
       {ok:lMid1h>lMA40,               tf:'1H', text:'Tendencia previa alcista (MA20 > MA40)'},
       {ok:prevP1h<pMid1h&&lastP1h>lMid1h,tf:'1H',text:'Precio rompe MA20 con vela alcista'},
@@ -554,8 +618,8 @@ function buildSignals(){
       {ok:farUp>2.5,                  tf:'1H', text:`Precio muy alejado de MA20 hacia arriba (${farUp.toFixed(1)}%)`},
       {ok:lastP15m>lUp15m,            tf:'15m',text:'Primera vela fuera del oscilador superior'},
       {ok:bbW15m>2,                   tf:'15m',text:`Volatilidad 15m activa (${bbW15m.toFixed(1)}%)`},
-    ]});
-  });
+    ]} // end for sym
+
   const active=all.map(s=>({...s,passed:s.reqs.filter(r=>r.ok).length})).filter(s=>s.passed>=2).sort((a,b)=>b.passed-a.passed);
   if(!active.length){
     area.innerHTML=`<div class="no-signal"><div style="font-size:26px;margin-bottom:8px">🔍</div><div style="font-size:14px;font-weight:500">Sin señales activas</div><div style="font-size:12px;margin-top:6px;color:var(--text3)">Ninguna estrategia cumple los requisitos mínimos.<br><span style="color:var(--yellow)">Paciencia — espera la señal correcta.</span></div></div>`;

@@ -20,7 +20,7 @@
   --r:10px;--rl:16px;
 }
 *{box-sizing:border-box;margin:0;padding:0;}
-html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:25px;line-height:1.5;}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:30px;line-height:1.5;}
 ::-webkit-scrollbar{width:4px;height:4px;}
 ::-webkit-scrollbar-thumb{background:var(--border2);border-radius:4px;}
 .shell{display:grid;grid-template-rows:56px 1fr;height:100vh;overflow:hidden;}
@@ -230,22 +230,34 @@ select.inp{cursor:pointer;}
     <div id="limitResult"></div>
   </div>
 
-  <!-- Reglas de Trade -->
+  <!-- Rotación de Dinero + Índices -->
   <div class="rsec">
-    <div class="plbl">Reglas de Trade · Hoy</div>
-    <div id="dayRules"></div>
-    <div style="margin-top:12px;display:flex;flex-direction:column;gap:7px;">
-      <div style="background:linear-gradient(135deg,rgba(61,139,255,.15),rgba(167,139,250,.15));border:1px solid rgba(61,139,255,.4);border-radius:10px;padding:12px 16px;text-align:center;">
-        <div style="font-family:var(--mono);font-size:15px;font-weight:700;color:var(--blue);letter-spacing:.08em;">⚡ RECUERDA SIEMPRE ⚡</div>
-      </div>
-      <div style="background:rgba(61,139,255,.07);border:1px solid rgba(61,139,255,.2);border-radius:10px;padding:10px 13px;display:flex;align-items:center;gap:10px;"><span style="font-size:16px;">📡</span><span style="font-size:12px;font-weight:600;">Saliendo de Bollinger</span></div>
-      <div style="background:rgba(167,139,250,.07);border:1px solid rgba(167,139,250,.2);border-radius:10px;padding:10px 13px;display:flex;align-items:center;gap:10px;"><span style="font-size:16px;">🧘</span><span style="font-size:12px;font-weight:600;">Paciencia</span></div>
-      <div style="background:rgba(0,209,122,.07);border:1px solid rgba(0,209,122,.2);border-radius:10px;padding:10px 13px;display:flex;align-items:center;gap:10px;"><span style="font-size:16px;">🗺️</span><span style="font-size:12px;font-weight:600;">Ver Panorama Completo</span></div>
-      <div style="background:rgba(0,209,122,.07);border:1px solid rgba(0,209,122,.2);border-radius:10px;padding:10px 13px;display:flex;align-items:center;gap:10px;"><span style="font-size:16px;">📊</span><span style="font-size:12px;font-weight:600;">Verificar Tendencias</span></div>
-      <div style="background:rgba(255,194,52,.07);border:1px solid rgba(255,194,52,.2);border-radius:10px;padding:10px 13px;display:flex;align-items:center;gap:10px;"><span style="font-size:16px;">❓</span><span style="font-size:12px;font-weight:600;">¿Me estoy apegando al plan?</span></div>
-      <div style="background:rgba(255,77,109,.07);border:1px solid rgba(255,77,109,.2);border-radius:10px;padding:10px 13px;display:flex;align-items:center;gap:10px;"><span style="font-size:16px;">🚫</span><span style="font-size:12px;font-weight:600;">El error de ayer NO lo cometeré HOY.</span></div>
+    <div style="text-align:center;margin-bottom:12px;">
+      <div style="font-size:18px;font-weight:700;color:#fff;">💰 Rotación de Dinero</div>
+      <div style="font-size:11px;color:var(--text3);margin-top:3px;">Índices · Sectores · Refugios · Smart Money</div>
     </div>
-    <div style="margin-top:10px;" id="dayReminder"></div>
+
+    <!-- Índices principales -->
+    <div style="margin-bottom:10px;">
+      <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;">📊 Índices</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;" id="rotIndices"></div>
+    </div>
+
+    <!-- Sectores S&P 500 -->
+    <div style="margin-bottom:10px;">
+      <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;">🏭 Sectores S&P 500</div>
+      <div id="rotSectores"></div>
+    </div>
+
+    <!-- Refugios / Smart Money -->
+    <div style="margin-bottom:10px;">
+      <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;">🛡️ Refugios & Smart Money</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;" id="rotRefugios"></div>
+    </div>
+
+    <!-- Señal de Rotación -->
+    <div id="rotSignal"></div>
+    <div style="margin-top:8px;" id="dayReminder"></div>
   </div>
 
   <!-- Noticias -->
@@ -470,7 +482,8 @@ async function loadLivePrices(){
   tag.textContent=`● Live·${src} · ${et.toLocaleTimeString('es-PR',{hour:'2-digit',minute:'2-digit',hour12:false})} ET`;
   tag.style.color='var(--green)';
   buildSignals();
-  buildMomentum(); // both async — run in parallel
+  buildMomentum();
+  loadRotation(); // both async — run in parallel
 
 }
 
@@ -688,6 +701,186 @@ function calcLimit(){
 }
 
 // ═══════════════════════════════════════════════════════════════
+// ROTACIÓN DE DINERO — Índices, Sectores, Refugios
+// ═══════════════════════════════════════════════════════════════
+const ROT_DATA = {
+  indices: [
+    {sym:'QQQ', name:'Nasdaq 100', color:'#3d8bff'},
+    {sym:'SPY', name:'S&P 500',    color:'#00d17a'},
+    {sym:'IWM', name:'Russell 2K', color:'#ffc234'},
+    {sym:'DIA', name:'Dow Jones',  color:'#a78bfa'},
+  ],
+  sectores: [
+    {sym:'XLK', name:'Tecnología'},
+    {sym:'XLF', name:'Financiero'},
+    {sym:'XLV', name:'Salud'},
+    {sym:'XLE', name:'Energía'},
+    {sym:'XLU', name:'Utilities'},
+    {sym:'XLI', name:'Industrial'},
+    {sym:'XLC', name:'Comunicación'},
+    {sym:'XLP', name:'Consumo Básico'},
+    {sym:'XLY', name:'Consumo Discr.'},
+    {sym:'XLB', name:'Materiales'},
+    {sym:'SOXX',name:'Semiconductores'},
+    {sym:'XBI', name:'Biotech'},
+  ],
+  refugios: [
+    {sym:'GLD', name:'Oro',      color:'#ffc234'},
+    {sym:'TLT', name:'Bonos T',  color:'#a78bfa'},
+    {sym:'VIX', name:'VIX Fear', color:'#ff4d6d'},
+    {sym:'UUP', name:'Dólar',    color:'#3d8bff'},
+  ]
+};
+
+// Fallback prices for rotation tickers (updated periodically)
+const ROT_FALLBACK = {
+  QQQ:474.20,SPY:594.52,IWM:208.45,DIA:431.60,
+  XLK:232.10,XLF:47.80,XLV:145.30,XLE:91.20,
+  XLU:68.40,XLI:132.50,XLC:88.90,XLP:79.60,
+  XLY:195.40,XLB:89.30,SOXX:245.80,XBI:98.70,
+  GLD:305.40,TLT:88.20,VIX:14.80,UUP:27.30,
+};
+const ROT_PREV = {
+  QQQ:472.10,SPY:592.70,IWM:209.30,DIA:428.40,
+  XLK:228.50,XLF:48.10,XLV:143.80,XLE:92.40,
+  XLU:67.90,XLI:131.20,XLC:87.60,XLP:80.10,
+  XLY:192.10,XLB:88.90,SOXX:242.30,XBI:97.20,
+  GLD:302.80,TLT:89.10,VIX:16.20,UUP:27.60,
+};
+
+async function fetchRotationQuote(sym) {
+  // Use existing Finnhub fetchQuote if available
+  const key = getKey();
+  if (!key || key.length < 8) return null;
+  const url = `https://finnhub.io/api/v1/quote?symbol=${sym}&token=${key}`;
+  try {
+    const r = await fetch(url, {signal: AbortSignal.timeout(4000)});
+    if (r.ok) {
+      const d = await r.json();
+      if (d && d.c > 0) {
+        return { price: d.c, prev: d.pc, pct: +((d.c-d.pc)/d.pc*100).toFixed(2) };
+      }
+    }
+  } catch(e) {}
+  // Fallback
+  const price = ROT_FALLBACK[sym] || 100;
+  const prev  = ROT_PREV[sym]     || price;
+  return { price, prev, pct: +((price-prev)/prev*100).toFixed(2) };
+}
+
+function rotCell(sym, name, pct, color) {
+  const up  = pct >= 0;
+  const col = up ? 'var(--green)' : 'var(--red)';
+  const bg  = up ? 'var(--green-bg)' : 'var(--red-bg)';
+  const bdr = color ? `border-left:2px solid ${color}` : `border-left:2px solid ${col}`;
+  return `<div style="background:var(--bg3);border-radius:var(--r);padding:6px 8px;${bdr};">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <div>
+        <div style="font-family:var(--mono);font-size:11px;font-weight:700;color:var(--text)">${sym}</div>
+        <div style="font-size:9px;color:var(--text3)">${name}</div>
+      </div>
+      <div style="font-family:var(--mono);font-size:12px;font-weight:700;color:${col}">${up?'+':''}${pct.toFixed(2)}%</div>
+    </div>
+  </div>`;
+}
+
+async function loadRotation() {
+  // Check market hours
+  const et  = new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+  const day = et.getDay(), h = et.getHours(), m = et.getMinutes();
+  const open = day>=1&&day<=5&&(h>9||(h===9&&m>=30))&&h<16;
+
+  // Fetch all in batches
+  const allSyms = [
+    ...ROT_DATA.indices.map(x=>x.sym),
+    ...ROT_DATA.sectores.map(x=>x.sym),
+    ...ROT_DATA.refugios.map(x=>x.sym),
+  ];
+
+  const quotes = {};
+  if (open) {
+    // Fetch in batches of 5 to respect rate limits
+    for (let i=0; i<allSyms.length; i+=5) {
+      const batch = allSyms.slice(i,i+5);
+      const results = await Promise.all(batch.map(s => fetchRotationQuote(s).catch(()=>null)));
+      batch.forEach((s,j) => { if(results[j]) quotes[s] = results[j]; });
+      if (i+5 < allSyms.length) await new Promise(r=>setTimeout(r,200));
+    }
+  } else {
+    // Use fallback for weekends/off-hours
+    allSyms.forEach(s => {
+      const price = ROT_FALLBACK[s]||100, prev = ROT_PREV[s]||price;
+      quotes[s] = { price, prev, pct: +((price-prev)/prev*100).toFixed(2) };
+    });
+  }
+
+  // ── Render Índices ──────────────────────────────────────────
+  const indEl = document.getElementById('rotIndices');
+  if (indEl) indEl.innerHTML = ROT_DATA.indices.map(x => {
+    const q = quotes[x.sym] || {pct:0};
+    return rotCell(x.sym, x.name, q.pct, x.color);
+  }).join('');
+
+  // ── Render Sectores — sorted by % change ───────────────────
+  const secEl = document.getElementById('rotSectores');
+  if (secEl) {
+    const withPct = ROT_DATA.sectores.map(x => ({...x, pct: (quotes[x.sym]||{pct:0}).pct}));
+    withPct.sort((a,b) => b.pct - a.pct);
+    secEl.innerHTML = withPct.map(x => {
+      const up = x.pct >= 0;
+      const col = up ? 'var(--green)' : 'var(--red)';
+      const barW = Math.min(Math.abs(x.pct) * 20, 100);
+      return `<div style="display:flex;align-items:center;gap:6px;padding:4px 0;border-bottom:1px solid var(--border);">
+        <div style="font-family:var(--mono);font-size:10px;font-weight:700;color:var(--text);min-width:42px">${x.sym}</div>
+        <div style="font-size:9px;color:var(--text3);min-width:80px">${x.name}</div>
+        <div style="flex:1;height:5px;background:var(--bg4);border-radius:3px;overflow:hidden;">
+          <div style="height:100%;width:${barW}%;background:${col};border-radius:3px;${!up?'margin-left:auto':''}"></div>
+        </div>
+        <div style="font-family:var(--mono);font-size:11px;font-weight:700;color:${col};min-width:48px;text-align:right">${up?'+':''}${x.pct.toFixed(2)}%</div>
+      </div>`;
+    }).join('');
+  }
+
+  // ── Render Refugios ─────────────────────────────────────────
+  const refEl = document.getElementById('rotRefugios');
+  if (refEl) refEl.innerHTML = ROT_DATA.refugios.map(x => {
+    const q = quotes[x.sym] || {pct:0};
+    return rotCell(x.sym, x.name, q.pct, x.color);
+  }).join('');
+
+  // ── Smart Money Signal ──────────────────────────────────────
+  const sigEl = document.getElementById('rotSignal');
+  if (sigEl) {
+    const techPct  = (quotes['XLK']||{pct:0}).pct;
+    const utilPct  = (quotes['XLU']||{pct:0}).pct;
+    const goldPct  = (quotes['GLD']||{pct:0}).pct;
+    const bondPct  = (quotes['TLT']||{pct:0}).pct;
+    const vixPct   = (quotes['VIX']||{pct:0}).pct;
+    const semiPct  = (quotes['SOXX']||{pct:0}).pct;
+
+    let signal='', sigCol='var(--text2)', sigBg='var(--bg3)', sigBdr='var(--border)';
+
+    if (vixPct > 5 && goldPct > 0 && bondPct > 0 && techPct < 0) {
+      signal = '🚨 FUGA AL REFUGIO — VIX sube, Oro y Bonos suben, Tech cae. Dinero saliendo de riesgo.';
+      sigCol='var(--red)'; sigBg='var(--red-bg)'; sigBdr='rgba(255,77,109,.3)';
+    } else if (techPct > 1 && semiPct > 1 && vixPct < 0) {
+      signal = '🚀 RISK ON — Tech y Semis suben, VIX baja. Apetito de riesgo alto. Favorable para CALLS.';
+      sigCol='var(--green)'; sigBg='var(--green-bg)'; sigBdr='rgba(0,209,122,.3)';
+    } else if (utilPct > techPct + 1 && goldPct > 0) {
+      signal = '🛡️ ROTACIÓN DEFENSIVA — Utilities y Oro lideran. Institucionales cubriendo riesgo.';
+      sigCol='var(--yellow)'; sigBg='var(--yellow-bg)'; sigBdr='rgba(255,194,52,.3)';
+    } else if (semiPct < -2 && techPct < -1) {
+      signal = '⚠️ PRESIÓN EN TECH/SEMIS — Sector bajo presión. Cuidado con CALLS en tech hoy.';
+      sigCol='var(--yellow)'; sigBg='var(--yellow-bg)'; sigBdr='rgba(255,194,52,.3)';
+    } else {
+      signal = '〰️ MERCADO MIXTO — Sin señal clara de rotación. Opera solo con confirmación técnica.';
+    }
+
+    sigEl.innerHTML = `<div style="background:${sigBg};border:1px solid ${sigBdr};border-radius:var(--r);padding:10px 12px;font-size:11px;color:${sigCol};line-height:1.6;font-weight:600;">${signal}</div>`;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
 // NEWS
 // ═══════════════════════════════════════════════════════════════
 function filterNews(f,btn){newsFilter=f;document.querySelectorAll('.tnav-btn').forEach(b=>b.classList.remove('active'));btn.classList.add('active');renderNews();}
@@ -733,6 +926,7 @@ async function init(){
     // No key — use fallback data immediately
     buildMomentum();
     buildSignals();
+    loadRotation();
   }
 
   // Auto-refresh every 5 min during market hours

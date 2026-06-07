@@ -556,7 +556,8 @@ function selectTicker(t){
 function renderDayRules(){
   const today=new Date().getDay();
   const rules=[{days:[1,2],l:'Lunes & Martes',r:'Strike más ECONÓMICO del rango'},{days:[3],l:'Miércoles',r:'Strike en el MEDIO del rango'},{days:[4,5],l:'Jueves & Viernes',r:'Strike más CARO del rango'}];
-  document.getElementById('dayRules').innerHTML=rules.map(r=>{const it=r.days.includes(today);return`<div class="drule${it?' today-rule':''}"><div class="dd">${r.l}${it?' ← HOY':''}</div><div class="dt">${r.r}</div></div>`;}).join('');
+  const drRules = document.getElementById('dayRules');
+  if(drRules) drRules.innerHTML=rules.map(r=>{const it=r.days.includes(today);return`<div class="drule${it?' today-rule':''}"><div class="dd">${r.l}${it?' ← HOY':''}</div><div class="dt">${r.r}</div></div>`;}).join('');
   const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
   let rem='';
   if(today===1||today===2)rem='📌 Hoy: strike más <strong>económico</strong>';
@@ -564,7 +565,8 @@ function renderDayRules(){
   else if(today===4)rem='📌 Hoy: strike más <strong>caro</strong>';
   else if(today===5)rem=et.getHours()>=12?'⚠️ Vie PM: compra para <strong>siguiente semana</strong>':'📌 Hoy Vie AM: strike más caro. PM → siguiente semana';
   else rem='📅 Mercado cerrado';
-  document.getElementById('dayReminder').innerHTML=`<div class="drule" style="font-size:11px;line-height:1.7">${rem}</div>`;
+  const drEl = document.getElementById('dayReminder');
+  if(drEl) drEl.innerHTML=`<div class="drule" style="font-size:11px;line-height:1.7">${rem}</div>`;
 }
 
 // ═══════════════════════════════════════════════════════════════

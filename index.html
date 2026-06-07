@@ -375,8 +375,19 @@ select.inp{cursor:pointer;}
 
   <!-- Balance Paper Trading -->
   <div class="rsec">
-    <div style="text-align:center;margin-bottom:12px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
       <div style="font-size:16px;font-weight:700;color:#fff;">📊 Balance Paper Trading</div>
+      <div style="display:flex;gap:6px;">
+        <button onclick="exportData()" title="Exportar todos mis datos"
+          style="background:var(--green-bg);border:1px solid rgba(0,209,122,.3);border-radius:20px;color:var(--green);padding:3px 10px;font-size:11px;font-weight:600;cursor:pointer;font-family:var(--sans);">
+          ⬇ Exportar
+        </button>
+        <label title="Importar datos desde archivo" 
+          style="background:var(--blue-bg);border:1px solid rgba(61,139,255,.3);border-radius:20px;color:var(--blue);padding:3px 10px;font-size:11px;font-weight:600;cursor:pointer;font-family:var(--sans);">
+          ⬆ Importar
+          <input type="file" accept=".json" onchange="importData(event)" style="display:none;">
+        </label>
+      </div>
     </div>
     <div class="inp-row">
       <div class="ig">
@@ -1507,6 +1518,64 @@ function renderStrikeLog() {
   const globalAvg = (all.reduce((a,b)=>a+b,0)/all.length).toFixed(1);
   avgGlb.innerHTML = `<span style='font-size:13px;color:var(--text)'>Promedio global: <strong style='font-size:16px;font-family:var(--mono);color:${_strikeColor}'>${globalAvg > 0 ? '+' : ''}${globalAvg}</strong> lugares · ${log.length} registro${log.length>1?'s':''}</span>`;
   avgBox.style.display = 'block';
+}
+
+// ═══════════════════════════════════════════════════════════════
+// EXPORT / IMPORT DATA
+// ═══════════════════════════════════════════════════════════════
+function exportData() {
+  const data = {
+    version: '1.0',
+    exportDate: new Date().toISOString(),
+    paperBalance:    localStorage.getItem('paperBalance') || '',
+    gainPct:         localStorage.getItem('gainPct') || '35',
+    strikelog_GOOG:  localStorage.getItem('strikelog_GOOG') || '[]',
+    strikelog_TSLA:  localStorage.getItem('strikelog_TSLA') || '[]',
+    strikelog_SPY:   localStorage.getItem('strikelog_SPY')  || '[]',
+    fundamental_GOOG: localStorage.getItem('fundamental_GOOG') || '{}',
+    fundamental_TSLA: localStorage.getItem('fundamental_TSLA') || '{}',
+    fundamental_SPY:  localStorage.getItem('fundamental_SPY')  || '{}',
+  };
+
+  const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'});
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  const date = new Date().toISOString().split('T')[0];
+  a.href     = url;
+  a.download = `tradedesk-backup-${date}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function importData(event) {
+  const file = event.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const data = JSON.parse(e.target.result);
+      if(!data.version) throw new Error('Archivo inválido');
+
+      // Restore all saved data
+      const keys = ['paperBalance','gainPct',
+        'strikelog_GOOG','strikelog_TSLA','strikelog_SPY',
+        'fundamental_GOOG','fundamental_TSLA','fundamental_SPY'];
+      keys.forEach(k => { if(data[k]) localStorage.setItem(k, data[k]); });
+
+      // Refresh UI
+      const pb = localStorage.getItem('paperBalance');
+      if(pb){ const el=document.getElementById('paperBalance'); if(el){el.value=pb;calcTradeSize();} }
+      const gp = localStorage.getItem('gainPct');
+      if(gp){ const el=document.getElementById('gainPct'); if(el) el.value=gp; }
+      updateCardAverages();
+
+      alert('✅ Datos importados correctamente.\nFecha de exportación: ' + (data.exportDate||'desconocida'));
+    } catch(err) {
+      alert('❌ Error al importar: ' + err.message);
+    }
+    event.target.value = ''; // reset input
+  };
+  reader.readAsText(file);
 }
 
 // ═══════════════════════════════════════════════════════════════

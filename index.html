@@ -844,12 +844,10 @@ function rotCell(sym, name, pct, color) {
 }
 
 async function loadRotation() {
-  // Check market hours
   const et  = new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
   const day = et.getDay(), h = et.getHours(), m = et.getMinutes();
   const open = day>=1&&day<=5&&(h>9||(h===9&&m>=30))&&h<16;
 
-  // Fetch all in batches
   const allSyms = [
     ...ROT_DATA.indices.map(x=>x.sym),
     ...ROT_DATA.sectores.map(x=>x.sym),
@@ -857,20 +855,34 @@ async function loadRotation() {
   ];
 
   const quotes = {};
-  if (open) {
-    // Fetch in batches of 5 to respect rate limits
-    for (let i=0; i<allSyms.length; i+=5) {
-      const batch = allSyms.slice(i,i+5);
-      const results = await Promise.all(batch.map(s => fetchRotationQuote(s).catch(()=>null)));
-      batch.forEach((s,j) => { if(results[j]) quotes[s] = results[j]; });
-      if (i+5 < allSyms.length) await new Promise(r=>setTimeout(r,200));
+
+  // Always start with fallback prices so UI renders immediately
+  allSyms.forEach(s => {
+    const price = ROT_FALLBACK[s]||100, prev = ROT_PREV[s]||price;
+    quotes[s] = { price, prev, pct: +((price-prev)/prev*100).toFixed(2) };
+  });
+
+  // Then fetch real prices from Finnhub if key available
+  const key = getKey();
+  if (key && key.length > 8) {
+    // Fetch all in parallel batches of 6
+    for (let i=0; i<allSyms.length; i+=6) {
+      const batch = allSyms.slice(i,i+6);
+      try {
+        const results = await Promise.all(batch.map(async s => {
+          try {
+            const url = `https://finnhub.io/api/v1/quote?symbol=${s}&token=${key}`;
+            const r = await fetch(url, {signal: AbortSignal.timeout(5000)});
+            if (!r.ok) return null;
+            const d = await r.json();
+            if (!d || !d.c || d.c <= 0) return null;
+            return { sym: s, price: d.c, prev: d.pc, pct: +((d.c-d.pc)/d.pc*100).toFixed(2) };
+          } catch(e) { return null; }
+        }));
+        results.forEach(q => { if(q) quotes[q.sym] = q; });
+      } catch(e) {}
+      if (i+6 < allSyms.length) await new Promise(r=>setTimeout(r,150));
     }
-  } else {
-    // Use fallback for weekends/off-hours
-    allSyms.forEach(s => {
-      const price = ROT_FALLBACK[s]||100, prev = ROT_PREV[s]||price;
-      quotes[s] = { price, prev, pct: +((price-prev)/prev*100).toFixed(2) };
-    });
   }
 
   // ── Render Índices ──────────────────────────────────────────

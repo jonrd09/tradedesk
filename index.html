@@ -87,6 +87,24 @@ select.inp{cursor:pointer;}
 /* API Key modal */
 .key-modal{position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;z-index:1000;}
 .key-box{background:var(--bg2);border:1px solid var(--border2);border-radius:var(--rl);padding:28px;width:420px;max-width:90vw;}
+/* Rules popup */
+.rules-popup{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:linear-gradient(135deg,#0d1b2e,#111827);border:1px solid rgba(61,139,255,.4);border-radius:var(--rl);padding:28px 32px;z-index:2000;min-width:460px;max-width:90vw;box-shadow:0 20px 60px rgba(0,0,0,.7);}
+.rules-popup-title{font-size:18px;font-weight:700;color:var(--blue);text-align:center;font-family:var(--mono);letter-spacing:.08em;margin-bottom:16px;}
+.rules-popup-item{display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border);}
+.rules-popup-item:last-child{border-bottom:none;}
+.rules-popup-bar{height:4px;background:var(--blue);border-radius:2px;margin-top:14px;overflow:hidden;}
+.rules-popup-fill{height:100%;background:var(--green);border-radius:2px;animation:shrink 10s linear forwards;}
+@keyframes shrink{from{width:100%}to{width:0%}}
+/* PIN modal */
+.pin-modal{position:fixed;inset:0;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;z-index:1500;}
+.pin-box{background:var(--bg2);border:1px solid var(--border2);border-radius:var(--rl);padding:24px;width:300px;text-align:center;}
+.pin-dots{display:flex;gap:10px;justify-content:center;margin:16px 0;}
+.pin-dot{width:14px;height:14px;border-radius:50%;background:var(--border2);transition:background .15s;}
+.pin-dot.filled{background:var(--blue);}
+.pin-keys{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px;}
+.pin-key{background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);padding:12px;font-size:18px;font-weight:700;cursor:pointer;font-family:var(--mono);color:var(--text);transition:background .1s;}
+.pin-key:hover{background:var(--bg4);}
+.pin-key:active{background:var(--blue-bg);}
 .key-title{font-size:16px;font-weight:600;color:var(--text);margin-bottom:8px;}
 .key-sub{font-size:12px;color:var(--text2);line-height:1.7;margin-bottom:16px;}
 .key-row{display:flex;gap:8px;}
@@ -99,6 +117,78 @@ select.inp{cursor:pointer;}
 </head>
 <body>
 <div class="shell">
+
+<!-- PIN MODAL -->
+<div class="pin-modal" id="pinModal" style="display:none;">
+  <div class="pin-box">
+    <div style="font-size:15px;font-weight:700;color:var(--text);margin-bottom:4px;">🔐 Verificación de seguridad</div>
+    <div style="font-size:11px;color:var(--text3);margin-bottom:8px;" id="pinLabel">Ingresa tu PIN para continuar</div>
+    <div class="pin-dots">
+      <div class="pin-dot" id="pd0"></div>
+      <div class="pin-dot" id="pd1"></div>
+      <div class="pin-dot" id="pd2"></div>
+      <div class="pin-dot" id="pd3"></div>
+    </div>
+    <div class="pin-keys">
+      <button class="pin-key" onclick="pinPress('1')">1</button>
+      <button class="pin-key" onclick="pinPress('2')">2</button>
+      <button class="pin-key" onclick="pinPress('3')">3</button>
+      <button class="pin-key" onclick="pinPress('4')">4</button>
+      <button class="pin-key" onclick="pinPress('5')">5</button>
+      <button class="pin-key" onclick="pinPress('6')">6</button>
+      <button class="pin-key" onclick="pinPress('7')">7</button>
+      <button class="pin-key" onclick="pinPress('8')">8</button>
+      <button class="pin-key" onclick="pinPress('9')">9</button>
+      <button class="pin-key" onclick="pinClear()" style="font-size:12px;color:var(--red);">✕</button>
+      <button class="pin-key" onclick="pinPress('0')">0</button>
+      <button class="pin-key" onclick="pinBackspace()" style="font-size:14px;">⌫</button>
+    </div>
+    <div id="pinError" style="font-size:11px;color:var(--red);margin-top:10px;min-height:16px;"></div>
+    <button onclick="closePinModal()" style="margin-top:10px;background:none;border:none;color:var(--text3);font-size:11px;cursor:pointer;font-family:var(--sans);">Cancelar</button>
+  </div>
+</div>
+
+<!-- RULES POPUP -->
+<div id="rulesPopup" style="display:none;" class="rules-popup">
+  <div class="rules-popup-title">⚡ RECUERDA SIEMPRE ⚡</div>
+  <div class="rules-popup-item"><span style="font-size:20px;">📡</span><span style="font-size:14px;font-weight:600;color:var(--text);">Saliendo de Bollinger</span></div>
+  <div class="rules-popup-item"><span style="font-size:20px;">🧘</span><span style="font-size:14px;font-weight:600;color:var(--text);">Paciencia</span></div>
+  <div class="rules-popup-item"><span style="font-size:20px;">🗺️</span><span style="font-size:14px;font-weight:600;color:var(--text);">Ver Panorama Completo</span></div>
+  <div class="rules-popup-item"><span style="font-size:20px;">📊</span><span style="font-size:14px;font-weight:600;color:var(--text);">Verificar Tendencias</span></div>
+  <div class="rules-popup-item"><span style="font-size:20px;">❓</span><span style="font-size:14px;font-weight:600;color:var(--text);">¿Me estoy apegando al plan?</span></div>
+  <div class="rules-popup-item"><span style="font-size:20px;">🚫</span><span style="font-size:14px;font-weight:600;color:var(--red);">El error de ayer NO lo cometeré HOY.</span></div>
+  <div class="rules-popup-bar"><div class="rules-popup-fill" id="rulesBar"></div></div>
+  <div style="text-align:center;font-size:10px;color:var(--text3);margin-top:6px;" id="rulesCountdown">Se cierra en 10s</div>
+</div>
+
+<!-- SCHWAB MODAL -->
+<div class="key-modal" id="schwabModal" style="display:none;">
+  <div class="key-box">
+    <div class="key-title">🔗 Conectar Charles Schwab API</div>
+    <div class="key-sub">
+      Cuando recibas la aprobación de Schwab, ingresa tus credenciales aquí.<br>
+      Ve a <a href="https://developer.schwab.com" target="_blank" style="color:var(--blue)">developer.schwab.com</a> → My Apps → tu app.<br><br>
+      <strong style="color:var(--yellow);">⏳ Estado: Pendiente de aprobación</strong>
+    </div>
+    <div class="ig" style="margin-bottom:10px;">
+      <label class="ilbl">App Key (Client ID)</label>
+      <input class="inp" type="text" id="schwabClientId" placeholder="Pega tu App Key aquí…"
+        onkeydown="if(event.key==='Enter') saveSchwabKey()">
+    </div>
+    <div class="ig" style="margin-bottom:14px;">
+      <label class="ilbl">App Secret (Client Secret)</label>
+      <input class="inp" type="password" id="schwabClientSecret" placeholder="Pega tu App Secret aquí…"
+        onkeydown="if(event.key==='Enter') saveSchwabKey()">
+    </div>
+    <div class="key-row">
+      <button class="btn-green" onclick="saveSchwabKey()">✓ Guardar</button>
+      <button class="btn-skip" onclick="document.getElementById('schwabModal').style.display='none'">Cerrar</button>
+    </div>
+    <div id="schwabKeyError" style="font-size:11px;color:var(--red);margin-top:8px;display:none;">
+      ⚠ Ingresa ambos campos correctamente.
+    </div>
+  </div>
+</div>
 
 <!-- API KEY MODAL — aparece solo si no hay key guardada -->
 <div class="key-modal" id="keyModal" style="display:none;">
@@ -125,20 +215,25 @@ select.inp{cursor:pointer;}
 <!-- TOPBAR -->
 <header class="topbar">
   <div class="logo">Trade<span>Desk</span> Pro</div>
-  <div style="display:flex;gap:6px;flex:1;overflow-x:auto;align-items:center;">
-    <div style="background:rgba(61,139,255,.1);border:1px solid rgba(61,139,255,.25);border-radius:20px;padding:4px 14px;font-size:12px;font-weight:600;color:var(--blue);white-space:nowrap;">📡 Saliendo de Bollinger</div>
-    <div style="background:rgba(167,139,250,.1);border:1px solid rgba(167,139,250,.25);border-radius:20px;padding:4px 14px;font-size:12px;font-weight:600;color:var(--purple);white-space:nowrap;">🧘 Paciencia</div>
-    <div style="background:rgba(0,209,122,.1);border:1px solid rgba(0,209,122,.25);border-radius:20px;padding:4px 14px;font-size:12px;font-weight:600;color:var(--green);white-space:nowrap;">🗺️ Ver Panorama Completo</div>
-    <div style="background:rgba(0,209,122,.1);border:1px solid rgba(0,209,122,.25);border-radius:20px;padding:4px 14px;font-size:12px;font-weight:600;color:var(--green);white-space:nowrap;">📊 Verificar Tendencias</div>
-    <div style="background:rgba(255,194,52,.1);border:1px solid rgba(255,194,52,.25);border-radius:20px;padding:4px 14px;font-size:12px;font-weight:600;color:var(--yellow);white-space:nowrap;">❓ ¿Me estoy apegando al plan?</div>
-    <div style="background:rgba(255,77,109,.1);border:1px solid rgba(255,77,109,.25);border-radius:20px;padding:4px 14px;font-size:12px;font-weight:600;color:var(--red);white-space:nowrap;">🚫 El error de ayer NO lo cometeré HOY.</div>
+  <div style="display:flex;gap:10px;flex:1;align-items:center;">
+    <!-- Last refresh timestamp -->
+    <div style="display:flex;align-items:center;gap:6px;background:var(--green-bg);border:1px solid rgba(0,209,122,.3);border-radius:20px;padding:4px 14px;">
+      <span style="font-size:11px;color:var(--text3);">🔄 Último refresh:</span>
+      <span id="lastRefreshTime" style="font-size:12px;font-weight:700;color:var(--green);font-family:var(--mono);">—</span>
+    </div>
+    <!-- Schwab API status -->
+    <div style="display:flex;align-items:center;gap:6px;background:var(--bg3);border:1px solid var(--border2);border-radius:20px;padding:4px 14px;">
+      <span style="font-size:11px;color:var(--text3);">Charles Schwab:</span>
+      <span id="schwabStatus" style="font-size:12px;font-weight:700;color:var(--red);">● Sin conectar</span>
+      <button onclick="requirePin(showSchwabModal, 'PIN para configurar Schwab API')" style="background:none;border:1px solid var(--border2);border-radius:12px;color:var(--text3);padding:1px 8px;font-size:10px;cursor:pointer;font-family:var(--sans);">🔗 Conectar</button>
+    </div>
   </div>
 
   <div style="display:flex;align-items:center;gap:10px;margin-left:auto;">
     <span id="liveTag" style="font-size:10px;font-weight:600;color:var(--text3);">⟳ Cargando…</span>
     <div style="display:flex;align-items:center;gap:5px;">
       <span id="keyStatus" style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;background:var(--red-bg);color:var(--red);">● Sin key</span>
-      <button onclick="showKeyModal()" style="background:var(--blue-bg);border:1px solid var(--blue);border-radius:20px;color:var(--blue);padding:4px 12px;font-size:11px;font-weight:700;cursor:pointer;font-family:var(--sans);" id="keyBtn" title="API key Finnhub">🔑 API Key</button>
+      <button onclick="requirePin(showKeyModal, 'PIN para cambiar Finnhub API Key')" style="background:var(--blue-bg);border:1px solid var(--blue);border-radius:20px;color:var(--blue);padding:4px 12px;font-size:11px;font-weight:700;cursor:pointer;font-family:var(--sans);" id="keyBtn" title="API key Finnhub">🔑 API Key</button>
     </div>
     <span class="mkt-closed" id="mktStatus">● —</span>
     <span class="clock" id="clockEl">—</span>
@@ -191,28 +286,44 @@ select.inp{cursor:pointer;}
     </div>
     <!-- Rangos de precio de contratos -->
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:12px;">
-      <div style="background:var(--bg3);border-radius:var(--r);padding:8px 10px;border-left:2px solid #cc0000;">
-        <div style="font-size:9px;font-weight:700;color:#cc0000;font-family:var(--mono);margin-bottom:3px;">TSLA</div>
-        <div style="font-size:12px;font-weight:600;color:var(--text);font-family:var(--mono);">$80–$160</div>
+      <div style="background:var(--bg3);border-radius:var(--r);padding:12px 10px;border-left:2px solid #cc0000;text-align:center;">
+        <div style="font-size:12px;font-weight:700;color:#cc0000;font-family:var(--mono);margin-bottom:5px;">TSLA</div>
+        <div style="font-size:16px;font-weight:700;color:var(--text);font-family:var(--mono);">$80–$160</div>
       </div>
-      <div style="background:var(--bg3);border-radius:var(--r);padding:8px 10px;border-left:2px solid #4285f4;">
-        <div style="font-size:9px;font-weight:700;color:#4285f4;font-family:var(--mono);margin-bottom:3px;">GOOG</div>
-        <div style="font-size:12px;font-weight:600;color:var(--text);font-family:var(--mono);">$60–$140</div>
+      <div style="background:var(--bg3);border-radius:var(--r);padding:12px 10px;border-left:2px solid #4285f4;text-align:center;">
+        <div style="font-size:12px;font-weight:700;color:#4285f4;font-family:var(--mono);margin-bottom:5px;">GOOG</div>
+        <div style="font-size:16px;font-weight:700;color:var(--text);font-family:var(--mono);">$60–$140</div>
       </div>
-      <div style="background:var(--bg3);border-radius:var(--r);padding:8px 10px;border-left:2px solid #00a651;">
-        <div style="font-size:9px;font-weight:700;color:#00a651;font-family:var(--mono);margin-bottom:3px;">SPY</div>
-        <div style="font-size:12px;font-weight:600;color:var(--text);font-family:var(--mono);">$30–$45</div>
+      <div style="background:var(--bg3);border-radius:var(--r);padding:12px 10px;border-left:2px solid #00a651;text-align:center;">
+        <div style="font-size:12px;font-weight:700;color:#00a651;font-family:var(--mono);margin-bottom:5px;">SPY</div>
+        <div style="font-size:16px;font-weight:700;color:var(--text);font-family:var(--mono);">$30–$45</div>
       </div>
     </div>
     <div class="inp-row">
       <div class="ig"><label class="ilbl">Precio comprado ($)</label><input class="inp" type="number" id="cBought" placeholder="ej. 1.45" step="0.01" oninput="calcLimit()"></div>
       <div class="ig"><label class="ilbl">Contratos</label><input class="inp" type="number" id="cQty" value="1" min="1" oninput="calcLimit()"></div>
     </div>
-    <div class="inp-row">
-      <div class="ig"><label class="ilbl">Ticker</label><input class="inp" type="text" id="cTicker" placeholder="GOOG" style="text-transform:uppercase"></div>
-      <div class="ig"><label class="ilbl">Tipo</label><select class="inp" id="cType" onchange="calcLimit()"><option value="call">CALL</option><option value="put">PUT</option></select></div>
-    </div>
+
     <div id="limitResult"></div>
+  </div>
+
+  <!-- Balance Paper Trading -->
+  <div class="rsec">
+    <div style="text-align:center;margin-bottom:12px;">
+      <div style="font-size:16px;font-weight:700;color:#fff;">📊 Balance Paper Trading</div>
+    </div>
+    <div class="inp-row">
+      <div class="ig">
+        <label class="ilbl">Balance de cuenta ($)</label>
+        <input class="inp" type="number" id="paperBalance" placeholder="ej. 100000" step="100"
+          oninput="calcTradeSize()" style="font-size:15px;">
+      </div>
+      <div class="ig">
+        <label class="ilbl">Por trade (10%)</label>
+        <div style="background:var(--bg3);border:1px solid var(--green);border-radius:var(--r);padding:7px 10px;font-size:16px;font-family:var(--mono);font-weight:700;color:var(--green);text-align:center;" id="tradeSizeResult">—</div>
+      </div>
+    </div>
+    <div style="font-size:10px;color:var(--text3);text-align:center;margin-top:-4px;">Máximo recomendado por operación = 10% del balance</div>
   </div>
 
   <!-- Rotación de Dinero + Índices -->
@@ -255,7 +366,112 @@ select.inp{cursor:pointer;}
 <script>
 // ── IMMEDIATE KEY RESTORE — Cookie + localStorage + sessionStorage ───────────
 (function(){
-  function getCookie(name){
+  // ── PIN Security ─────────────────────────────────────────────────────────────
+const DEFAULT_PIN = '2122'; // Change this to your preferred PIN
+let _pinBuffer   = '';
+let _pinCallback = null;
+
+function requirePin(callback, label='Ingresa tu PIN para continuar') {
+  _pinBuffer   = '';
+  _pinCallback = callback;
+  document.getElementById('pinLabel').textContent = label;
+  document.getElementById('pinError').textContent = '';
+  for(let i=0;i<4;i++) document.getElementById('pd'+i).classList.remove('filled');
+  document.getElementById('pinModal').style.display='flex';
+  document.getElementById('pinModal').querySelector('.pin-box').querySelector('button').focus();
+}
+function pinPress(d) {
+  if(_pinBuffer.length >= 4) return;
+  _pinBuffer += d;
+  document.getElementById('pd'+(_pinBuffer.length-1)).classList.add('filled');
+  if(_pinBuffer.length === 4) {
+    setTimeout(() => {
+      const saved = '2122';
+      if(_pinBuffer === saved) {
+        document.getElementById('pinModal').style.display='none';
+        _pinBuffer = '';
+        if(_pinCallback) _pinCallback();
+      } else {
+        document.getElementById('pinError').textContent = '❌ PIN incorrecto. Intenta de nuevo.';
+        _pinBuffer = '';
+        for(let i=0;i<4;i++) document.getElementById('pd'+i).classList.remove('filled');
+      }
+    }, 200);
+  }
+}
+function pinBackspace() {
+  if(_pinBuffer.length === 0) return;
+  document.getElementById('pd'+(_pinBuffer.length-1)).classList.remove('filled');
+  _pinBuffer = _pinBuffer.slice(0,-1);
+}
+function pinClear() {
+  _pinBuffer = '';
+  for(let i=0;i<4;i++) document.getElementById('pd'+i).classList.remove('filled');
+  document.getElementById('pinError').textContent='';
+}
+function closePinModal() {
+  document.getElementById('pinModal').style.display='none';
+  _pinBuffer=''; _pinCallback=null;
+}
+
+// ── Rules Popup — shows for 10 seconds ───────────────────────────────────────
+let _rulesTimer = null;
+function showRulesPopup() {
+  const popup = document.getElementById('rulesPopup');
+  const bar   = document.getElementById('rulesBar');
+  const cd    = document.getElementById('rulesCountdown');
+  if (!popup) return;
+  // Reset animation
+  bar.style.animation = 'none';
+  bar.offsetHeight; // reflow
+  bar.style.animation = 'shrink 10s linear forwards';
+  popup.style.display = 'block';
+  let secs = 10;
+  cd.textContent = `Se cierra en ${secs}s`;
+  if(_rulesTimer) clearInterval(_rulesTimer);
+  _rulesTimer = setInterval(() => {
+    secs--;
+    cd.textContent = `Se cierra en ${secs}s`;
+    if(secs <= 0) {
+      clearInterval(_rulesTimer);
+      popup.style.display = 'none';
+    }
+  }, 1000);
+}
+
+// ── Schwab Key Management ─────────────────────────────────────────────────────
+function showSchwabModal(){
+  document.getElementById('schwabModal').style.display='flex';
+}
+function saveSchwabKey(){
+  const cid = (document.getElementById('schwabClientId').value||'').trim();
+  const sec = (document.getElementById('schwabClientSecret').value||'').trim();
+  const err = document.getElementById('schwabKeyError');
+  if(!cid||!sec){err.style.display='block';return;}
+  err.style.display='none';
+  try{ localStorage.setItem('schwab_client_id',cid); }catch(e){}
+  try{ localStorage.setItem('schwab_client_secret',sec); }catch(e){}
+  window._schwabId  = cid;
+  window._schwabSec = sec;
+  document.getElementById('schwabModal').style.display='none';
+  updateSchwabStatus();
+}
+function updateSchwabStatus(){
+  const id  = window._schwabId  || localStorage.getItem('schwab_client_id')  || '';
+  const sec = window._schwabSec || localStorage.getItem('schwab_client_secret') || '';
+  const el  = document.getElementById('schwabStatus');
+  if(el){
+    if(id && sec){
+      el.textContent='● Configurado';
+      el.style.color='var(--green)';
+    } else {
+      el.textContent='● Sin conectar';
+      el.style.color='var(--red)';
+    }
+  }
+}
+
+function getCookie(name){
     const v=document.cookie.split(';').find(c=>c.trim().startsWith(name+'='));
     return v?decodeURIComponent(v.trim().split('=')[1].trim()):'';
   }
@@ -295,6 +511,111 @@ let currentTicker='GOOG';
 // ═══════════════════════════════════════════════════════════════
 // API KEY MANAGEMENT — Modal al inicio si no hay key
 // ═══════════════════════════════════════════════════════════════
+// ── PIN Security ─────────────────────────────────────────────────────────────
+const DEFAULT_PIN = '1234'; // Change this to your preferred PIN
+let _pinBuffer   = '';
+let _pinCallback = null;
+
+function requirePin(callback, label='Ingresa tu PIN para continuar') {
+  _pinBuffer   = '';
+  _pinCallback = callback;
+  document.getElementById('pinLabel').textContent = label;
+  document.getElementById('pinError').textContent = '';
+  for(let i=0;i<4;i++) document.getElementById('pd'+i).classList.remove('filled');
+  document.getElementById('pinModal').style.display='flex';
+  document.getElementById('pinModal').querySelector('.pin-box').querySelector('button').focus();
+}
+function pinPress(d) {
+  if(_pinBuffer.length >= 4) return;
+  _pinBuffer += d;
+  document.getElementById('pd'+(_pinBuffer.length-1)).classList.add('filled');
+  if(_pinBuffer.length === 4) {
+    setTimeout(() => {
+      const saved = '2122';
+      if(_pinBuffer === saved) {
+        document.getElementById('pinModal').style.display='none';
+        _pinBuffer = '';
+        if(_pinCallback) _pinCallback();
+      } else {
+        document.getElementById('pinError').textContent = '❌ PIN incorrecto. Intenta de nuevo.';
+        _pinBuffer = '';
+        for(let i=0;i<4;i++) document.getElementById('pd'+i).classList.remove('filled');
+      }
+    }, 200);
+  }
+}
+function pinBackspace() {
+  if(_pinBuffer.length === 0) return;
+  document.getElementById('pd'+(_pinBuffer.length-1)).classList.remove('filled');
+  _pinBuffer = _pinBuffer.slice(0,-1);
+}
+function pinClear() {
+  _pinBuffer = '';
+  for(let i=0;i<4;i++) document.getElementById('pd'+i).classList.remove('filled');
+  document.getElementById('pinError').textContent='';
+}
+function closePinModal() {
+  document.getElementById('pinModal').style.display='none';
+  _pinBuffer=''; _pinCallback=null;
+}
+
+// ── Rules Popup — shows for 10 seconds ───────────────────────────────────────
+let _rulesTimer = null;
+function showRulesPopup() {
+  const popup = document.getElementById('rulesPopup');
+  const bar   = document.getElementById('rulesBar');
+  const cd    = document.getElementById('rulesCountdown');
+  if (!popup) return;
+  // Reset animation
+  bar.style.animation = 'none';
+  bar.offsetHeight; // reflow
+  bar.style.animation = 'shrink 10s linear forwards';
+  popup.style.display = 'block';
+  let secs = 10;
+  cd.textContent = `Se cierra en ${secs}s`;
+  if(_rulesTimer) clearInterval(_rulesTimer);
+  _rulesTimer = setInterval(() => {
+    secs--;
+    cd.textContent = `Se cierra en ${secs}s`;
+    if(secs <= 0) {
+      clearInterval(_rulesTimer);
+      popup.style.display = 'none';
+    }
+  }, 1000);
+}
+
+// ── Schwab Key Management ─────────────────────────────────────────────────────
+function showSchwabModal(){
+  document.getElementById('schwabModal').style.display='flex';
+}
+function saveSchwabKey(){
+  const cid = (document.getElementById('schwabClientId').value||'').trim();
+  const sec = (document.getElementById('schwabClientSecret').value||'').trim();
+  const err = document.getElementById('schwabKeyError');
+  if(!cid||!sec){err.style.display='block';return;}
+  err.style.display='none';
+  try{ localStorage.setItem('schwab_client_id',cid); }catch(e){}
+  try{ localStorage.setItem('schwab_client_secret',sec); }catch(e){}
+  window._schwabId  = cid;
+  window._schwabSec = sec;
+  document.getElementById('schwabModal').style.display='none';
+  updateSchwabStatus();
+}
+function updateSchwabStatus(){
+  const id  = window._schwabId  || localStorage.getItem('schwab_client_id')  || '';
+  const sec = window._schwabSec || localStorage.getItem('schwab_client_secret') || '';
+  const el  = document.getElementById('schwabStatus');
+  if(el){
+    if(id && sec){
+      el.textContent='● Configurado';
+      el.style.color='var(--green)';
+    } else {
+      el.textContent='● Sin conectar';
+      el.style.color='var(--red)';
+    }
+  }
+}
+
 function getCookie(name){
   const v=document.cookie.split(';').find(c=>c.trim().startsWith(name+'='));
   return v?decodeURIComponent(v.trim().split('=')[1].trim()):'';
@@ -478,8 +799,12 @@ async function loadLivePrices(){
   });
   const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
   const src=getKey().length>8?'Finnhub':'Yahoo';
-  tag.textContent=`● Live·${src} · ${et.toLocaleTimeString('es-PR',{hour:'2-digit',minute:'2-digit',hour12:false})} ET`;
+  const timeStr=et.toLocaleTimeString('es-PR',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:true});
+  tag.textContent=`● Live·${src} · ${et.toLocaleTimeString('es-PR',{hour:'2-digit',minute:'2-digit',hour12:true})} ET`;
   tag.style.color='var(--green)';
+  // Update last refresh timestamp
+  const lrt=document.getElementById('lastRefreshTime');
+  if(lrt) lrt.textContent=timeStr+' ET';
   buildSignals();
   buildMomentum();
   loadRotation(); // both async — run in parallel
@@ -712,8 +1037,7 @@ function saveGainPct(){const v=parseFloat(document.getElementById('gainPct')?.va
 function calcLimit(){
   const bought=parseFloat(document.getElementById('cBought').value);
   const qty=parseInt(document.getElementById('cQty').value)||1;
-  const ticker=document.getElementById('cTicker').value.toUpperCase()||'—';
-  const type=document.getElementById('cType').value;
+  const type='CALL';
   const el=document.getElementById('limitResult');
   if(!bought||bought<=0){el.innerHTML='';return;}
   const gainPct=parseFloat(document.getElementById('gainPct')?.value)||35;
@@ -722,7 +1046,7 @@ function calcLimit(){
   const profC=+((lp-bought)*100).toFixed(2);
   const profT=+(profC*qty).toFixed(2);
   const costT=+(bought*100*qty).toFixed(2);
-  el.innerHTML=`<div class="limit-box"><div class="limit-lbl">Precio Límite de Venta — ${gainPct}% + $0.02 broker</div><div class="limit-price">$${lp.toFixed(2)}</div><div style="font-size:11px;color:var(--text2);margin-top:4px;">Compraste $${bought.toFixed(2)} · ${type.toUpperCase()} · ${ticker}</div></div><div class="res-box"><div class="res-row"><span class="res-lbl">Precio comprado</span><span class="res-val">$${bought.toFixed(2)}</span></div><div class="res-row"><span class="res-lbl">Ganancia ${gainPct}%</span><span class="res-val" style="color:var(--green)">+$${(bought*gainPct/100).toFixed(2)}</span></div><div class="res-row"><span class="res-lbl">Comisión broker</span><span class="res-val" style="color:var(--yellow)">+$0.02</span></div><div class="res-row"><span class="res-lbl">Precio límite venta</span><span class="res-val" style="color:var(--green);font-weight:700">$${lp.toFixed(2)}</span></div><div class="res-row"><span class="res-lbl">Contratos</span><span class="res-val">${qty}</span></div><div class="res-row"><span class="res-lbl">Ganancia total neta</span><span class="res-val" style="color:var(--green);font-size:15px">+$${profT.toFixed(2)}</span></div></div>`;
+  el.innerHTML=`<div class="limit-box"><div class="limit-lbl">Precio Límite de Venta — ${gainPct}% + $0.02 broker</div><div class="limit-price">$${lp.toFixed(2)}</div><div style="font-size:11px;color:var(--text2);margin-top:4px;">Compraste $${bought.toFixed(2)}</div></div><div class="res-box"><div class="res-row"><span class="res-lbl">Precio comprado</span><span class="res-val">$${bought.toFixed(2)}</span></div><div class="res-row"><span class="res-lbl">Ganancia ${gainPct}%</span><span class="res-val" style="color:var(--green)">+$${(bought*gainPct/100).toFixed(2)}</span></div><div class="res-row"><span class="res-lbl">Comisión broker</span><span class="res-val" style="color:var(--yellow)">+$0.02</span></div><div class="res-row"><span class="res-lbl">Precio límite venta</span><span class="res-val" style="color:var(--green);font-weight:700">$${lp.toFixed(2)}</span></div><div class="res-row"><span class="res-lbl">Contratos</span><span class="res-val">${qty}</span></div><div class="res-row"><span class="res-lbl">Ganancia total neta</span><span class="res-val" style="color:var(--green);font-size:15px">+$${profT.toFixed(2)}</span></div></div>`;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -757,20 +1081,21 @@ const ROT_DATA = {
   ]
 };
 
-// Fallback prices for rotation tickers (updated periodically)
+// Fallback prices — Jun 5, 2026 closing prices (updated weekly)
 const ROT_FALLBACK = {
   QQQ:474.20,SPY:594.52,IWM:208.45,DIA:431.60,
-  XLK:232.10,XLF:47.80,XLV:145.30,XLE:91.20,
-  XLU:68.40,XLI:132.50,XLC:88.90,XLP:79.60,
-  XLY:195.40,XLB:89.30,SOXX:245.80,XBI:98.70,
-  GLD:305.40,TLT:88.20,VIX:14.80,UUP:27.30,
+  XLK:193.17,XLF:51.49,XLV:145.30,XLE:91.20,
+  XLU:68.40, XLI:132.50,XLC:88.90, XLP:79.60,
+  XLY:195.40,XLB:89.30, SOXX:245.80,XBI:98.70,
+  GLD:305.40,TLT:88.20, VIX:14.80, UUP:27.30,
 };
+// Previous day close (Jun 4, 2026) — used to calculate % change
 const ROT_PREV = {
-  QQQ:472.10,SPY:592.70,IWM:209.30,DIA:428.40,
-  XLK:228.50,XLF:48.10,XLV:143.80,XLE:92.40,
-  XLU:67.90,XLI:131.20,XLC:87.60,XLP:80.10,
-  XLY:192.10,XLB:88.90,SOXX:242.30,XBI:97.20,
-  GLD:302.80,TLT:89.10,VIX:16.20,UUP:27.60,
+  QQQ:496.90,SPY:613.10,IWM:215.30,DIA:441.80,
+  XLK:199.40,XLF:50.80,XLV:144.20,XLE:92.80,
+  XLU:67.50, XLI:134.20,XLC:90.10, XLP:78.90,
+  XLY:200.80,XLB:91.20, SOXX:253.40,XBI:100.20,
+  GLD:301.50,TLT:89.40, VIX:12.60, UUP:27.80,
 };
 
 async function fetchRotationQuote(sym) {
@@ -922,6 +1247,19 @@ async function loadRotation() {
 // ═══════════════════════════════════════════════════════════════
 
 // ═══════════════════════════════════════════════════════════════
+// PAPER TRADING BALANCE CALCULATOR
+// ═══════════════════════════════════════════════════════════════
+function calcTradeSize() {
+  const bal = parseFloat(document.getElementById('paperBalance').value) || 0;
+  const el  = document.getElementById('tradeSizeResult');
+  if (!bal || bal <= 0) { el.textContent = '—'; return; }
+  const ten = (bal * 0.10).toFixed(2);
+  el.textContent = '$' + parseFloat(ten).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+  // Save to localStorage
+  try { localStorage.setItem('paperBalance', bal); } catch(e) {}
+}
+
+// ═══════════════════════════════════════════════════════════════
 // INIT
 // ═══════════════════════════════════════════════════════════════
 async function init(){
@@ -932,6 +1270,23 @@ async function init(){
     try{ localStorage.setItem('finnhub_key',_saved); }catch(e){}
     try{ sessionStorage.setItem('finnhub_key',_saved); }catch(e){}
     document.cookie='fk='+encodeURIComponent(_saved)+';max-age='+365*24*3600+';path=/;SameSite=Lax';
+  }
+
+  // Clear any stale PIN from localStorage
+  try{ localStorage.removeItem('dashboard_pin'); }catch(e){}
+
+  // Restore Schwab keys
+  const _sid = localStorage.getItem('schwab_client_id');
+  const _sec = localStorage.getItem('schwab_client_secret');
+  if(_sid) window._schwabId  = _sid;
+  if(_sec) window._schwabSec = _sec;
+  updateSchwabStatus();
+
+  // Restore paper balance
+  const _pb = localStorage.getItem('paperBalance');
+  if (_pb) {
+    const pbEl = document.getElementById('paperBalance');
+    if (pbEl) { pbEl.value = _pb; calcTradeSize(); }
   }
 
   // Restore gain % — default always 35 unless user changed it
@@ -975,6 +1330,7 @@ async function init(){
     if(d>=1&&d<=5&&(h>9||(h===9&&m>=30))&&h<16){
       loadLivePrices();
       loadRotation();
+      showRulesPopup();
     }
   },5*60*1000);
 }

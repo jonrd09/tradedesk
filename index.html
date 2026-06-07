@@ -89,7 +89,7 @@ select.inp{cursor:pointer;}
 .key-box{background:var(--bg2);border:1px solid var(--border2);border-radius:var(--rl);padding:28px;width:420px;max-width:90vw;}
 /* Strike Log Modal */
 .strike-modal{position:fixed;inset:0;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;z-index:1000;}
-.strike-box{background:var(--bg2);border:1px solid var(--border2);border-radius:var(--rl);padding:24px;width:460px;max-width:95vw;}
+.strike-box{background:var(--bg2);border:1px solid var(--border2);border-radius:var(--rl);padding:24px;width:580px;max-width:95vw;}
 .strike-entry{display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px;}
 .strike-entry:last-child{border-bottom:none;}
 .strike-day{min-width:90px;color:var(--text2);}
@@ -130,13 +130,34 @@ select.inp{cursor:pointer;}
 <!-- STRIKE LOG MODAL -->
 <div class="strike-modal" id="strikeModal" style="display:none;">
   <div class="strike-box">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
-      <div>
-        <div style="font-size:18px;font-weight:700;color:#fff;" id="strikeModalTitle">📊 Strike Log — GOOG</div>
-        <div style="font-size:11px;color:var(--text3);margin-top:2px;">Distancia Spot → Strike por día</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;gap:12px;">
+      <!-- Left: ticker + fundamental data -->
+      <div style="display:flex;align-items:center;gap:16px;">
+        <div style="font-size:24px;font-weight:700;font-family:var(--mono);" id="strikeModalTitle">GOOG</div>
+        <div style="display:flex;gap:10px;align-items:flex-end;">
+          <div>
+            <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;">Target Price</div>
+            <div style="display:flex;align-items:center;gap:4px;">
+              <span style="font-size:13px;color:var(--text3);">$</span>
+              <input type="number" id="strikeTargetPrice" placeholder="ej. 430" step="1"
+                style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);color:var(--green);padding:5px 8px;font-size:15px;font-family:var(--mono);font-weight:700;width:90px;outline:none;text-align:center;"
+                oninput="saveStrikeFundamentals()" onfocus="this.style.borderColor='var(--blue)'" onblur="this.style.borderColor='var(--border)'">
+            </div>
+          </div>
+          <div>
+            <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;">Recomendación</div>
+            <input type="number" id="strikeRecom" placeholder="ej. 2.47" step="0.01" min="1" max="5"
+              style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);color:var(--yellow);padding:5px 8px;font-size:15px;font-family:var(--mono);font-weight:700;width:80px;outline:none;text-align:center;"
+              oninput="saveStrikeFundamentals();updateRecomLabel()" onfocus="this.style.borderColor='var(--blue)'" onblur="this.style.borderColor='var(--border)'">
+          </div>
+          <div style="padding-bottom:6px;">
+            <div id="recomLabel" style="font-size:13px;font-weight:600;color:var(--text2);">—</div>
+          </div>
+        </div>
       </div>
-      <button onclick="closeStrikeModal()" style="background:none;border:none;color:var(--text3);font-size:20px;cursor:pointer;">✕</button>
+      <button onclick="closeStrikeModal()" style="background:none;border:none;color:var(--text3);font-size:20px;cursor:pointer;flex-shrink:0;">✕</button>
     </div>
+    <div style="font-size:11px;color:var(--text3);margin-bottom:12px;">Distancia Spot → Strike por día</div>
     <!-- Entry form -->
     <div style="display:flex;gap:8px;margin-bottom:14px;">
       <select id="strikeDay" class="inp" style="flex:1.5;">
@@ -328,17 +349,17 @@ select.inp{cursor:pointer;}
     </div>
     <!-- Rangos de precio de contratos — click to open strike log -->
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:12px;">
-      <div onclick="openStrikeModal('TSLA','#cc0000')" style="background:var(--bg3);border-radius:var(--r);padding:12px 10px;border-left:2px solid #cc0000;text-align:center;cursor:pointer;transition:background .15s;" onmouseover="this.style.background='var(--bg4)'" onmouseout="this.style.background='var(--bg3)'">
+      <div onclick="openStrikeLog('TSLA','#cc0000')" style="background:var(--bg3);border-radius:var(--r);padding:12px 10px;border-left:2px solid #cc0000;text-align:center;cursor:pointer;transition:background .15s;" onmouseover="this.style.background='var(--bg4)'" onmouseout="this.style.background='var(--bg3)'">
         <div style="font-size:12px;font-weight:700;color:#cc0000;font-family:var(--mono);margin-bottom:5px;">TSLA</div>
         <div style="font-size:16px;font-weight:700;color:var(--text);font-family:var(--mono);">$80–$160</div>
         <div id="avg-TSLA" style="font-size:15px;font-weight:700;font-family:var(--mono);color:#fff;margin-top:4px;">—</div>
       </div>
-      <div onclick="openStrikeModal('GOOG','#4285f4')" style="background:var(--bg3);border-radius:var(--r);padding:12px 10px;border-left:2px solid #4285f4;text-align:center;cursor:pointer;transition:background .15s;" onmouseover="this.style.background='var(--bg4)'" onmouseout="this.style.background='var(--bg3)'">
+      <div onclick="openStrikeLog('GOOG','#4285f4')" style="background:var(--bg3);border-radius:var(--r);padding:12px 10px;border-left:2px solid #4285f4;text-align:center;cursor:pointer;transition:background .15s;" onmouseover="this.style.background='var(--bg4)'" onmouseout="this.style.background='var(--bg3)'">
         <div style="font-size:12px;font-weight:700;color:#4285f4;font-family:var(--mono);margin-bottom:5px;">GOOG</div>
         <div style="font-size:16px;font-weight:700;color:var(--text);font-family:var(--mono);">$60–$140</div>
         <div id="avg-GOOG" style="font-size:15px;font-weight:700;font-family:var(--mono);color:#fff;margin-top:4px;">—</div>
       </div>
-      <div onclick="openStrikeModal('SPY','#00a651')" style="background:var(--bg3);border-radius:var(--r);padding:12px 10px;border-left:2px solid #00a651;text-align:center;cursor:pointer;transition:background .15s;" onmouseover="this.style.background='var(--bg4)'" onmouseout="this.style.background='var(--bg3)'">
+      <div onclick="openStrikeLog('SPY','#00a651')" style="background:var(--bg3);border-radius:var(--r);padding:12px 10px;border-left:2px solid #00a651;text-align:center;cursor:pointer;transition:background .15s;" onmouseover="this.style.background='var(--bg4)'" onmouseout="this.style.background='var(--bg3)'">
         <div style="font-size:12px;font-weight:700;color:#00a651;font-family:var(--mono);margin-bottom:5px;">SPY</div>
         <div style="font-size:16px;font-weight:700;color:var(--text);font-family:var(--mono);">$30–$45</div>
         <div id="avg-SPY" style="font-size:15px;font-weight:700;font-family:var(--mono);color:#fff;margin-top:4px;">—</div>
@@ -1297,6 +1318,39 @@ async function loadRotation() {
 let _strikeTicker = 'GOOG';
 let _strikeColor  = '#4285f4';
 
+function saveStrikeFundamentals() {
+  const tp  = document.getElementById('strikeTargetPrice')?.value || '';
+  const rec = document.getElementById('strikeRecom')?.value || '';
+  try {
+    localStorage.setItem('fundamental_' + _strikeTicker, JSON.stringify({tp, rec}));
+  } catch(e) {}
+}
+
+function loadStrikeFundamentals(ticker) {
+  try {
+    const saved = JSON.parse(localStorage.getItem('fundamental_' + ticker) || '{}');
+    const tEl = document.getElementById('strikeTargetPrice');
+    const rEl = document.getElementById('strikeRecom');
+    if(tEl) tEl.value = saved.tp || '';
+    if(rEl) { rEl.value = saved.rec || ''; }
+    updateRecomLabel();
+  } catch(e) {}
+}
+
+function updateRecomLabel() {
+  const val = parseFloat(document.getElementById('strikeRecom')?.value);
+  const el  = document.getElementById('recomLabel');
+  if(!el) return;
+  if(isNaN(val)) { el.textContent = '—'; el.style.color = 'var(--text2)'; return; }
+  let label, col;
+  if(val <= 2.00)      { label = '✅ Recomendable';     col = 'var(--green)'; }
+  else if(val <= 2.50) { label = '⚠️ Con precaución';   col = 'var(--yellow)'; }
+  else                 { label = '🚫 No recomendable';  col = 'var(--red)'; }
+  el.textContent = label;
+  el.style.color = col;
+  el.style.fontWeight = '700';
+}
+
 function updateCardAverages() {
   ['TSLA','GOOG','SPY'].forEach(ticker => {
     const el = document.getElementById('avg-' + ticker);
@@ -1310,11 +1364,20 @@ function updateCardAverages() {
   });
 }
 
+function openStrikeLog(ticker, color) { openStrikeModal(ticker, color); }
+
 function openStrikeModal(ticker, color) {
   _strikeTicker = ticker;
   _strikeColor  = color;
-  document.getElementById('strikeModalTitle').textContent = `📊 Strike Log — ${ticker}`;
-  document.getElementById('strikeModalTitle').style.color = color;
+
+  // Set ticker title
+  const titleEl = document.getElementById('strikeModalTitle');
+  if(titleEl){ titleEl.textContent = ticker; titleEl.style.color = color; }
+
+  // Reset fundamental fields
+  document.getElementById('strikeTargetPrice').textContent = '—';
+  document.getElementById('strikeRecom').textContent = '—';
+
   // Pre-select today's day
   const days = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
   const today = days[new Date().getDay()];
@@ -1326,6 +1389,9 @@ function openStrikeModal(ticker, color) {
   document.getElementById('strikeModal').style.display = 'flex';
   renderStrikeLog();
   setTimeout(()=>document.getElementById('strikeDist').focus(), 100);
+
+  // Load saved fundamentals from localStorage
+  loadStrikeFundamentals(ticker);
 }
 
 function closeStrikeModal() {

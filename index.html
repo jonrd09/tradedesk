@@ -310,7 +310,14 @@ let currentTicker='GOOG', newsFilter='all';
 // ═══════════════════════════════════════════════════════════════
 // API KEY MANAGEMENT — Modal al inicio si no hay key
 // ═══════════════════════════════════════════════════════════════
-function getKey(){ return window._fk || localStorage.getItem('finnhub_key') || ''; }
+function getKey(){
+  // Always sync from localStorage to window._fk on every call
+  if (!window._fk) {
+    const stored = localStorage.getItem('finnhub_key');
+    if (stored && stored.length > 8) window._fk = stored;
+  }
+  return window._fk || '';
+}
 
 function showKeyModal(){
   document.getElementById('keyModal').style.display='flex';
@@ -910,9 +917,12 @@ async function init(){
   if (gpEl) gpEl.value = gainVal;
   localStorage.setItem('gainPct', gainVal); // ensure saved value is valid
 
-  // Show key modal if no key saved
-  if(!getKey()||getKey().length<8){
+  // Show key modal ONLY if truly no key saved anywhere
+  const _k = getKey();
+  if(!_k || _k.length < 8){
     document.getElementById('keyModal').style.display='flex';
+  } else {
+    document.getElementById('keyModal').style.display='none';
   }
 
   // Render UI shell immediately
@@ -920,7 +930,8 @@ async function init(){
   renderNews();
 
   // Fetch live prices first, then build signals with real data
-  if(getKey().length>8){
+  const activeKey = getKey(); // re-reads localStorage after sync above
+  if(activeKey && activeKey.length > 8){
     await loadLivePrices(); // this calls buildSignals + buildMomentum when done
   } else {
     // No key — use fallback data immediately

@@ -157,7 +157,10 @@ select.inp{cursor:pointer;}
   </div>
   <div style="display:flex;align-items:center;gap:10px;margin-left:auto;">
     <span id="liveTag" style="font-size:10px;font-weight:600;color:var(--text3);">⟳ Cargando…</span>
-    <button onclick="showKeyModal()" style="background:none;border:1px solid var(--border2);border-radius:20px;color:var(--text3);padding:3px 10px;font-size:10px;cursor:pointer;font-family:var(--sans);" title="Cambiar API key de Finnhub">🔑</button>
+    <div style="display:flex;align-items:center;gap:5px;">
+      <span id="keyStatus" style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;background:var(--red-bg);color:var(--red);">● Sin key</span>
+      <button onclick="showKeyModal()" style="background:none;border:1px solid var(--border2);border-radius:20px;color:var(--text3);padding:3px 10px;font-size:10px;cursor:pointer;font-family:var(--sans);" id="keyBtn" title="API key Finnhub">🔑</button>
+    </div>
     <span class="mkt-closed" id="mktStatus">● —</span>
     <span class="clock" id="clockEl">—</span>
   </div>
@@ -275,6 +278,17 @@ select.inp{cursor:pointer;}
 </div>
 
 <script>
+// ── IMMEDIATE KEY RESTORE — runs before anything else ────────────────────────
+(function(){
+  try {
+    const k = localStorage.getItem('finnhub_key') || sessionStorage.getItem('finnhub_key');
+    if (k && k.length > 8) {
+      window._fk = k;
+      console.log('✅ Finnhub key restored immediately:', k.substring(0,8)+'...');
+    }
+  } catch(e) { console.warn('Could not read key from storage:', e); }
+})();
+
 // ═══════════════════════════════════════════════════════════════
 // DATA
 // ═══════════════════════════════════════════════════════════════
@@ -313,7 +327,7 @@ let currentTicker='GOOG', newsFilter='all';
 function getKey(){
   // Always sync from localStorage to window._fk on every call
   if (!window._fk) {
-    const stored = localStorage.getItem('finnhub_key');
+    const stored = localStorage.getItem('finnhub_key') || sessionStorage.getItem('finnhub_key');
     if (stored && stored.length > 8) window._fk = stored;
   }
   return window._fk || '';
@@ -328,9 +342,24 @@ function saveKeyModal(){
   const err=document.getElementById('modalKeyError');
   if(!k||k.length<8){err.style.display='block';return;}
   err.style.display='none';
-  localStorage.setItem('finnhub_key',k);
+  try {
+    localStorage.setItem('finnhub_key',k);
+    // Verify it was saved
+    const test = localStorage.getItem('finnhub_key');
+    if (!test || test !== k) throw new Error('localStorage no guardó');
+  } catch(e) {
+    // localStorage blocked — store in sessionStorage as fallback
+    try { sessionStorage.setItem('finnhub_key',k); } catch(e2) {}
+    err.textContent = '⚠ Tu navegador bloquea el guardado. La key funcionará esta sesión pero deberás reingresarla al recargar.';
+    err.style.color = 'var(--yellow)';
+    err.style.display = 'block';
+  }
   window._fk=k;
   document.getElementById('keyModal').style.display='none';
+  const ks=document.getElementById('keyStatus');
+  if(ks){ ks.textContent='● Key activa'; ks.style.background='var(--green-bg)'; ks.style.color='var(--green)'; }
+  const kb=document.getElementById('keyBtn');
+  if(kb) kb.style.color='var(--green)';
   loadLivePrices();
 }
 function skipKeyModal(){
@@ -919,10 +948,15 @@ async function init(){
 
   // Show key modal ONLY if truly no key saved anywhere
   const _k = getKey();
+  const keyStatusEl = document.getElementById('keyStatus');
   if(!_k || _k.length < 8){
     document.getElementById('keyModal').style.display='flex';
+    document.getElementById('keyBtn').style.color='var(--red)';
+    if(keyStatusEl){ keyStatusEl.textContent='● Sin key'; keyStatusEl.style.background='var(--red-bg)'; keyStatusEl.style.color='var(--red)'; }
   } else {
     document.getElementById('keyModal').style.display='none';
+    document.getElementById('keyBtn').style.color='var(--green)';
+    if(keyStatusEl){ keyStatusEl.textContent='● Key activa'; keyStatusEl.style.background='var(--green-bg)'; keyStatusEl.style.color='var(--green)'; }
   }
 
   // Render UI shell immediately

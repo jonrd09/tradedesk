@@ -181,6 +181,71 @@ select.inp{cursor:pointer;}
   </div>
 </div>
 
+<!-- INSIDER TRADING MODAL -->
+<div class="key-modal" id="insiderModal" style="display:none;">
+  <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:var(--rl);padding:24px;width:900px;max-width:96vw;max-height:88vh;display:flex;flex-direction:column;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+      <div>
+        <div style="font-size:18px;font-weight:700;color:var(--purple);">👁 Insider Trading</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px;">Transacciones recientes de ejecutivos e insiders</div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <select id="insiderTickerFilter" class="inp" style="width:120px;font-size:13px;" onchange="filterInsiderTable()">
+          <option value="ALL">Todos</option>
+          <option value="TSLA">TSLA</option>
+          <option value="AAPL">AAPL</option>
+          <option value="MSFT">MSFT</option>
+          <option value="NVDA">NVDA</option>
+          <option value="AMD">AMD</option>
+          <option value="COIN">COIN</option>
+          <option value="AMZN">AMZN</option>
+          <option value="NFLX">NFLX</option>
+          <option value="META">META</option>
+          <option value="AVGO">AVGO</option>
+          <option value="MU">MU</option>
+          <option value="QCOM">QCOM</option>
+          <option value="GOOG">GOOG</option>
+          <option value="PLTR">PLTR</option>
+          <option value="UBER">UBER</option>
+          <option value="PYPL">PYPL</option>
+          <option value="CRM">CRM</option>
+          <option value="HOOD">HOOD</option>
+          <option value="UNH">UNH</option>
+          <option value="OKLO">OKLO</option>
+          <option value="URA">URA</option>
+          <option value="ORCL">ORCL</option>
+        </select>
+        <div style="display:flex;align-items:center;gap:6px;background:var(--bg3);border:1px solid var(--border);border-radius:20px;padding:3px 10px;">
+          <input type="checkbox" id="insiderAllTypes" onchange="filterInsiderTable()" style="cursor:pointer;">
+          <label for="insiderAllTypes" style="font-size:11px;color:var(--text2);cursor:pointer;">Mostrar todos</label>
+        </div>
+        <button onclick="loadInsiderData()" style="background:var(--blue-bg);border:1px solid var(--blue);border-radius:20px;color:var(--blue);padding:4px 12px;font-size:11px;font-weight:600;cursor:pointer;font-family:var(--sans);">↻ Actualizar</button>
+        <button onclick="document.getElementById('insiderModal').style.display='none'" style="background:none;border:none;color:var(--text3);font-size:20px;cursor:pointer;">✕</button>
+      </div>
+    </div>
+    <!-- Table -->
+    <div style="overflow-y:auto;flex:1;">
+      <table style="width:100%;border-collapse:collapse;font-size:12px;" id="insiderTable">
+        <thead>
+          <tr style="border-bottom:2px solid var(--border2);">
+            <th style="text-align:left;padding:8px 10px;color:var(--text3);font-size:10px;text-transform:uppercase;letter-spacing:.08em;white-space:nowrap;">Ticker</th>
+            <th style="text-align:left;padding:8px 10px;color:var(--text3);font-size:10px;text-transform:uppercase;letter-spacing:.08em;white-space:nowrap;">Insider</th>
+            <th style="text-align:left;padding:8px 10px;color:var(--text3);font-size:10px;text-transform:uppercase;letter-spacing:.08em;white-space:nowrap;">Relationship</th>
+            <th onclick="sortInsider('date')" style="text-align:left;padding:8px 10px;color:var(--text3);font-size:10px;text-transform:uppercase;letter-spacing:.08em;white-space:nowrap;cursor:pointer;">Date <span id="sort-date"></span></th>
+            <th style="text-align:center;padding:8px 10px;color:var(--text3);font-size:10px;text-transform:uppercase;letter-spacing:.08em;white-space:nowrap;">Transaction</th>
+            <th onclick="sortInsider('shares')" style="text-align:right;padding:8px 10px;color:var(--blue);font-size:10px;text-transform:uppercase;letter-spacing:.08em;white-space:nowrap;cursor:pointer;text-decoration:underline;"># Shares <span id="sort-shares">▼</span></th>
+            <th onclick="sortInsider('total')" style="text-align:right;padding:8px 10px;color:var(--text3);font-size:10px;text-transform:uppercase;letter-spacing:.08em;white-space:nowrap;cursor:pointer;">Shares Total <span id="sort-total"></span></th>
+          </tr>
+        </thead>
+        <tbody id="insiderTableBody">
+          <tr><td colspan="7" style="text-align:center;padding:30px;color:var(--text3);">Haz clic en ↻ Actualizar para cargar datos</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div style="margin-top:10px;font-size:10px;color:var(--text3);text-align:right;" id="insiderLastUpdate"></div>
+  </div>
+</div>
+
 <!-- PIN MODAL -->
 <div class="pin-modal" id="pinModal" style="display:none;">
   <div class="pin-box">
@@ -293,6 +358,11 @@ select.inp{cursor:pointer;}
   </div>
 
   <div style="display:flex;align-items:center;gap:10px;margin-left:auto;">
+    <!-- Insider Trading button -->
+    <button onclick="openInsiderModal()" 
+      style="background:rgba(167,139,250,.15);border:1px solid rgba(167,139,250,.4);border-radius:20px;color:var(--purple);padding:4px 14px;font-size:11px;font-weight:700;cursor:pointer;font-family:var(--sans);white-space:nowrap;">
+      👁 Insider Trading
+    </button>
     <span id="liveTag" style="font-size:10px;font-weight:600;color:var(--text3);">⟳ Cargando…</span>
     <div style="display:flex;align-items:center;gap:5px;">
       <span id="keyStatus" style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;background:var(--red-bg);color:var(--red);">● Sin key</span>
@@ -1589,6 +1659,144 @@ function calcTradeSize() {
   el.textContent = '$' + parseFloat(ten).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
   // Save to localStorage
   try { localStorage.setItem('paperBalance', bal); } catch(e) {}
+}
+
+// ═══════════════════════════════════════════════════════════════
+// INSIDER TRADING
+// ═══════════════════════════════════════════════════════════════
+const INSIDER_TICKERS = ['TSLA','AAPL','MSFT','NVDA','AMD','COIN','AMZN','NFLX','META','AVGO','MU','QCOM','GOOG','PLTR','UBER','PYPL','CRM','HOOD','UNH','OKLO','URA','ORCL'];
+let _insiderData = [];
+let _insiderSort = { col: 'shares', dir: -1 }; // default: # shares desc
+
+function openInsiderModal() {
+  document.getElementById('insiderModal').style.display = 'flex';
+  if(_insiderData.length === 0) loadInsiderData();
+}
+
+async function loadInsiderData() {
+  const key = getKey();
+  const tbody = document.getElementById('insiderTableBody');
+  if(!key || key.length < 8) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--yellow);">⚠ Configura tu API key de Finnhub primero</td></tr>';
+    return;
+  }
+  tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--text2);">⟳ Cargando datos de insiders…</td></tr>';
+  _insiderData = [];
+
+  // Fetch in batches of 4
+  for(let i=0; i<INSIDER_TICKERS.length; i+=4) {
+    const batch = INSIDER_TICKERS.slice(i, i+4);
+    await Promise.all(batch.map(async sym => {
+      try {
+        const url = `https://finnhub.io/api/v1/stock/insider-transactions?symbol=${sym}&token=${key}`;
+        const r = await fetch(url, {signal: AbortSignal.timeout(6000)});
+        if(!r.ok) return;
+        const d = await r.json();
+        if(d && d.data && d.data.length > 0) {
+          // Take last 5 transactions per ticker
+          d.data.slice(0,5).forEach(t => {
+            _insiderData.push({
+              sym,
+              name:   t.name        || '—',
+              title:  t.title       || '—',
+              date:   t.transactionDate || '—',
+              type:   t.transactionCode || '—',
+              shares: t.change      || 0,
+              total:  t.share       || 0,
+            });
+          });
+        }
+      } catch(e) {}
+    }));
+    if(i+4 < INSIDER_TICKERS.length) await new Promise(r=>setTimeout(r,200));
+  }
+
+  // Sort by date desc, filter only P and S
+  _insiderData.sort((a,b) => b.date.localeCompare(a.date));
+  _insiderData = _insiderData.filter(r => r.type === 'P' || r.type === 'S');
+
+  renderInsiderTable(_insiderData);
+  const upEl = document.getElementById('insiderLastUpdate');
+  if(upEl) upEl.textContent = 'Actualizado: ' + new Date().toLocaleTimeString('es-PR',{hour:'2-digit',minute:'2-digit',hour12:true}) + ' ET · ' + _insiderData.length + ' transacciones';
+}
+
+function filterInsiderTable() {
+  const filter  = document.getElementById('insiderTickerFilter')?.value || 'ALL';
+  const showAll = document.getElementById('insiderAllTypes')?.checked || false;
+  let filtered  = _insiderData;
+  if(!showAll) filtered = filtered.filter(r => r.type === 'P' || r.type === 'S');
+  if(filter !== 'ALL') filtered = filtered.filter(r => r.sym === filter);
+  renderInsiderTable(filtered);
+}
+
+function sortInsider(col) {
+  if(_insiderSort.col === col){
+    _insiderSort.dir *= -1; // toggle direction
+  } else {
+    _insiderSort.col = col;
+    _insiderSort.dir = col === 'shares' || col === 'total' || col === 'date' ? -1 : 1;
+  }
+  // Update header indicators
+  ['sym','name','date','type','shares','total'].forEach(c => {
+    const el = document.getElementById('sort-' + c);
+    if(!el) return;
+    if(c === _insiderSort.col) el.textContent = _insiderSort.dir === -1 ? '▼' : '▲';
+    else el.textContent = '';
+  });
+  // Update header color
+  document.querySelectorAll('#insiderTable th').forEach(th => th.style.color = 'var(--text3)');
+  filterInsiderTable();
+}
+
+function renderInsiderTable(data) {
+  // Apply sort
+  const col = _insiderSort.col;
+  const dir = _insiderSort.dir;
+  data = [...data].sort((a,b) => {
+    let av = a[col], bv = b[col];
+    if(col === 'shares' || col === 'total') { av = Math.abs(av||0); bv = Math.abs(bv||0); }
+    if(typeof av === 'string') return dir * av.localeCompare(bv);
+    return dir * ((av||0) - (bv||0));
+  });
+  const tbody = document.getElementById('insiderTableBody');
+  if(!data.length) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--text3);">Sin datos disponibles</td></tr>';
+    return;
+  }
+
+  // Transaction code map
+  const txMap = {
+    'P': {label:'Compra',    col:'var(--green)'},
+    'S': {label:'Venta',     col:'var(--red)'},
+    'A': {label:'Award',     col:'var(--blue)'},
+    'D': {label:'Donación',  col:'var(--yellow)'},
+    'F': {label:'Tax',       col:'var(--text3)'},
+    'G': {label:'Gift',      col:'var(--text3)'},
+    'I': {label:'Disposición',col:'var(--text3)'},
+    'M': {label:'Ejercicio', col:'var(--purple)'},
+  };
+
+  const colors = {TSLA:'#cc0000',AAPL:'#888',MSFT:'#00a4ef',NVDA:'#76b900',GOOG:'#4285f4',
+    AMD:'#ed1c24',COIN:'#0052ff',AMZN:'#ff9900',NFLX:'#e50914',META:'#1877f2',
+    AVGO:'#cc0000',MU:'#e60012',QCOM:'#3253dc',PLTR:'#7e6bff',UBER:'#000',
+    PYPL:'#003087',CRM:'#00a1e0',HOOD:'#00c805',UNH:'#002677',OKLO:'#00d17a',
+    URA:'#ffc234',ORCL:'#c74634'};
+
+  tbody.innerHTML = data.map(r => {
+    const tx  = txMap[r.type] || {label: r.type || '—', col:'var(--text2)'};
+    const col = colors[r.sym] || 'var(--text3)';
+    const sharesStr = r.shares ? (r.shares > 0 ? '+' : '') + r.shares.toLocaleString() : '—';
+    const totalStr  = r.total  ? r.total.toLocaleString() : '—';
+    return `<tr style="border-bottom:1px solid var(--border);" onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background=''">
+      <td style="padding:8px 10px;font-family:var(--mono);font-weight:700;color:${col};white-space:nowrap;">${r.sym}</td>
+      <td style="padding:8px 10px;color:var(--text);white-space:nowrap;">${r.name}</td>
+      <td style="padding:8px 10px;color:var(--text2);white-space:nowrap;font-size:11px;">${r.title}</td>
+      <td style="padding:8px 10px;color:var(--text3);font-family:var(--mono);font-size:11px;white-space:nowrap;">${r.date}</td>
+      <td style="padding:8px 10px;text-align:center;"><span style="background:${tx.col}22;color:${tx.col};border-radius:8px;padding:2px 8px;font-size:11px;font-weight:700;">${tx.label}</span></td>
+      <td style="padding:8px 10px;text-align:right;font-family:var(--mono);font-weight:700;color:${r.shares>0?'var(--green)':r.shares<0?'var(--red)':'var(--text2)'};">${sharesStr}</td>
+      <td style="padding:8px 10px;text-align:right;font-family:var(--mono);color:var(--text2);">${totalStr}</td>
+    </tr>`;
+  }).join('');
 }
 
 // ═══════════════════════════════════════════════════════════════

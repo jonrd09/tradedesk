@@ -87,6 +87,15 @@ select.inp{cursor:pointer;}
 /* API Key modal */
 .key-modal{position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;z-index:1000;}
 .key-box{background:var(--bg2);border:1px solid var(--border2);border-radius:var(--rl);padding:28px;width:420px;max-width:90vw;}
+/* Strike Log Modal */
+.strike-modal{position:fixed;inset:0;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;z-index:1000;}
+.strike-box{background:var(--bg2);border:1px solid var(--border2);border-radius:var(--rl);padding:24px;width:460px;max-width:95vw;}
+.strike-entry{display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px;}
+.strike-entry:last-child{border-bottom:none;}
+.strike-day{min-width:90px;color:var(--text2);}
+.strike-dist{font-family:var(--mono);font-weight:700;color:var(--blue);}
+.strike-avg-box{background:var(--bg3);border-radius:var(--r);padding:12px;text-align:center;margin-top:12px;}
+
 /* Rules popup */
 .rules-popup{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:linear-gradient(135deg,#0d1b2e,#111827);border:1px solid rgba(61,139,255,.4);border-radius:var(--rl);padding:28px 32px;z-index:2000;min-width:460px;max-width:90vw;box-shadow:0 20px 60px rgba(0,0,0,.7);}
 .rules-popup-title{font-size:18px;font-weight:700;color:var(--blue);text-align:center;font-family:var(--mono);letter-spacing:.08em;margin-bottom:16px;}
@@ -117,6 +126,39 @@ select.inp{cursor:pointer;}
 </head>
 <body>
 <div class="shell">
+
+<!-- STRIKE LOG MODAL -->
+<div class="strike-modal" id="strikeModal" style="display:none;">
+  <div class="strike-box">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+      <div>
+        <div style="font-size:18px;font-weight:700;color:#fff;" id="strikeModalTitle">📊 Strike Log — GOOG</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px;">Distancia Spot → Strike por día</div>
+      </div>
+      <button onclick="closeStrikeModal()" style="background:none;border:none;color:var(--text3);font-size:20px;cursor:pointer;">✕</button>
+    </div>
+    <!-- Entry form -->
+    <div style="display:flex;gap:8px;margin-bottom:14px;">
+      <select id="strikeDay" class="inp" style="flex:1.5;">
+        <option value="Lunes">Lunes</option>
+        <option value="Martes">Martes</option>
+        <option value="Miércoles">Miércoles</option>
+        <option value="Jueves">Jueves</option>
+        <option value="Viernes">Viernes</option>
+      </select>
+      <input type="number" id="strikeDist" class="inp" placeholder="Distancia (ej. 5)" min="0" max="100" step="0.5" style="flex:1;text-align:center;">
+      <button onclick="addStrikeEntry()" style="background:var(--blue);border:none;border-radius:var(--r);color:#fff;padding:0 16px;font-size:14px;font-weight:700;cursor:pointer;font-family:var(--sans);">+ Agregar</button>
+    </div>
+    <!-- Log entries -->
+    <div style="max-height:220px;overflow-y:auto;margin-bottom:10px;" id="strikeLogList"></div>
+    <!-- Average box -->
+    <div class="strike-avg-box" id="strikeAvgBox" style="display:none;">
+      <div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;">Promedio de distancia</div>
+      <div style="display:flex;justify-content:center;gap:24px;flex-wrap:wrap;" id="strikeAvgDetail"></div>
+      <div style="margin-top:8px;font-size:11px;color:var(--text3);" id="strikeAvgGlobal"></div>
+    </div>
+  </div>
+</div>
 
 <!-- PIN MODAL -->
 <div class="pin-modal" id="pinModal" style="display:none;">
@@ -284,19 +326,22 @@ select.inp{cursor:pointer;}
         </div>
       </div>
     </div>
-    <!-- Rangos de precio de contratos -->
+    <!-- Rangos de precio de contratos — click to open strike log -->
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:12px;">
-      <div style="background:var(--bg3);border-radius:var(--r);padding:12px 10px;border-left:2px solid #cc0000;text-align:center;">
+      <div onclick="openStrikeModal('TSLA','#cc0000')" style="background:var(--bg3);border-radius:var(--r);padding:12px 10px;border-left:2px solid #cc0000;text-align:center;cursor:pointer;transition:background .15s;" onmouseover="this.style.background='var(--bg4)'" onmouseout="this.style.background='var(--bg3)'">
         <div style="font-size:12px;font-weight:700;color:#cc0000;font-family:var(--mono);margin-bottom:5px;">TSLA</div>
         <div style="font-size:16px;font-weight:700;color:var(--text);font-family:var(--mono);">$80–$160</div>
+        <div id="avg-TSLA" style="font-size:15px;font-weight:700;font-family:var(--mono);color:#fff;margin-top:4px;">—</div>
       </div>
-      <div style="background:var(--bg3);border-radius:var(--r);padding:12px 10px;border-left:2px solid #4285f4;text-align:center;">
+      <div onclick="openStrikeModal('GOOG','#4285f4')" style="background:var(--bg3);border-radius:var(--r);padding:12px 10px;border-left:2px solid #4285f4;text-align:center;cursor:pointer;transition:background .15s;" onmouseover="this.style.background='var(--bg4)'" onmouseout="this.style.background='var(--bg3)'">
         <div style="font-size:12px;font-weight:700;color:#4285f4;font-family:var(--mono);margin-bottom:5px;">GOOG</div>
         <div style="font-size:16px;font-weight:700;color:var(--text);font-family:var(--mono);">$60–$140</div>
+        <div id="avg-GOOG" style="font-size:15px;font-weight:700;font-family:var(--mono);color:#fff;margin-top:4px;">—</div>
       </div>
-      <div style="background:var(--bg3);border-radius:var(--r);padding:12px 10px;border-left:2px solid #00a651;text-align:center;">
+      <div onclick="openStrikeModal('SPY','#00a651')" style="background:var(--bg3);border-radius:var(--r);padding:12px 10px;border-left:2px solid #00a651;text-align:center;cursor:pointer;transition:background .15s;" onmouseover="this.style.background='var(--bg4)'" onmouseout="this.style.background='var(--bg3)'">
         <div style="font-size:12px;font-weight:700;color:#00a651;font-family:var(--mono);margin-bottom:5px;">SPY</div>
         <div style="font-size:16px;font-weight:700;color:var(--text);font-family:var(--mono);">$30–$45</div>
+        <div id="avg-SPY" style="font-size:15px;font-weight:700;font-family:var(--mono);color:#fff;margin-top:4px;">—</div>
       </div>
     </div>
     <div class="inp-row">
@@ -1247,6 +1292,158 @@ async function loadRotation() {
 // ═══════════════════════════════════════════════════════════════
 
 // ═══════════════════════════════════════════════════════════════
+// STRIKE LOG
+// ═══════════════════════════════════════════════════════════════
+let _strikeTicker = 'GOOG';
+let _strikeColor  = '#4285f4';
+
+function updateCardAverages() {
+  ['TSLA','GOOG','SPY'].forEach(ticker => {
+    const el = document.getElementById('avg-' + ticker);
+    if (!el) return;
+    let log = [];
+    try{ log = JSON.parse(localStorage.getItem('strikelog_' + ticker)||'[]'); }catch(e){}
+    if (!log.length) { el.textContent = '—'; el.style.color = '#fff'; return; }
+    const avg = (log.reduce((a,b)=>a+b.dist,0)/log.length);
+    el.textContent = Math.round(avg);
+    el.style.color = avg > 0 ? 'var(--green)' : avg < 0 ? 'var(--red)' : '#fff';
+  });
+}
+
+function openStrikeModal(ticker, color) {
+  _strikeTicker = ticker;
+  _strikeColor  = color;
+  document.getElementById('strikeModalTitle').textContent = `📊 Strike Log — ${ticker}`;
+  document.getElementById('strikeModalTitle').style.color = color;
+  // Pre-select today's day
+  const days = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
+  const today = days[new Date().getDay()];
+  const sel = document.getElementById('strikeDay');
+  for(let i=0; i<sel.options.length; i++){
+    if(sel.options[i].value === today){ sel.selectedIndex=i; break; }
+  }
+  document.getElementById('strikeDist').value = '';
+  document.getElementById('strikeModal').style.display = 'flex';
+  renderStrikeLog();
+  setTimeout(()=>document.getElementById('strikeDist').focus(), 100);
+}
+
+function closeStrikeModal() {
+  document.getElementById('strikeModal').style.display = 'none';
+}
+
+function addStrikeEntry() {
+  const day  = document.getElementById('strikeDay').value;
+  const dist = parseFloat(document.getElementById('strikeDist').value);
+  if(!dist && dist !== 0) return;
+  const key  = 'strikelog_' + _strikeTicker;
+  let log = [];
+  try{ log = JSON.parse(localStorage.getItem(key)||'[]'); }catch(e){}
+  log.unshift({ day, dist, date: new Date().toLocaleDateString('es-PR') });
+  try{ localStorage.setItem(key, JSON.stringify(log)); }catch(e){}
+  document.getElementById('strikeDist').value = '';
+  renderStrikeLog();
+  updateCardAverages();
+}
+
+function editStrikeEntry(ticker, idx) {
+  const key = 'strikelog_' + ticker;
+  let log = [];
+  try{ log = JSON.parse(localStorage.getItem(key)||'[]'); }catch(e){}
+  const e = log[idx];
+  if(!e) return;
+
+  const el = document.getElementById('sentry-' + idx);
+  if(!el) return;
+
+  // Replace row with inline edit fields
+  const days = ['Lunes','Martes','Miércoles','Jueves','Viernes'];
+  const dayOpts = days.map(d => `<option value="${d}" ${d===e.day?'selected':''}>${d}</option>`).join('');
+
+  el.innerHTML = `
+    <select id="edit-day-${idx}" style="background:var(--bg4);border:1px solid var(--blue);border-radius:6px;color:var(--text);padding:3px 6px;font-size:12px;font-family:var(--sans);flex:1.2;">${dayOpts}</select>
+    <input type="number" id="edit-dist-${idx}" value="${e.dist}" step="0.5"
+      style="background:var(--bg4);border:1px solid var(--blue);border-radius:6px;color:var(--text);padding:3px 6px;font-size:12px;font-family:var(--mono);width:70px;text-align:center;">
+    <button onclick="saveStrikeEdit('${ticker}',${idx})"
+      style="background:var(--green);border:none;border-radius:6px;color:#001a0e;padding:3px 10px;font-size:12px;font-weight:700;cursor:pointer;">✓</button>
+    <button onclick="renderStrikeLog()"
+      style="background:none;border:1px solid var(--border);border-radius:6px;color:var(--text3);padding:3px 8px;font-size:12px;cursor:pointer;">✕</button>`;
+  document.getElementById('edit-dist-' + idx).focus();
+}
+
+function saveStrikeEdit(ticker, idx) {
+  const day  = document.getElementById('edit-day-'  + idx)?.value;
+  const dist = parseFloat(document.getElementById('edit-dist-' + idx)?.value);
+  if(!day || isNaN(dist)) return;
+  const key = 'strikelog_' + ticker;
+  let log = [];
+  try{ log = JSON.parse(localStorage.getItem(key)||'[]'); }catch(e){}
+  if(!log[idx]) return;
+  log[idx].day  = day;
+  log[idx].dist = dist;
+  try{ localStorage.setItem(key, JSON.stringify(log)); }catch(e){}
+  renderStrikeLog();
+  updateCardAverages();
+}
+
+function deleteStrikeEntry(ticker, idx) {
+  const key = 'strikelog_' + ticker;
+  let log = [];
+  try{ log = JSON.parse(localStorage.getItem(key)||'[]'); }catch(e){}
+  log.splice(idx, 1);
+  try{ localStorage.setItem(key, JSON.stringify(log)); }catch(e){}
+  renderStrikeLog();
+  updateCardAverages();
+}
+
+function renderStrikeLog() {
+  const key = 'strikelog_' + _strikeTicker;
+  let log = [];
+  try{ log = JSON.parse(localStorage.getItem(key)||'[]'); }catch(e){}
+
+  const listEl = document.getElementById('strikeLogList');
+  const avgBox = document.getElementById('strikeAvgBox');
+  const avgDet = document.getElementById('strikeAvgDetail');
+  const avgGlb = document.getElementById('strikeAvgGlobal');
+
+  if(!log.length){
+    listEl.innerHTML = `<div style="text-align:center;padding:20px;color:var(--text3);font-size:12px;">Sin entradas aún — agrega tu primer registro</div>`;
+    avgBox.style.display = 'none';
+    return;
+  }
+
+  // Render entries
+  listEl.innerHTML = log.map((e,i) => `
+    <div class="strike-entry" id="sentry-${i}">
+      <span class="strike-day" style="font-size:14px;color:var(--text);min-width:80px;font-weight:600">${e.day}</span>
+      <span style="font-size:13px;color:var(--text2);flex:1;">${e.date}</span>
+      <span style="font-size:15px;font-family:var(--mono);font-weight:700;color:${_strikeColor};">${e.dist > 0 ? '+' : ''}${e.dist}</span>
+      <button onclick="editStrikeEntry('${_strikeTicker}',${i})" style="background:none;border:none;color:var(--blue);cursor:pointer;font-size:11px;padding:0 4px;" title="Editar">✏️</button>
+      <button onclick="deleteStrikeEntry('${_strikeTicker}',${i})" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:12px;padding:0 4px;" title="Eliminar">✕</button>
+    </div>`).join('');
+
+  // Calculate averages by day
+  const byDay = {};
+  log.forEach(e => {
+    if(!byDay[e.day]) byDay[e.day] = [];
+    byDay[e.day].push(e.dist);
+  });
+  const dayOrder = ['Lunes','Martes','Miércoles','Jueves','Viernes'];
+  avgDet.innerHTML = dayOrder
+    .filter(d => byDay[d])
+    .map(d => {
+      const avg = (byDay[d].reduce((a,b)=>a+b,0)/byDay[d].length).toFixed(1);
+      return `<div style="text-align:center;"><div style="font-size:12px;color:var(--text);font-weight:600">${d}</div><div style="font-size:20px;font-weight:700;font-family:var(--mono);color:${_strikeColor}">${avg > 0 ? '+' : ''}${avg}</div><div style="font-size:11px;color:var(--text3)">${byDay[d].length} registro${byDay[d].length>1?'s':''}</div></div>`;
+    }).join('');
+
+  // Global average
+  const all = log.map(e=>e.dist);
+  const globalAvg = (all.reduce((a,b)=>a+b,0)/all.length).toFixed(1);
+  avgGlb.innerHTML = `<span style='font-size:13px;color:var(--text)'>Promedio global: <strong style='font-size:16px;font-family:var(--mono);color:${_strikeColor}'>${globalAvg > 0 ? '+' : ''}${globalAvg}</strong> lugares · ${log.length} registro${log.length>1?'s':''}</span>`;
+  avgBox.style.display = 'block';
+}
+
+// ═══════════════════════════════════════════════════════════════
 // PAPER TRADING BALANCE CALCULATOR
 // ═══════════════════════════════════════════════════════════════
 function calcTradeSize() {
@@ -1281,6 +1478,9 @@ async function init(){
   if(_sid) window._schwabId  = _sid;
   if(_sec) window._schwabSec = _sec;
   updateSchwabStatus();
+
+  // Update card averages from saved logs
+  updateCardAverages();
 
   // Restore paper balance
   const _pb = localStorage.getItem('paperBalance');

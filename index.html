@@ -865,7 +865,12 @@ async function loadLivePrices(){
   const key=getKey();
   if(!key||key.length<8)return;
   const syms=['GOOG','TSLA'];
-  const results=await Promise.all(syms.map(s=>fetchQuote(s).catch(()=>null)));
+  // Sequential to avoid rate limit
+  const results=[];
+  for(const s of syms){
+    results.push(await fetchQuote(s).catch(()=>null));
+    await new Promise(r=>setTimeout(r,200));
+  }
   syms.forEach((sym,i)=>{
     const q=results[i];
     if(!q)return;
@@ -910,7 +915,7 @@ async function fetchCandles(sym,resolution,bars){
   const ck=`${sym}_${resolution}`;
   const cached=_candleCache[ck];
   const now=Math.floor(Date.now()/1000);
-  if(cached&&(now-cached.ts)<300)return cached.data;
+  if(cached&&(now-cached.ts)<600)return cached.data;
   const to=now,from=to-bars*(resolution==='60'?3600:resolution==='D'?86400:900)*3;
   const url=`https://finnhub.io/api/v1/stock/candle?symbol=${sym}&resolution=${resolution}&from=${from}&to=${to}&token=${key}`;
   try{
@@ -1035,24 +1040,27 @@ async function buildSignals(){
       }catch(e){addLog('warn','Schwab',`${sym} señales error`,e.message);}
     }
 
-    // Finnhub fallback
+    // Finnhub fallback — secuencial con delay para no exceder rate limit (60 req/min)
     if(!ohlc1h){
       try{
         const r=await Promise.race([fetchCandles(sym,'60',50),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),5000))]);
         if(r&&closes(r).length>=10){ohlc1h=r;dataLabel='📡 Finnhub';}
       }catch(e){}
+      await new Promise(r=>setTimeout(r,300));
     }
     if(!ohlc15){
       try{
         const r=await Promise.race([fetchCandles(sym,'15',50),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),5000))]);
         if(r&&closes(r).length>=5)ohlc15=r;
       }catch(e){}
+      await new Promise(r=>setTimeout(r,300));
     }
     if(!ohlcD){
       try{
         const r=await Promise.race([fetchCandles(sym,'D',30),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),5000))]);
         if(r&&closes(r).length>=20)ohlcD=r;
       }catch(e){}
+      await new Promise(r=>setTimeout(r,300));
     }
 
     // Sin datos reales en cualquier timeframe = no evaluar señales
@@ -1325,10 +1333,12 @@ async function buildMomentum(){
   for(const[sym,info]of Object.entries(MOM_STOCKS)){
     const base=info.price;
     let pDay=null,p1h=null;
-    try{[pDay,p1h]=await Promise.race([
-      Promise.all([fetchCandles(sym,'D',60),fetchCandles(sym,'60',48)]),
-      new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),3000))
-    ]);}catch(e){}
+    try{
+      pDay=await Promise.race([fetchCandles(sym,'D',60),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),4000))]);
+      await new Promise(r=>setTimeout(r,250));
+      p1h=await Promise.race([fetchCandles(sym,'60',48),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),4000))]);
+      await new Promise(r=>setTimeout(r,250));
+    }catch(e){}
     if(!pDay||closes(pDay).length<20){const s=genCandles(base,60,.012);pDay={c:s,h:s,l:s,o:s};}
     if(!p1h||closes(p1h).length<10){const s=genCandles(base,48,.005);p1h={c:s,h:s,l:s,o:s};}
     const _cd=closes(pDay),_c1=closes(p1h);
@@ -1402,7 +1412,7 @@ async function loadRotation(){
         const res=await Promise.all(batch.map(s=>fetchRotationQuote(s).catch(()=>null)));
         batch.forEach((s,j)=>{if(res[j])quotes[s]=res[j];});
       }catch(e){}
-      if(i+6<allSyms.length)await new Promise(r=>setTimeout(r,150));
+      if(i+6<allSyms.length)await new Promise(r=>setTimeout(r,600));
     }
   }
   const indEl=document.getElementById('rotIndices');
@@ -1808,10 +1818,12 @@ async function init(){
   // Load data
   if(_k&&_k.length>8){
     await loadLivePrices();
+    // Delay rotation load to avoid rate limit burst on startup
+    setTimeout(()=>loadRotation(),3000);
   }else{
-    buildSignals();
-    buildMomentum();
-    loadRotation();
+    // No key — don't make any API calls
+    document.getElementById('signalArea').innerHTML='<div style="text-align:center;padding:30px;color:var(--text2);font-size:13px;"><div style="font-size:28px;margin-bottom:10px">🔑</div><div style="font-weight:600;">Configura tu API key</div><div style="font-size:11px;margin-top:6px;color:var(--text3)">Haz clic en el botón Finnhub en el topbar</div></div>';
+    document.getElementById('momentumArea').innerHTML='<div style="text-align:center;padding:20px;color:var(--text3);font-size:12px;">Requiere API key</div>';
   }
 
   // Show rules popup on first load

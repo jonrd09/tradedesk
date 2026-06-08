@@ -735,9 +735,7 @@ function genCandles(base,n,vol){
 const _candleCache={};
 async function fetchCandles(sym,resolution,bars){
   const key=getKey();if(!key||key.length<8)return null;
-  const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
-  const d=et.getDay(),h=et.getHours(),m=et.getMinutes();
-  if(!(d>=1&&d<=5&&(h>8||(h===8&&m>=30))&&h<16))return null;
+  // Note: Finnhub returns last available data even outside market hours
   const ck=`${sym}_${resolution}`;
   const cached=_candleCache[ck];
   const now=Math.floor(Date.now()/1000);
@@ -762,113 +760,124 @@ async function fetchCandles(sym,resolution,bars){
 // ═══════════════════════════════════════════════════════════════
 async function buildSignals(){
   const area=document.getElementById('signalArea');
-  area.innerHTML='<div style="text-align:center;padding:20px;color:var(--text2);font-size:13px;">⟳ Calculando señales…</div>';
+  area.innerHTML='<div style="text-align:center;padding:20px;color:var(--text2);font-size:13px;">⟳ Obteniendo velas reales…</div>';
   const all=[];
+
   for(const sym of['GOOG','TSLA']){
-    const base=DEFAULTS[sym].price,pct=DEFAULTS[sym].pct;
-    let p1h=null,p15m=null,dataLabel='⚠️ Simulado';
-    // Try Schwab first
+    const base=DEFAULTS[sym].price, pct=DEFAULTS[sym].pct;
+    let p1h=null, dataLabel='⚠️ Simulado';
+
+    // ── 1. Try Schwab (30min candles as 1H proxy) ──────────────────────────
     const schwabToken=await getSchwabToken();
     if(schwabToken){
       try{
-        // Schwab: 60min not supported, use 30min as proxy; 15min with 1 day
-      [p1h,p15m]=await Promise.race([
-          Promise.all([fetchSchwabCandles(sym,'day',10,'minute',30),fetchSchwabCandles(sym,'day',1,'minute',15)]),
-          new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),5000))
+        const result=await Promise.race([
+          fetchSchwabCandles(sym,'day',10,'minute',30),
+          new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),6000))
         ]);
-        if(p1h&&p15m)dataLabel='📡 Schwab Live';
-      }catch(e){}
+        if(result&&result.length>=10){p1h=result;dataLabel='📡 Schwab Live';}
+      }catch(e){console.warn('Schwab signals error:',sym,e.message);}
     }
-    // Fallback: Finnhub
-    if(!p1h||!p15m){
+
+    // ── 2. Fallback: Finnhub 1H ───────────────────────────────────────────
+    if(!p1h){
       try{
-        const[r1h,r15m]=await Promise.race([
-          Promise.all([fetchCandles(sym,'60',24),fetchCandles(sym,'15',10)]),
-          new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),3000))
+        const result=await Promise.race([
+          fetchCandles(sym,'60',24),
+          new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),4000))
         ]);
-        if(r1h&&r15m){p1h=r1h;p15m=r15m;dataLabel='📡 Finnhub';}
+        if(result&&result.length>=10){p1h=result;dataLabel='📡 Finnhub';}
       }catch(e){}
     }
-    // Simulated fallback
-    if(!p1h)p1h=genCandles(base,24,.005);
-    if(!p15m)p15m=genCandles(base,10,.0025);
 
-    const ma20_1h=sma(p1h,Math.min(20,p1h.length-1)),ma40_1h=sma(p1h,Math.min(40,p1h.length-1));
-    const bb1h=bollinger(p1h),bb15m=bollinger(p15m);
-    const lP1h=p1h.slice(-1)[0],lP15m=p15m.slice(-1)[0];
-    const lMid1h=bb1h.mid.filter(v=>v!=null).slice(-1)[0];
-    const lUp1h=bb1h.upper.filter(v=>v!=null).slice(-1)[0];
-    const lLow1h=bb1h.lower.filter(v=>v!=null).slice(-1)[0];
+    // ── 3. Final fallback: simulated ──────────────────────────────────────
+    if(!p1h){p1h=genCandles(base,24,.005);dataLabel='⚠️ Simulado';}
 
-    const lMA20=ma20_1h.filter(v=>v!=null).slice(-1)[0];
-    const lMA40=ma40_1h.filter(v=>v!=null).slice(-1)[0];
-    const bbW1h=lMid1h?(lUp1h-lLow1h)/lMid1h*100:0;
-    const r1h=rsi(p1h);
-    const lRSI1h=r1h.slice(-1)[0]||50;
-    const meta={sym,price:base,pct,lRSI1h,bbW1h,dataLabel,name:DEFAULTS[sym].name};
+    // ── Calculate indicators ──────────────────────────────────────────────
+    const n=p1h.length;
+    const ma20=sma(p1h,Math.min(20,n-1));
+    const ma40=sma(p1h,Math.min(40,n-1));
+    const bb  =bollinger(p1h);
+    const rsiv=rsi(p1h);
+
+    const lP   =p1h[n-1];
+    const pP   =p1h[n-2]||lP;
+    const lMA20=ma20.filter(v=>v!=null).slice(-1)[0]||lP;
+    const lMA40=ma40.filter(v=>v!=null).slice(-1)[0]||lP;
+    const lMid =bb.mid.filter(v=>v!=null).slice(-1)[0]||lP;
+    const lUp  =bb.upper.filter(v=>v!=null).slice(-1)[0]||lP;
+    const lLow =bb.lower.filter(v=>v!=null).slice(-1)[0]||lP;
+    const bbW  =lMid?(lUp-lLow)/lMid*100:0;
+    const lRSI =rsiv.slice(-1)[0]||50;
+
+    const meta={sym,price:base,pct,lRSI1h:lRSI,bbW1h:bbW,dataLabel,name:DEFAULTS[sym].name};
+
     all.push({...meta,code:'E1',name:'Cambio de Tendencia al ALZA',type:'call',reqs:[
-      {ok:lMA20>lMA40,tf:'1H',text:'Tendencia alcista: MA20 > MA40'},
-      {ok:lP1h>lMA20&&p1h.slice(-2)[0]<=lMA20,tf:'1H',text:'Precio rompe MA20 con vela alcista'},
-      {ok:bbW1h>3,tf:'1H',text:`Volatilidad BB activa (${bbW1h.toFixed(1)}%)`},
-      {ok:lRSI1h>50,tf:'1H',text:`RSI 1H sobre 50 (${lRSI1h.toFixed(1)})`},
+      {ok:lMA20>lMA40,       tf:'1H',text:'Tendencia alcista: MA20 > MA40'},
+      {ok:lP>lMA20&&pP<=lMA20,tf:'1H',text:'Precio rompe MA20 con vela alcista'},
+      {ok:bbW>3,             tf:'1H',text:`Volatilidad BB activa (${bbW.toFixed(1)}%)`},
+      {ok:lRSI>50,           tf:'1H',text:`RSI 1H sobre 50 (${lRSI.toFixed(1)})`},
     ]});
     all.push({...meta,code:'E2',name:'Cambio de Tendencia a la BAJA',type:'put',reqs:[
-      {ok:lMA20<lMA40,tf:'1H',text:'Tendencia bajista: MA20 < MA40'},
-      {ok:lP1h<lMA20&&p1h.slice(-2)[0]>=lMA20,tf:'1H',text:'Precio rompe MA20 con vela bajista'},
-      {ok:bbW1h>3,tf:'1H',text:`Volatilidad BB activa (${bbW1h.toFixed(1)}%)`},
-      {ok:lRSI1h<50,tf:'1H',text:`RSI 1H bajo 50 (${lRSI1h.toFixed(1)})`},
+      {ok:lMA20<lMA40,       tf:'1H',text:'Tendencia bajista: MA20 < MA40'},
+      {ok:lP<lMA20&&pP>=lMA20,tf:'1H',text:'Precio rompe MA20 con vela bajista'},
+      {ok:bbW>3,             tf:'1H',text:`Volatilidad BB activa (${bbW.toFixed(1)}%)`},
+      {ok:lRSI<50,           tf:'1H',text:`RSI 1H bajo 50 (${lRSI.toFixed(1)})`},
     ]});
   }
+
   const active=all.map(s=>({...s,passed:s.reqs.filter(r=>r.ok).length})).filter(s=>s.passed>=2).sort((a,b)=>b.passed-a.passed);
+
   if(!active.length){
-    area.innerHTML='<div style="text-align:center;padding:30px;color:var(--text2);font-size:13px;"><div style="font-size:28px;margin-bottom:10px">📊</div><div style="font-weight:600;">Sin señales activas</div><div style="font-size:11px;margin-top:6px;color:var(--text3)">Ninguna estrategia cumple ≥2 requisitos</div></div>';
+    area.innerHTML='<div style="text-align:center;padding:30px;color:var(--text2);font-size:13px;"><div style="font-size:28px;margin-bottom:10px">📊</div><div style="font-weight:600;">Sin señales activas</div><div style="font-size:11px;margin-top:6px;color:var(--text3)">Ninguna estrategia cumple ≥2 requisitos en 1H</div></div>';
     return;
   }
-  const sigCount=active.length;
-  const calls=active.filter(s=>s.type==='call').length,puts=active.filter(s=>s.type==='put').length;
+
+  const calls=active.filter(s=>s.type==='call').length;
+  const puts =active.filter(s=>s.type==='put').length;
   let dir='',dirCol='var(--text2)';
-  if(calls>0&&puts===0){dir=`🚀 SOLO CALL — tendencia alcista`;dirCol='var(--green)';}
-  else if(puts>0&&calls===0){dir=`🔻 SOLO PUT — tendencia bajista`;dirCol='var(--red)';}
+  if(calls>0&&puts===0){dir='🚀 SOLO CALL — tendencia alcista';dirCol='var(--green)';}
+  else if(puts>0&&calls===0){dir='🔻 SOLO PUT — tendencia bajista';dirCol='var(--red)';}
   else{dir=`⚡ MIXTO — ${calls} CALL · ${puts} PUT · revisar tendencia`;dirCol='var(--yellow)';}
+
   let html=`<div style="text-align:center;padding:10px 0;border-bottom:1px solid var(--border);margin-bottom:12px;">
-    <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:4px;">SEÑALES ACTIVAS — E1 · E2 · E7 · E8</div>
-    <div style="font-family:var(--mono);font-size:32px;font-weight:700;color:#fff;">${sigCount}</div>
-    <div style="font-size:12px;color:${dirCol};margin-top:4px;">⚡ ${dir}</div>
+    <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:4px;">SEÑALES ACTIVAS — E1 · E2</div>
+    <div style="font-family:var(--mono);font-size:32px;font-weight:700;color:#fff;">${active.length}</div>
+    <div style="font-size:12px;color:${dirCol};margin-top:4px;">${dir}</div>
   </div>`;
+
   active.forEach(s=>{
     const disp=Math.round(s.passed/4*100);
+    const col=disp>=75?'var(--green)':disp>=50?'var(--yellow)':'var(--red)';
     const hdr=s.type==='call'?'sig-call':'sig-put';
-    const high=s.passed>=3;
     html+=`<div class="sig-card" style="margin-bottom:10px;">
       <div class="sig-hdr ${hdr}">
         <div>
           <div style="display:flex;align-items:center;gap:6px;">
             <span style="font-family:var(--mono);font-size:17px;font-weight:700;color:#fff">${s.sym}</span>
-            ${high?'<span class="badge">★ ALTA</span>':''}
+            ${s.passed>=3?'<span class="badge">★ ALTA</span>':''}
             <span class="badge">${s.type.toUpperCase()} · ${s.code}</span>
           </div>
-          <div style="font-size:11px;color:rgba(255,255,255,.75);margin-top:3px;">${s.name} · $${s.price.toFixed(2)} (${s.pct>=0?'+':''}${s.pct.toFixed(2)}%)</div>
-          <div style="font-size:10px;color:rgba(255,255,255,.6);margin-top:2px;">${s.dataLabel||'⚠️ Simulado'}</div>
+          <div style="font-size:11px;color:rgba(255,255,255,.75);margin-top:2px;">${s.name} · $${s.price.toFixed(2)} (${s.pct>=0?'+':''}${s.pct.toFixed(2)}%)</div>
+          <div style="font-size:10px;color:rgba(255,255,255,.6);margin-top:1px;">${s.dataLabel}</div>
         </div>
         <div style="font-family:var(--mono);font-size:22px;font-weight:700;color:#fff">${disp}%</div>
       </div>
       <div class="sig-body">
-        <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;">
-          ${s.reqs.filter(r=>r.ok).length>=3?'<span style="background:rgba(61,139,255,.2);color:var(--blue);border-radius:8px;padding:2px 8px;font-size:10px;font-weight:700;">✓ '+s.reqs.filter(r=>r.ok).length+'/4 confirmados</span>':''}
-        </div>
         ${s.reqs.map(r=>`<div class="sig-req">
           <span style="font-size:13px;flex-shrink:0">${r.ok?'✅':'❌'}</span>
-          <span style="font-size:12px;font-weight:700;min-width:28px;color:${r.tf==='1H'?'var(--blue)':'var(--purple)'}">${r.tf}</span>
+          <span style="font-size:12px;font-weight:700;min-width:28px;color:var(--blue)">${r.tf}</span>
           <span style="color:${r.ok?'var(--text)':'var(--text3)'};font-size:13px">${r.text}</span>
         </div>`).join('')}
-        <div style="font-size:11px;color:var(--text3);margin-top:6px;">RSI1H: <span style="color:var(--yellow)">${s.lRSI1h.toFixed(1)}</span> · RSI15m: <span style="color:var(--yellow)">${s.lRSI15m.toFixed(1)}</span> · BBW: <span style="color:var(--green)">${s.bbW1h.toFixed(1)}%</span></div>
-        <div style="height:3px;background:var(--bg4);border-radius:2px;margin-top:7px;overflow:hidden;"><div style="height:100%;width:${disp}%;background:${disp>=75?'var(--green)':disp>=50?'var(--yellow)':'var(--red)'};border-radius:2px;"></div></div>
+        <div style="font-size:11px;color:var(--text3);margin-top:6px;">RSI 1H: <span style="color:var(--yellow)">${s.lRSI1h.toFixed(1)}</span> · BBW: <span style="color:var(--green)">${s.bbW1h.toFixed(1)}%</span></div>
+        <div style="height:3px;background:var(--bg4);border-radius:2px;margin-top:6px;overflow:hidden;"><div style="height:100%;width:${disp}%;background:${col};border-radius:2px;"></div></div>
         <div style="text-align:right;font-size:11px;color:var(--text3);margin-top:3px;">${s.passed}/4 requisitos · ${disp}% confianza</div>
       </div>
     </div>`;
   });
   area.innerHTML=html;
 }
+
 
 // ═══════════════════════════════════════════════════════════════
 // MOMENTUM SCANNER

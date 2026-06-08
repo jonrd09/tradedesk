@@ -704,62 +704,6 @@ async function handleSchwabCallback() {
   }
 }
 
-async function getSchwabToken() {
-  const token  = localStorage.getItem('schwab_access_token');
-  const expiry = parseInt(localStorage.getItem('schwab_token_expiry') || 0);
-  if(token && Date.now() < expiry) return token;
-  // Try refresh
-  const refresh = localStorage.getItem('schwab_refresh_token');
-  const secret  = localStorage.getItem('schwab_client_secret') || window._schwabSec || '';
-  if(!refresh || !secret) return null;
-  try {
-    const credentials = btoa(SCHWAB_CLIENT_ID + ':' + secret);
-    const resp = await fetch('https://api.schwabapi.com/v1/oauth/token', {
-      method: 'POST',
-      headers: { 'Authorization': 'Basic ' + credentials, 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refresh })
-    });
-    if(!resp.ok) return null;
-    const data = await resp.json();
-    localStorage.setItem('schwab_access_token',  data.access_token);
-    localStorage.setItem('schwab_token_expiry',  Date.now() + (data.expires_in||1800)*1000);
-    return data.access_token;
-  } catch(e) { return null; }
-}
-
-async function fetchSchwabCandles(sym, periodType, period, freqType, freq) {
-  const token = await getSchwabToken();
-  if(!token) return null;
-  try {
-    const url = `${SCHWAB_API_BASE}/pricehistory?symbol=${sym}&periodType=${periodType}&period=${period}&frequencyType=${freqType}&frequency=${freq}&needExtendedHoursData=false`;
-    const r = await fetch(url, {
-      headers: { 'Authorization': 'Bearer ' + token },
-      signal: AbortSignal.timeout(6000)
-    });
-    if(!r.ok) return null;
-    const data = await r.json();
-    if(!data.candles || !data.candles.length) return null;
-    // Return close prices
-    return data.candles.slice(-50).map(c => c.close);
-  } catch(e) { return null; }
-}
-
-function getCookie(name){
-    const v=document.cookie.split(';').find(c=>c.trim().startsWith(name+'='));
-    return v?decodeURIComponent(v.trim().split('=')[1].trim()):'';
-  }
-  try {
-    const k = getCookie('fk') || localStorage.getItem('finnhub_key') || sessionStorage.getItem('finnhub_key');
-    if(k && k.length > 8){
-      window._fk = k;
-      // Re-save to all storage to ensure persistence
-      try{ localStorage.setItem('finnhub_key',k); }catch(e){}
-      try{ sessionStorage.setItem('finnhub_key',k); }catch(e){}
-      // Set cookie that expires in 365 days
-      document.cookie = 'fk='+encodeURIComponent(k)+';max-age='+365*24*3600+';path=/;SameSite=Lax';
-    }
-  } catch(e) {}
-})();
 
 // ═══════════════════════════════════════════════════════════════
 // DATA
@@ -2191,6 +2135,7 @@ async function init(){
       showRulesPopup();
     }
   },5*60*1000);
+}1000);
 }
 init();
 </script>

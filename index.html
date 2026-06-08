@@ -377,11 +377,12 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
       <button onclick="closeStrikeModal()" style="background:none;border:none;color:var(--text3);font-size:20px;cursor:pointer;">✕</button>
     </div>
     <div style="font-size:11px;color:var(--text3);margin-bottom:10px;">Distancia Spot → Strike por día</div>
-    <div style="display:flex;gap:8px;margin-bottom:12px;">
-      <select id="strikeDay" class="inp" style="flex:1.5;">
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
+      <select id="strikeDay" class="inp" style="flex:1.5;min-width:100px;">
         <option>Lunes</option><option>Martes</option><option>Miércoles</option><option>Jueves</option><option>Viernes</option>
       </select>
-      <input type="number" id="strikeDist" class="inp" placeholder="Distancia (ej. 5)" min="0" max="100" step="0.5" style="flex:1;text-align:center;">
+      <input type="number" id="strikeCosto" class="inp" placeholder="Costo $" min="0" step="0.01" style="flex:1;text-align:center;min-width:80px;">
+      <input type="number" id="strikeDist" class="inp" placeholder="Lugares" min="-50" max="100" step="0.5" style="flex:1;text-align:center;min-width:70px;">
       <button onclick="addStrikeEntry()" style="background:var(--blue);border:none;border-radius:var(--r);color:#fff;padding:0 14px;font-size:14px;font-weight:700;cursor:pointer;">+ Agregar</button>
     </div>
     <div style="max-height:200px;overflow-y:auto;margin-bottom:10px;" id="strikeLogList"></div>
@@ -597,15 +598,22 @@ async function getSchwabToken(){
 }
 async function fetchSchwabCandles(sym,periodType,period,freqType,freq){
   const token=await getSchwabToken();
-  if(!token)return null;
+  if(!token){console.warn('Schwab: no token');return null;}
   try{
     const url=`${SCHWAB_API_BASE}/pricehistory?symbol=${sym}&periodType=${periodType}&period=${period}&frequencyType=${freqType}&frequency=${freq}&needExtendedHoursData=false`;
+    console.log('Schwab fetch:', sym, url.substring(0,80));
     const r=await fetch(url,{headers:{'Authorization':'Bearer '+token},signal:AbortSignal.timeout(6000)});
-    if(!r.ok)return null;
+    console.log('Schwab response:', sym, r.status);
+    if(!r.ok){
+      const err=await r.text().catch(()=>'');
+      console.warn('Schwab error:', sym, r.status, err.substring(0,100));
+      return null;
+    }
     const d=await r.json();
-    if(!d.candles||!d.candles.length)return null;
+    if(!d.candles||!d.candles.length){console.warn('Schwab: no candles for',sym,d);return null;}
+    console.log('Schwab OK:', sym, d.candles.length, 'candles');
     return d.candles.slice(-50).map(c=>c.close);
-  }catch(e){return null;}
+  }catch(e){console.warn('Schwab fetch error:',sym,e.message);return null;}
 }
 function updateSchwabStatus(){
   const token=localStorage.getItem('schwab_access_token')||'';
@@ -1111,22 +1119,25 @@ function loadStrikeFundamentals(ticker){
 function updateRecomLabel(){
   const val=parseFloat(document.getElementById('strikeRecom')?.value);
   const el=document.getElementById('recomLabel');if(!el)return;
-  if(isNaN(val)){el.textContent='—';el.style.color='var(--text2)';return;}
-  let label,col;
-  if(val<=2.00){label='✅ Recomendable';col='var(--green)';}
-  else if(val<=2.50){label='⚠️ Con precaución';col='var(--yellow)';}
-  else{label='🚫 No recomendable';col='var(--red)';}
+  if(isNaN(val)){el.textContent='—';el.style.color='var(--text2)';el.style.background='none';el.style.padding='0';return;}
+  let label,col,bg,bdr;
+  if(val<=2.00){label='✅ Recomendable';col='var(--green)';bg='var(--green-bg)';bdr='rgba(0,209,122,.3)';}
+  else if(val<=2.50){label='⚠️ Precaución';col='var(--yellow)';bg='var(--yellow-bg)';bdr='rgba(255,194,52,.3)';}
+  else{label='🚫 No recomendable';col='var(--red)';bg='var(--red-bg)';bdr='rgba(255,77,109,.3)';}
   el.textContent=label;el.style.color=col;el.style.fontWeight='700';
+  el.style.background=bg;el.style.border='1px solid '+bdr;el.style.borderRadius='8px';el.style.padding='2px 8px';
 }
 function addStrikeEntry(){
   const day=document.getElementById('strikeDay').value;
   const dist=parseFloat(document.getElementById('strikeDist').value);
+  const costo=parseFloat(document.getElementById('strikeCosto').value)||0;
   if(!dist&&dist!==0)return;
   const key='strikelog_'+_strikeTicker;
   let log=[];try{log=JSON.parse(localStorage.getItem(key)||'[]');}catch(e){}
-  log.unshift({day,dist,date:new Date().toLocaleDateString('es-PR')});
+  log.unshift({day,dist,costo,date:new Date().toLocaleDateString('es-PR')});
   try{localStorage.setItem(key,JSON.stringify(log));}catch(e){}
   document.getElementById('strikeDist').value='';
+  document.getElementById('strikeCosto').value='';
   renderStrikeLog();updateCardAverages();
 }
 function deleteStrikeEntry(ticker,idx){
@@ -1142,8 +1153,9 @@ function editStrikeEntry(ticker,idx){
   const el=document.getElementById('sentry-'+idx);if(!el)return;
   const days=['Lunes','Martes','Miércoles','Jueves','Viernes'];
   const opts=days.map(d=>`<option value="${d}" ${d===e.day?'selected':''}>${d}</option>`).join('');
-  el.innerHTML=`<select id="ed-${idx}" style="background:var(--bg4);border:1px solid var(--blue);border-radius:6px;color:var(--text);padding:3px 6px;font-size:12px;flex:1.2;">${opts}</select>
-    <input type="number" id="ev-${idx}" value="${e.dist}" step="0.5" style="background:var(--bg4);border:1px solid var(--blue);border-radius:6px;color:var(--text);padding:3px 6px;font-size:12px;width:70px;text-align:center;">
+  el.innerHTML=`<select id="ed-${idx}" style="background:var(--bg4);border:1px solid var(--blue);border-radius:6px;color:var(--text);padding:3px 6px;font-size:12px;flex:1;">${opts}</select>
+    <input type="number" id="ec-${idx}" value="${e.costo||0}" step="0.01" placeholder="$" style="background:var(--bg4);border:1px solid var(--blue);border-radius:6px;color:var(--yellow);padding:3px 6px;font-size:12px;width:65px;text-align:center;">
+    <input type="number" id="ev-${idx}" value="${e.dist}" step="0.5" style="background:var(--bg4);border:1px solid var(--blue);border-radius:6px;color:var(--text);padding:3px 6px;font-size:12px;width:60px;text-align:center;">
     <button onclick="saveStrikeEdit('${ticker}',${idx})" style="background:var(--green);border:none;border-radius:6px;color:#001a0e;padding:3px 10px;font-size:12px;font-weight:700;cursor:pointer;">✓</button>
     <button onclick="renderStrikeLog()" style="background:none;border:1px solid var(--border);border-radius:6px;color:var(--text3);padding:3px 8px;font-size:12px;cursor:pointer;">✕</button>`;
   document.getElementById('ev-'+idx).focus();
@@ -1151,10 +1163,11 @@ function editStrikeEntry(ticker,idx){
 function saveStrikeEdit(ticker,idx){
   const day=document.getElementById('ed-'+idx)?.value;
   const dist=parseFloat(document.getElementById('ev-'+idx)?.value);
+  const costo=parseFloat(document.getElementById('ec-'+idx)?.value)||0;
   if(!day||isNaN(dist))return;
   const key='strikelog_'+ticker;let log=[];
   try{log=JSON.parse(localStorage.getItem(key)||'[]');}catch(e){}
-  if(!log[idx])return;log[idx].day=day;log[idx].dist=dist;
+  if(!log[idx])return;log[idx].day=day;log[idx].dist=dist;log[idx].costo=costo;
   try{localStorage.setItem(key,JSON.stringify(log));}catch(e){}
   renderStrikeLog();updateCardAverages();
 }
@@ -1167,9 +1180,10 @@ function renderStrikeLog(){
   const avgGlb=document.getElementById('strikeAvgGlobal');
   if(!log.length){listEl.innerHTML='<div style="text-align:center;padding:16px;color:var(--text3);font-size:12px;">Sin entradas — agrega tu primer registro</div>';avgBox.style.display='none';return;}
   listEl.innerHTML=log.map((e,i)=>`<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border);font-size:13px;" id="sentry-${i}">
-    <span style="min-width:80px;color:var(--text);font-weight:600;">${e.day}</span>
-    <span style="font-size:11px;color:var(--text3);flex:1;">${e.date}</span>
-    <span style="font-family:var(--mono);font-weight:700;color:${_strikeColor};">${e.dist>0?'+':''}${e.dist}</span>
+    <span style="min-width:75px;color:var(--text);font-weight:600;">${e.day}</span>
+    <span style="font-size:11px;color:var(--text3);min-width:80px;">${e.date}</span>
+    <span style="font-family:var(--mono);font-size:12px;color:var(--yellow);min-width:52px;">$${(e.costo||0).toFixed(2)}</span>
+    <span style="font-family:var(--mono);font-weight:700;color:${_strikeColor};min-width:30px;text-align:right;">${e.dist}</span>
     <button onclick="editStrikeEntry('${_strikeTicker}',${i})" style="background:none;border:none;color:var(--blue);cursor:pointer;font-size:12px;padding:0 4px;">✏️</button>
     <button onclick="deleteStrikeEntry('${_strikeTicker}',${i})" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:12px;padding:0 4px;">✕</button>
   </div>`).join('');
@@ -1177,7 +1191,7 @@ function renderStrikeLog(){
   const dayOrder=['Lunes','Martes','Miércoles','Jueves','Viernes'];
   avgDet.innerHTML=dayOrder.filter(d=>byDay[d]).map(d=>{
     const avg=(byDay[d].reduce((a,b)=>a+b,0)/byDay[d].length).toFixed(1);
-    return`<div style="text-align:center;"><div style="font-size:11px;color:var(--text);font-weight:600">${d}</div><div style="font-size:18px;font-weight:700;font-family:var(--mono);color:${_strikeColor}">${avg>0?'+':''}${avg}</div><div style="font-size:10px;color:var(--text3)">${byDay[d].length} reg.</div></div>`;
+    return`<div style="text-align:center;"><div style="font-size:11px;color:var(--text);font-weight:600">${d}</div><div style="font-size:18px;font-weight:700;font-family:var(--mono);color:${_strikeColor}">${avg}</div><div style="font-size:10px;color:var(--text3)">${byDay[d].length} reg.</div></div>`;
   }).join('');
   const all=log.map(e=>e.dist);
   const gAvg=(all.reduce((a,b)=>a+b,0)/all.length).toFixed(1);

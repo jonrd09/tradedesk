@@ -772,7 +772,7 @@ async function buildSignals(){
     if(schwabToken){
       try{
         [p1h,p15m]=await Promise.race([
-          Promise.all([fetchSchwabCandles(sym,'day',5,'minute',60),fetchSchwabCandles(sym,'day',1,'minute',15)]),
+          Promise.all([fetchSchwabCandles(sym,'day',5,'minute',60),fetchSchwabCandles(sym,'day',5,'minute',15)]),
           new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),5000))
         ]);
         if(p1h&&p15m)dataLabel='📡 Schwab Live';

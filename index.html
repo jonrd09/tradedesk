@@ -105,38 +105,34 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
 <header class="topbar">
   <div class="logo">Trade<span>Desk</span> Pro</div>
 
-  <!-- Last Refresh -->
-  <div style="display:flex;align-items:center;gap:6px;background:var(--green-bg);border:1px solid rgba(0,209,122,.3);border-radius:20px;padding:3px 12px;white-space:nowrap;">
-    <span style="font-size:11px;color:var(--text3);">🔄</span>
-    <span id="lastRefreshTime" style="font-size:11px;font-weight:700;color:var(--green);font-family:var(--mono);">—</span>
-  </div>
+  <!-- Schwab button -->
+  <button id="schwabBtn" onclick="requirePin(showSchwabModal,'PIN para Schwab')"
+    style="background:var(--red-bg);border:1px solid var(--red);border-radius:20px;color:var(--red);padding:4px 16px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--sans);white-space:nowrap;">
+    Schwabs
+  </button>
 
-  <!-- Schwab -->
-  <div style="display:flex;align-items:center;gap:6px;background:var(--bg3);border:1px solid var(--border2);border-radius:20px;padding:3px 12px;white-space:nowrap;">
-    <span style="font-size:11px;color:var(--text3);">Charles Schwab:</span>
-    <span id="schwabStatus" style="font-size:11px;font-weight:700;color:var(--red);">● Sin conectar</span>
-    <button id="schwabConnectBtn" onclick="requirePin(showSchwabModal,'PIN para Schwab API')"
-      style="background:none;border:1px solid var(--border2);border-radius:12px;color:var(--text3);padding:1px 8px;font-size:10px;cursor:pointer;font-family:var(--sans);">🔗 Conectar</button>
-  </div>
+  <!-- Finnhub button -->
+  <button id="finnhubBtn" onclick="requirePin(showKeyModal,'PIN para Finnhub API Key')"
+    style="background:var(--red-bg);border:1px solid var(--red);border-radius:20px;color:var(--red);padding:4px 16px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--sans);white-space:nowrap;">
+    Finnhub
+  </button>
 
   <!-- Insider Trading -->
   <button onclick="openInsiderModal()" id="insiderBtn"
-    style="background:rgba(167,139,250,.15);border:1px solid rgba(167,139,250,.4);border-radius:20px;color:var(--purple);padding:4px 14px;font-size:11px;font-weight:700;cursor:pointer;font-family:var(--sans);display:flex;align-items:center;gap:5px;white-space:nowrap;">
+    style="background:rgba(167,139,250,.15);border:1px solid rgba(167,139,250,.4);border-radius:20px;color:var(--purple);padding:4px 14px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--sans);display:flex;align-items:center;gap:5px;white-space:nowrap;">
     <span id="insiderEye">👁</span><span>Insider</span>
     <span id="insiderAlert" style="display:none;background:var(--green);color:#001a0e;border-radius:10px;padding:1px 6px;font-size:10px;font-weight:700;">NEW</span>
   </button>
 
   <div style="flex:1;"></div>
 
-  <!-- Finnhub Live -->
-  <span id="liveTag" style="font-size:11px;font-weight:600;color:var(--text3);white-space:nowrap;">⟳ Cargando…</span>
-
-  <!-- Key Status + Button -->
-  <div style="display:flex;align-items:center;gap:5px;">
-    <span id="keyStatus" style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;background:var(--red-bg);color:var(--red);white-space:nowrap;">● Sin key</span>
-    <button onclick="requirePin(showKeyModal,'PIN para Finnhub API Key')" id="keyBtn"
-      style="background:var(--blue-bg);border:1px solid var(--blue);border-radius:20px;color:var(--blue);padding:3px 10px;font-size:11px;font-weight:700;cursor:pointer;font-family:var(--sans);white-space:nowrap;">🔑 API Key</button>
-  </div>
+  <!-- Hidden live tag (keeps logic working but invisible) -->
+  <span id="liveTag" style="display:none;"></span>
+  <span id="lastRefreshTime" style="display:none;"></span>
+  <span id="schwabStatus" style="display:none;"></span>
+  <span id="keyStatus" style="display:none;"></span>
+  <span id="keyBtn" style="display:none;"></span>
+  <span id="schwabConnectBtn" style="display:none;"></span>
 
   <!-- Market status + clock -->
   <span id="mktStatus" class="mkt-closed">● —</span>
@@ -515,10 +511,7 @@ function saveKeyModal(){
   try{sessionStorage.setItem('finnhub_key',k)}catch(e){}
   document.cookie='fk='+encodeURIComponent(k)+';max-age='+365*24*3600+';path=/;SameSite=Lax';
   document.getElementById('keyModal').style.display='none';
-  const ks=document.getElementById('keyStatus');
-  if(ks){ks.textContent='● Key activa';ks.style.background='var(--green-bg)';ks.style.color='var(--green)';}
-  const kb=document.getElementById('keyBtn');
-  if(kb)kb.style.color='var(--green)';
+  updateFinnhubBtn(true);
   loadLivePrices();
 }
 
@@ -526,6 +519,18 @@ function saveKeyModal(){
 // SCHWAB
 // ═══════════════════════════════════════════════════════════════
 function showSchwabModal(){
+  const token=localStorage.getItem('schwab_access_token')||'';
+  const expiry=parseInt(localStorage.getItem('schwab_token_expiry')||'0');
+  const valid=token&&Date.now()<expiry;
+  if(valid){
+    if(confirm('Schwab está conectado.\n\n¿Quieres desconectar?')){
+      localStorage.removeItem('schwab_access_token');
+      localStorage.removeItem('schwab_refresh_token');
+      localStorage.removeItem('schwab_token_expiry');
+      updateSchwabStatus();
+    }
+    return;
+  }
   const id=localStorage.getItem('schwab_client_id')||'';
   if(id){document.getElementById('schwabClientId').value=id;}
   document.getElementById('schwabModal').style.display='flex';
@@ -606,11 +611,15 @@ function updateSchwabStatus(){
   const token=localStorage.getItem('schwab_access_token')||'';
   const expiry=parseInt(localStorage.getItem('schwab_token_expiry')||'0');
   const valid=token&&Date.now()<expiry;
-  const el=document.getElementById('schwabStatus');
-  const btn=document.getElementById('schwabConnectBtn');
-  if(el){
-    if(valid){el.textContent='● Conectado';el.style.color='var(--green)';if(btn){btn.textContent='🔗 Conectado';btn.style.color='var(--green)';}}
-    else{el.textContent='● Sin conectar';el.style.color='var(--red)';if(btn){btn.textContent='🔗 Conectar';btn.style.color='';}}
+  const btn=document.getElementById('schwabBtn');
+  if(btn){
+    if(valid){
+      btn.style.background='var(--green-bg)';btn.style.borderColor='var(--green)';btn.style.color='var(--green)';
+      btn.title='Schwab conectado · Click para desconectar';
+    }else{
+      btn.style.background='var(--red-bg)';btn.style.borderColor='var(--red)';btn.style.color='var(--red)';
+      btn.title='Schwab no conectado · Click para conectar';
+    }
   }
 }
 
@@ -1003,6 +1012,17 @@ function calcLimit(){
   const profT=+(profC*qty*100).toFixed(2);
   el.innerHTML=`<div class="limit-box"><div class="limit-lbl">Precio Límite de Venta — ${gainPct}% + $0.02 broker</div><div class="limit-price">$${lp.toFixed(2)}</div><div style="font-size:11px;color:var(--text2);margin-top:4px;">Compraste $${bought.toFixed(2)}</div></div><div class="res-box"><div class="res-row"><span class="res-lbl">Precio comprado</span><span class="res-val">$${bought.toFixed(2)}</span></div><div class="res-row"><span class="res-lbl">Ganancia ${gainPct}%</span><span class="res-val" style="color:var(--green)">+$${(bought*gainPct/100).toFixed(2)}</span></div><div class="res-row"><span class="res-lbl">Comisión broker</span><span class="res-val" style="color:var(--yellow)">+$0.02</span></div><div class="res-row"><span class="res-lbl">Precio límite venta</span><span class="res-val" style="color:var(--green);font-weight:700">$${lp.toFixed(2)}</span></div><div class="res-row"><span class="res-lbl">Contratos</span><span class="res-val">${qty}</span></div><div class="res-row"><span class="res-lbl">Ganancia total neta</span><span class="res-val" style="color:var(--green);font-size:15px">+$${profT.toFixed(2)}</span></div></div>`;
 }
+function updateFinnhubBtn(active){
+  const btn=document.getElementById('finnhubBtn');
+  if(!btn)return;
+  if(active){
+    btn.style.background='var(--green-bg)';btn.style.borderColor='var(--green)';btn.style.color='var(--green)';
+    btn.title='Finnhub activo · Click para cambiar key';
+  }else{
+    btn.style.background='var(--red-bg)';btn.style.borderColor='var(--red)';btn.style.color='var(--red)';
+    btn.title='Finnhub sin key · Click para configurar';
+  }
+}
 function saveGainPct(){try{localStorage.setItem('gainPct',document.getElementById('gainPct').value);}catch(e){}}
 
 // ═══════════════════════════════════════════════════════════════
@@ -1312,15 +1332,12 @@ async function init(){
   // Restore Finnhub key
   try{localStorage.removeItem('dashboard_pin');}catch(e){}
   const _k=getKey();
-  const ksEl=document.getElementById('keyStatus');
-  const kbEl=document.getElementById('keyBtn');
   if(!_k||_k.length<8){
     document.getElementById('keyModal').style.display='flex';
-    if(ksEl){ksEl.textContent='● Sin key';ksEl.style.background='var(--red-bg)';ksEl.style.color='var(--red)';}
+    updateFinnhubBtn(false);
   }else{
     document.getElementById('keyModal').style.display='none';
-    if(ksEl){ksEl.textContent='● Key activa';ksEl.style.background='var(--green-bg)';ksEl.style.color='var(--green)';}
-    if(kbEl)kbEl.style.color='var(--green)';
+    updateFinnhubBtn(true);
   }
 
   // Handle Schwab OAuth callback

@@ -359,9 +359,9 @@ select.inp{cursor:pointer;}
 
   <div style="display:flex;align-items:center;gap:10px;margin-left:auto;">
     <!-- Insider Trading button -->
-    <button onclick="openInsiderModal()" 
-      style="background:rgba(167,139,250,.15);border:1px solid rgba(167,139,250,.4);border-radius:20px;color:var(--purple);padding:4px 14px;font-size:11px;font-weight:700;cursor:pointer;font-family:var(--sans);white-space:nowrap;">
-      👁 Insider Trading
+    <button onclick="openInsiderModal()" id="insiderBtn"
+      style="background:rgba(167,139,250,.15);border:1px solid rgba(167,139,250,.4);border-radius:20px;color:var(--purple);padding:4px 14px;font-size:11px;font-weight:700;cursor:pointer;font-family:var(--sans);white-space:nowrap;display:flex;align-items:center;gap:5px;">
+      <span id="insiderEye">👁</span><span>Insider Trading</span><span id="insiderAlert" style="display:none;background:var(--green);color:#001a0e;border-radius:10px;padding:1px 6px;font-size:10px;font-weight:700;">NEW</span>
     </button>
     <span id="liveTag" style="font-size:10px;font-weight:600;color:var(--text3);">⟳ Cargando…</span>
     <div style="display:flex;align-items:center;gap:5px;">
@@ -400,6 +400,40 @@ select.inp{cursor:pointer;}
 
 <!-- ══ RIGHT ══ -->
 <aside class="right-panel">
+
+  <!-- Balance Paper Trading -->
+  <div class="rsec">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+      <div style="font-size:16px;font-weight:700;color:#fff;">📊 Balance Paper Trading</div>
+      <div style="display:flex;gap:6px;">
+        <button onclick="exportData()" title="Exportar todos mis datos"
+          style="background:var(--green-bg);border:1px solid rgba(0,209,122,.3);border-radius:20px;color:var(--green);padding:3px 10px;font-size:11px;font-weight:600;cursor:pointer;font-family:var(--sans);">
+          ⬇ Exportar
+        </button>
+        <label title="Importar datos desde archivo" 
+          style="background:var(--blue-bg);border:1px solid rgba(61,139,255,.3);border-radius:20px;color:var(--blue);padding:3px 10px;font-size:11px;font-weight:600;cursor:pointer;font-family:var(--sans);">
+          ⬆ Importar
+          <input type="file" accept=".json" onchange="importData(event)" style="display:none;">
+        </label>
+      </div>
+    </div>
+    <div class="inp-row">
+      <div class="ig">
+        <label class="ilbl">Balance de cuenta ($)</label>
+        <div style="display:flex;align-items:center;background:var(--bg3);border:1px solid var(--green);border-radius:var(--r);padding:7px 10px;gap:4px;">
+          <span style="font-family:var(--mono);font-weight:700;color:var(--green);font-size:15px;">$</span>
+          <input type="text" id="paperBalance" placeholder="100,000" inputmode="numeric"
+            style="background:transparent;border:none;outline:none;color:var(--green);font-size:15px;font-family:var(--mono);font-weight:700;width:100%;"
+            oninput="formatBalanceInput(this)">
+        </div>
+      </div>
+      <div class="ig">
+        <label class="ilbl">Por trade (10%)</label>
+        <div style="background:var(--bg3);border:1px solid var(--green);border-radius:var(--r);padding:7px 10px;font-size:16px;font-family:var(--mono);font-weight:700;color:#fff;text-align:center;" id="tradeSizeResult">—</div>
+      </div>
+    </div>
+    <div style="font-size:10px;color:var(--text3);text-align:center;margin-top:-4px;">Máximo recomendado por operación = 10% del balance</div>
+  </div>
 
   <!-- Calculadora Limit -->
   <div class="rsec">
@@ -441,36 +475,6 @@ select.inp{cursor:pointer;}
     </div>
 
     <div id="limitResult"></div>
-  </div>
-
-  <!-- Balance Paper Trading -->
-  <div class="rsec">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-      <div style="font-size:16px;font-weight:700;color:#fff;">📊 Balance Paper Trading</div>
-      <div style="display:flex;gap:6px;">
-        <button onclick="exportData()" title="Exportar todos mis datos"
-          style="background:var(--green-bg);border:1px solid rgba(0,209,122,.3);border-radius:20px;color:var(--green);padding:3px 10px;font-size:11px;font-weight:600;cursor:pointer;font-family:var(--sans);">
-          ⬇ Exportar
-        </button>
-        <label title="Importar datos desde archivo" 
-          style="background:var(--blue-bg);border:1px solid rgba(61,139,255,.3);border-radius:20px;color:var(--blue);padding:3px 10px;font-size:11px;font-weight:600;cursor:pointer;font-family:var(--sans);">
-          ⬆ Importar
-          <input type="file" accept=".json" onchange="importData(event)" style="display:none;">
-        </label>
-      </div>
-    </div>
-    <div class="inp-row">
-      <div class="ig">
-        <label class="ilbl">Balance de cuenta ($)</label>
-        <input class="inp" type="number" id="paperBalance" placeholder="ej. 100000" step="100"
-          oninput="calcTradeSize()" style="font-size:15px;">
-      </div>
-      <div class="ig">
-        <label class="ilbl">Por trade (10%)</label>
-        <div style="background:var(--bg3);border:1px solid var(--green);border-radius:var(--r);padding:7px 10px;font-size:16px;font-family:var(--mono);font-weight:700;color:var(--green);text-align:center;" id="tradeSizeResult">—</div>
-      </div>
-    </div>
-    <div style="font-size:10px;color:var(--text3);text-align:center;margin-top:-4px;">Máximo recomendado por operación = 10% del balance</div>
   </div>
 
   <!-- Rotación de Dinero + Índices -->
@@ -1651,14 +1655,30 @@ function importData(event) {
 // ═══════════════════════════════════════════════════════════════
 // PAPER TRADING BALANCE CALCULATOR
 // ═══════════════════════════════════════════════════════════════
+function formatBalanceInput(el) {
+  // Remove non-numeric chars except dot
+  const raw = el.value.replace(/[^0-9.]/g, '');
+  if(!raw) { el.value = ''; calcTradeSize(); return; }
+  const num = parseFloat(raw);
+  if(isNaN(num)) return;
+  // Format with commas — supports up to billions
+  el.value = num.toLocaleString('en-US', {maximumFractionDigits:0});
+  calcTradeSize();
+}
+
 function calcTradeSize() {
-  const bal = parseFloat(document.getElementById('paperBalance').value) || 0;
+  const raw = (document.getElementById('paperBalance').value || '').replace(/[^0-9.]/g, '');
+  const bal = parseFloat(raw) || 0;
   const el  = document.getElementById('tradeSizeResult');
-  if (!bal || bal <= 0) { el.textContent = '—'; return; }
-  const ten = (bal * 0.10).toFixed(2);
-  el.textContent = '$' + parseFloat(ten).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
-  // Save to localStorage
-  try { localStorage.setItem('paperBalance', bal); } catch(e) {}
+  if(!bal || bal <= 0) { if(el) el.textContent = '—'; return; }
+  const ten = bal * 0.10;
+  // Format result — show M for millions
+  let display;
+  if(ten >= 1000000)      display = '$' + (ten/1000000).toFixed(2) + 'M';
+  else if(ten >= 1000)    display = '$' + ten.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+  else                    display = '$' + ten.toFixed(2);
+  if(el) el.textContent = display;
+  try { localStorage.setItem('paperBalance', raw); } catch(e) {}
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1668,9 +1688,36 @@ const INSIDER_TICKERS = ['TSLA','AAPL','MSFT','NVDA','AMD','COIN','AMZN','NFLX',
 let _insiderData = [];
 let _insiderSort = { col: 'shares', dir: -1 }; // default: # shares desc
 
+function checkInsiderAlert() {
+  const bigTrades = _insiderData.filter(r => Math.abs(r.shares) >= 500000);
+  const eyeEl   = document.getElementById('insiderEye');
+  const alertEl = document.getElementById('insiderAlert');
+  const btnEl   = document.getElementById('insiderBtn');
+  if(bigTrades.length > 0){
+    if(eyeEl)   eyeEl.textContent = '🟢';
+    if(alertEl){ alertEl.style.display='inline'; alertEl.textContent = bigTrades.length + ' BIG'; }
+    if(btnEl){
+      btnEl.style.background = 'rgba(0,209,122,.15)';
+      btnEl.style.borderColor = 'rgba(0,209,122,.4)';
+      btnEl.style.color = 'var(--green)';
+    }
+  } else {
+    if(eyeEl)   eyeEl.textContent = '👁';
+    if(alertEl) alertEl.style.display = 'none';
+    if(btnEl){
+      btnEl.style.background = 'rgba(167,139,250,.15)';
+      btnEl.style.borderColor = 'rgba(167,139,250,.4)';
+      btnEl.style.color = 'var(--purple)';
+    }
+  }
+}
+
 function openInsiderModal() {
   document.getElementById('insiderModal').style.display = 'flex';
   if(_insiderData.length === 0) loadInsiderData();
+  // Reset alert when opened
+  const alertEl = document.getElementById('insiderAlert');
+  if(alertEl) alertEl.style.display = 'none';
 }
 
 async function loadInsiderData() {
@@ -1714,6 +1761,9 @@ async function loadInsiderData() {
   // Sort by date desc, filter only P and S
   _insiderData.sort((a,b) => b.date.localeCompare(a.date));
   _insiderData = _insiderData.filter(r => r.type === 'P' || r.type === 'S');
+
+  // Check for large transactions (>= 500,000 shares) — turn eye green
+  checkInsiderAlert();
 
   renderInsiderTable(_insiderData);
   const upEl = document.getElementById('insiderLastUpdate');
@@ -1829,7 +1879,10 @@ async function init(){
   const _pb = localStorage.getItem('paperBalance');
   if (_pb) {
     const pbEl = document.getElementById('paperBalance');
-    if (pbEl) { pbEl.value = _pb; calcTradeSize(); }
+    if (pbEl) {
+      pbEl.value = parseInt(_pb).toLocaleString('en-US');
+      calcTradeSize();
+    }
   }
 
   // Restore gain % — default always 35 unless user changed it

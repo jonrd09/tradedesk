@@ -143,6 +143,12 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
   <!-- Market status + clock -->
   <span id="mktStatus" class="mkt-closed">● —</span>
   <span class="clock" id="clockEl">—</span>
+
+  <!-- TEST button -->
+  <button id="testBtn" onclick="runTestMode()"
+    style="background:rgba(167,139,250,.15);border:1px solid rgba(167,139,250,.5);border-radius:20px;color:var(--purple);padding:4px 14px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--sans);white-space:nowrap;">
+    🧪 Test
+  </button>
 </header>
 
 <!-- MAIN GRID -->
@@ -166,7 +172,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
   <div class="card">
     <div style="text-align:center;margin-bottom:10px;">
       <div style="font-size:18px;font-weight:700;color:#fff;">Señales Activas</div>
-      <div style="font-size:11px;color:var(--text2);margin-top:3px;">E1·E2 Tendencia · E3·E4 Rebote MA20D · E5·E6 Imán Premarket · E7·E8 Imán Tendencia · GOOG &amp; TSLA</div>
+      <div style="font-size:11px;color:var(--text2);margin-top:3px;">E1·E2 Tendencia · E3·E4 Rebote MA20D · E5·E6 Imán Premarket · E7·E8 Imán Tendencia · GOOG · TSLA · SPY</div>
     </div>
     <div id="signalArea">
       <div style="text-align:center;padding:20px;color:var(--text2);font-size:13px;">⟳ Calculando señales…</div>
@@ -510,6 +516,7 @@ let _rulesTimer=null;
 const DEFAULTS={
   GOOG:{price:365.76,pct:-0.95,name:'Alphabet'},
   TSLA:{price:391.00,pct:-6.56,name:'Tesla'},
+  SPY: {price:594.52,pct: 0.00,name:'S&P 500 ETF'},
 };
 const MOM_STOCKS={
   GOOG:{price:365.76,name:'Alphabet'},TSLA:{price:391.00,name:'Tesla'},
@@ -864,7 +871,7 @@ async function fetchQuote(sym){
 async function loadLivePrices(){
   const key=getKey();
   if(!key||key.length<8)return;
-  const syms=['GOOG','TSLA'];
+  const syms=['GOOG','TSLA','SPY'];
   // Sequential to avoid rate limit
   const results=[];
   for(const s of syms){
@@ -1020,7 +1027,7 @@ async function buildSignals(){
   const all=[];
 
   // ── Fetch all timeframes needed ──────────────────────────────────────────
-  for(const sym of['GOOG','TSLA']){
+  for(const sym of['GOOG','TSLA','SPY']){
     const base=DEFAULTS[sym].price,pct=DEFAULTS[sym].pct;
     let ohlc1h=null,ohlc15=null,ohlcD=null;
     let dataLabel='📡 Sin fuente';
@@ -1779,6 +1786,70 @@ function renderInsiderTable(data){
 // ═══════════════════════════════════════════════════════════════
 // INIT
 // ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// TEST MODE — Datos históricos reales para verificar lógica
+// ═══════════════════════════════════════════════════════════════
+async function runTestMode(){
+  const btn=document.getElementById('testBtn');
+  if(btn){btn.textContent='⟳ Cargando…';btn.style.opacity='.6';btn.disabled=true;}
+
+  // Inject synthetic but realistic OHLC data that triggers multiple strategies
+  // Based on real GOOG/TSLA/SPY price action patterns
+  // 1H data: 50 candles simulating a confirmed bearish-to-bullish trendline break (E1)
+  function mkOHLC(closes,spread=0.005){
+    return{c:closes,h:closes.map(v=>v*(1+spread)),l:closes.map(v=>v*(1-spread)),o:closes.map((_,i)=>i===0?closes[0]:closes[i-1])};
+  }
+
+  // GOOG — E1 pattern: 4 descending highs then break above trendline + MA20
+  const googBase=365;
+  const goog1h=[...Array(30)].map((_,i)=>googBase - 8 + i*0.1 - Math.sin(i*0.4)*3)  // slight downtrend
+    .concat([...Array(15)].map((_,i)=>googBase - 3 + i*1.2))  // breakout begins
+    .concat([googBase+13, googBase+14.5, googBase+15.2, googBase+16, googBase+16.8]); // confirmed breakout
+  const goog15=[...Array(35)].map((_,i)=>googBase+10+i*0.3);  // 15min fully bullish
+  const googD=[...Array(25)].map((_,i)=>googBase-15+i*0.8);   // daily approaching MA20
+
+  // TSLA — E7 pattern: strong downtrend, price far from MA20, stoch cross up
+  const tslaBase=391;
+  const tsla1h=[...Array(50)].map((_,i)=>tslaBase+20 - i*1.1); // sustained downtrend
+  const tsla15h=tsla1h.map(v=>v*1.001);
+  const tsla15l=tsla1h.map(v=>v*0.999);
+  const tsla15=[...Array(40)].map((_,i)=>tslaBase-20 - 2 + i*0.08); // below BB lower
+  const tslaD=[...Array(25)].map((_,i)=>tslaBase+5 - i*0.9);
+
+  // SPY — E3 pattern: bearish 1H, price near daily MA20 acting as support
+  const spyBase=594;
+  const spy1h=[...Array(50)].map((_,i)=>spyBase+5 - i*0.15); // slight downtrend, below MA20
+  const spy15=[...Array(40)].map((_,i)=>spyBase-1+i*0.05);   // 15min starting to rebound
+  const spyD=[...Array(25)].map((_,i)=>spyBase-8+i*0.35);    // daily near MA20
+
+  // Inject into cache so fetchCandles returns this data
+  const now=Math.floor(Date.now()/1000);
+  _candleCache['GOOG_60']={data:mkOHLC(goog1h,0.003),ts:now};
+  _candleCache['GOOG_15']={data:mkOHLC(goog15,0.002),ts:now};
+  _candleCache['GOOG_D']={data:mkOHLC(googD,0.008),ts:now};
+  _candleCache['TSLA_60']={data:mkOHLC(tsla1h,0.004),ts:now};
+  _candleCache['TSLA_15']={data:{c:tsla15,h:tsla15.map(v=>v*1.003),l:tsla15.map(v=>v*0.997),o:tsla15.map((_,i)=>i===0?tsla15[0]:tsla15[i-1])},ts:now};
+  _candleCache['TSLA_D']={data:mkOHLC(tslaD,0.01),ts:now};
+  _candleCache['SPY_60']={data:mkOHLC(spy1h,0.002),ts:now};
+  _candleCache['SPY_15']={data:mkOHLC(spy15,0.002),ts:now};
+  _candleCache['SPY_D']={data:mkOHLC(spyD,0.006),ts:now};
+
+  // Mark as test mode in UI
+  const area=document.getElementById('signalArea');
+  area.innerHTML='<div style="text-align:center;padding:12px;color:var(--purple);font-size:12px;border:1px solid rgba(167,139,250,.3);border-radius:var(--r);margin-bottom:12px;">🧪 MODO TEST — Datos sintéticos para verificar lógica · No son señales reales</div>';
+
+  // Run signals with injected data
+  await buildSignals();
+
+  // Restore button
+  if(btn){btn.textContent='🧪 Test';btn.style.opacity='1';btn.disabled=false;}
+
+  // Prepend test banner to results
+  const existingArea=document.getElementById('signalArea');
+  const banner='<div style="text-align:center;padding:8px 12px;color:var(--purple);font-size:11px;font-weight:700;border:1px solid rgba(167,139,250,.3);border-radius:var(--r);margin-bottom:12px;background:rgba(167,139,250,.08);">🧪 MODO TEST — Datos sintéticos · No son señales reales</div>';
+  existingArea.innerHTML=banner+existingArea.innerHTML;
+}
+
 async function init(){
   // Restore Finnhub key
   // (dashboard_pin key deprecated — removed)

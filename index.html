@@ -160,7 +160,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
   <div class="card">
     <div style="text-align:center;margin-bottom:10px;">
       <div style="font-size:18px;font-weight:700;color:#fff;">Señales Activas</div>
-      <div style="font-size:11px;color:var(--text2);margin-top:3px;">E1 Alza · E2 Baja · E7 Imán Bajista · E8 Imán Alcista · 1H+15m · GOOG &amp; TSLA</div>
+      <div style="font-size:11px;color:var(--text2);margin-top:3px;">E1 Cambio al Alza · E2 Cambio a la Baja · Temporalidad 1H · GOOG &amp; TSLA</div>
     </div>
     <div id="signalArea">
       <div style="text-align:center;padding:20px;color:var(--text2);font-size:13px;">⟳ Calculando señales…</div>
@@ -799,43 +799,24 @@ async function buildSignals(){
     const lMid1h=bb1h.mid.filter(v=>v!=null).slice(-1)[0];
     const lUp1h=bb1h.upper.filter(v=>v!=null).slice(-1)[0];
     const lLow1h=bb1h.lower.filter(v=>v!=null).slice(-1)[0];
-    const lUp15m=bb15m.upper.filter(v=>v!=null).slice(-1)[0];
-    const lLow15m=bb15m.lower.filter(v=>v!=null).slice(-1)[0];
+
     const lMA20=ma20_1h.filter(v=>v!=null).slice(-1)[0];
     const lMA40=ma40_1h.filter(v=>v!=null).slice(-1)[0];
     const bbW1h=lMid1h?(lUp1h-lLow1h)/lMid1h*100:0;
-    const bb15mMid=bb15m.mid.filter(v=>v!=null).slice(-1)[0];
-    const bb15mUp=bb15m.upper.filter(v=>v!=null).slice(-1)[0];
-    const bb15mLow=bb15m.lower.filter(v=>v!=null).slice(-1)[0];
-    const bbW15m=bb15mMid?(bb15mUp-bb15mLow)/bb15mMid*100:0;
-    const r1h=rsi(p1h);const r15=rsi(p15m);
-    const lRSI1h=r1h.slice(-1)[0]||50;const lRSI15m=r15.slice(-1)[0]||50;
-    const farDown=lMid1h?((lMid1h-lP1h)/lMid1h*100):0;
-    const farUp=lMid1h?((lP1h-lMid1h)/lMid1h*100):0;
-    const meta={sym,price:base,pct,lRSI1h,lRSI15m,bbW1h,bbW15m,dataLabel,name:DEFAULTS[sym].name};
+    const r1h=rsi(p1h);
+    const lRSI1h=r1h.slice(-1)[0]||50;
+    const meta={sym,price:base,pct,lRSI1h,bbW1h,dataLabel,name:DEFAULTS[sym].name};
     all.push({...meta,code:'E1',name:'Cambio de Tendencia al ALZA',type:'call',reqs:[
-      {ok:lMA20>lMA40,tf:'1H',text:'Tendencia previa alcista (MA20 > MA40)'},
+      {ok:lMA20>lMA40,tf:'1H',text:'Tendencia alcista: MA20 > MA40'},
       {ok:lP1h>lMA20&&p1h.slice(-2)[0]<=lMA20,tf:'1H',text:'Precio rompe MA20 con vela alcista'},
       {ok:bbW1h>3,tf:'1H',text:`Volatilidad BB activa (${bbW1h.toFixed(1)}%)`},
-      {ok:lRSI15m>50,tf:'15m',text:'Tendencia 15m totalmente alcista'},
+      {ok:lRSI1h>50,tf:'1H',text:`RSI 1H sobre 50 (${lRSI1h.toFixed(1)})`},
     ]});
     all.push({...meta,code:'E2',name:'Cambio de Tendencia a la BAJA',type:'put',reqs:[
-      {ok:lMA20<lMA40,tf:'1H',text:'Tendencia previa bajista (MA20 < MA40)'},
+      {ok:lMA20<lMA40,tf:'1H',text:'Tendencia bajista: MA20 < MA40'},
       {ok:lP1h<lMA20&&p1h.slice(-2)[0]>=lMA20,tf:'1H',text:'Precio rompe MA20 con vela bajista'},
       {ok:bbW1h>3,tf:'1H',text:`Volatilidad BB activa (${bbW1h.toFixed(1)}%)`},
-      {ok:lRSI15m<50,tf:'15m',text:'Tendencia 15m totalmente bajista'},
-    ]});
-    all.push({...meta,code:'E7',name:'Efecto IMÁN Bajista → CALL',type:'call',reqs:[
-      {ok:lMA20<lMA40,tf:'1H',text:'Tendencia bajista confirmada (MA20 < MA40)'},
-      {ok:farDown>2.5,tf:'1H',text:`Precio muy alejado de MA20 hacia abajo (${farDown.toFixed(1)}%)`},
-      {ok:lP15m<lLow15m,tf:'15m',text:'Primera vela fuera del oscilador inferior'},
-      {ok:bbW15m>2,tf:'15m',text:`Volatilidad 15m activa (${bbW15m.toFixed(1)}%)`},
-    ]});
-    all.push({...meta,code:'E8',name:'Efecto IMÁN Alcista → PUT',type:'put',reqs:[
-      {ok:lMA20>lMA40,tf:'1H',text:'Tendencia alcista confirmada (MA20 > MA40)'},
-      {ok:farUp>2.5,tf:'1H',text:`Precio muy alejado de MA20 hacia arriba (${farUp.toFixed(1)}%)`},
-      {ok:lP15m>lUp15m,tf:'15m',text:'Primera vela fuera del oscilador superior'},
-      {ok:bbW15m>2,tf:'15m',text:`Volatilidad 15m activa (${bbW15m.toFixed(1)}%)`},
+      {ok:lRSI1h<50,tf:'1H',text:`RSI 1H bajo 50 (${lRSI1h.toFixed(1)})`},
     ]});
   }
   const active=all.map(s=>({...s,passed:s.reqs.filter(r=>r.ok).length})).filter(s=>s.passed>=2).sort((a,b)=>b.passed-a.passed);
@@ -873,8 +854,7 @@ async function buildSignals(){
       </div>
       <div class="sig-body">
         <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;">
-          ${s.reqs.filter(r=>r.ok&&r.tf==='1H').length?'<span style="background:rgba(61,139,255,.2);color:var(--blue);border-radius:8px;padding:2px 8px;font-size:10px;font-weight:700;">1H confirma</span>':''}
-          ${s.reqs.filter(r=>r.ok&&r.tf==='15m').length?'<span style="background:rgba(167,139,250,.2);color:var(--purple);border-radius:8px;padding:2px 8px;font-size:10px;font-weight:700;">15m entrada</span>':''}
+          ${s.reqs.filter(r=>r.ok).length>=3?'<span style="background:rgba(61,139,255,.2);color:var(--blue);border-radius:8px;padding:2px 8px;font-size:10px;font-weight:700;">✓ '+s.reqs.filter(r=>r.ok).length+'/4 confirmados</span>':''}
         </div>
         ${s.reqs.map(r=>`<div class="sig-req">
           <span style="font-size:13px;flex-shrink:0">${r.ok?'✅':'❌'}</span>

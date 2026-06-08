@@ -311,7 +311,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
 </div>
 
 <!-- LOGS MODAL -->
-<div style="position:fixed;inset:0;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;z-index:1000;" id="logsModal" style="display:none;">
+<div style="position:fixed;inset:0;background:rgba(0,0,0,.75);display:none;align-items:center;justify-content:center;z-index:1000;" id="logsModal">
   <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:var(--rl);padding:22px;width:800px;max-width:96vw;max-height:85vh;display:flex;flex-direction:column;">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
       <div>
@@ -546,7 +546,7 @@ function saveKeyModal(){
   document.cookie='fk='+encodeURIComponent(k)+';max-age='+365*24*3600+';path=/;SameSite=Lax';
   document.getElementById('keyModal').style.display='none';
   updateFinnhubBtn(true);
-  addLog('info','Finnhub','API Key guardada y activada ✓');
+  
   loadLivePrices();
 }
 
@@ -608,7 +608,6 @@ async function handleSchwabCallback(){
     localStorage.removeItem('schwab_oauth_state');
     window.history.replaceState({},document.title,SCHWAB_REDIRECT);
     updateSchwabStatus();
-    addLog('info','Schwab OAuth','Conexión exitosa ✓ Token obtenido');
   }catch(e){console.warn('Schwab token error:',e);
     addLog('error','Schwab OAuth','Error intercambiando token',e.message);}
 }
@@ -652,7 +651,6 @@ async function fetchSchwabCandles(sym,periodType,period,freqType,freq){
       addLog('warn','Schwab API',`${sym} → Sin velas disponibles`);
       return null;}
     console.log('Schwab OK:', sym, d.candles.length, 'candles');
-    addLog('info','Schwab API',`${sym} → ${d.candles.length} velas recibidas ✓`);
     return d.candles.slice(-50).map(c=>c.close);
   }catch(e){console.warn('Schwab fetch error:',sym,e.message);return null;}
 }
@@ -680,20 +678,27 @@ const MAX_LOGS = 200;
 let _logFilter = 'all';
 
 function addLog(level, category, message, detail='') {
+  // Only log errors and warnings — never info on normal operation
+  if(level === 'info') return;
+
   const et = new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
   const time = et.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:true});
   const entry = { level, category, message, detail, time, ts: Date.now() };
   _logs.unshift(entry);
   if(_logs.length > MAX_LOGS) _logs.pop();
 
-  // Update badge — only show for errors
-  const errors = _logs.filter(l=>l.level==='error').length;
+  // Turn button green when there are new unread records
+  const btn = document.getElementById('logsBtn');
   const badge = document.getElementById('logsBadge');
-  const btn   = document.getElementById('logsBtn');
-  if(badge && errors > 0){
+  if(btn){
+    btn.style.borderColor='var(--green)';
+    btn.style.color='var(--green)';
+    btn.style.background='var(--green-bg)';
+  }
+  if(badge){
     badge.style.display='inline';
-    badge.textContent=errors;
-    if(btn){btn.style.borderColor='var(--red)';btn.style.color='var(--red)';}
+    badge.style.background='var(--green)';
+    badge.textContent=_logs.length;
   }
   // Refresh if modal is open
   if(document.getElementById('logsModal')?.style.display!=='none') renderLogs();
@@ -701,11 +706,14 @@ function addLog(level, category, message, detail='') {
 
 function openLogsModal(){
   document.getElementById('logsModal').style.display='flex';
-  // Reset badge
-  const badge=document.getElementById('logsBadge');
+  // Reset button to neutral after opening
   const btn=document.getElementById('logsBtn');
   if(badge)badge.style.display='none';
-  if(btn){btn.style.borderColor='var(--border2)';btn.style.color='var(--text3)';}
+  if(btn){
+    btn.style.borderColor='var(--border2)';
+    btn.style.color='var(--text3)';
+    btn.style.background='var(--bg3)';
+  }
   renderLogs();
 }
 
@@ -905,7 +913,7 @@ async function buildSignals(){
           fetchSchwabCandles(sym,'day',10,'minute',30),
           new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),6000))
         ]);
-        if(result&&result.length>=10){p1h=result;dataLabel='📡 Schwab Live';addLog('info','Señales',`${sym} → Velas Schwab Live (${result.length})`);}
+        if(result&&result.length>=10){p1h=result;dataLabel='📡 Schwab Live';}
       }catch(e){console.warn('Schwab signals error:',sym,e.message);
         addLog('error','Schwab',`Error obteniendo velas de ${sym}`,e.message);}
     }
@@ -917,12 +925,15 @@ async function buildSignals(){
           fetchCandles(sym,'60',24),
           new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),4000))
         ]);
-        if(result&&result.length>=10){p1h=result;dataLabel='📡 Finnhub';addLog('info','Señales',`${sym} → Velas Finnhub (${result.length})`);}
+        if(result&&result.length>=10){p1h=result;dataLabel='📡 Finnhub';}
       }catch(e){}
     }
 
     // ── 3. Final fallback: simulated ──────────────────────────────────────
-    if(!p1h){p1h=genCandles(base,24,.005);dataLabel='⚠️ Simulado';addLog('warn','Señales',`${sym} → Usando datos simulados (Schwab y Finnhub no disponibles)`);}
+    if(!p1h){p1h=genCandles(base,24,.005);dataLabel='⚠️ Simulado';
+      const _et2=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+      const _open2=_et2.getDay()>=1&&_et2.getDay()<=5&&(_et2.getHours()>8||(_et2.getHours()===8&&_et2.getMinutes()>=30))&&_et2.getHours()<16;
+      if(_open2)addLog('warn','Señales',`${sym} → Datos simulados durante horario de mercado`);}
 
     // ── Calculate indicators ──────────────────────────────────────────────
     const n=p1h.length;
@@ -1507,6 +1518,9 @@ async function init(){
     buildMomentum();
     loadRotation();
   }
+
+  // Show rules popup on first load
+  setTimeout(()=>showRulesPopup(), 1500);
 
   // Auto-refresh every 5 min during market hours
   setInterval(()=>{

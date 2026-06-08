@@ -23,11 +23,11 @@
 html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:16px;line-height:1.5;}
 ::-webkit-scrollbar{width:4px;height:4px;}
 ::-webkit-scrollbar-thumb{background:var(--border2);border-radius:4px;}
-.shell{display:grid;grid-template-rows:48px 1fr;height:100vh;overflow:hidden;}
+.shell{display:grid;grid-template-rows:48px 1fr;height:100vh;width:100vw;overflow:hidden;}
 .topbar{background:var(--bg2);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:14px;padding:0 20px;}
 .logo{font-family:var(--mono);font-size:13px;font-weight:700;color:var(--blue);white-space:nowrap;}
 .logo span{color:var(--text2);font-weight:400;}
-.main{display:grid;grid-template-columns:400px 600px 520px;overflow:hidden;height:100%;}
+.main{display:grid;grid-template-columns:400px 1fr 520px;overflow:hidden;height:100%;width:100vw;}
 .up{color:var(--green);}.dn{color:var(--red);}
 .left-panel,.right-panel{background:var(--bg2);overflow-y:auto;display:flex;flex-direction:column;}
 .left-panel{border-right:1px solid var(--border);}
@@ -816,7 +816,7 @@ function tick(){
   const h=et.getHours(),m=et.getMinutes(),s=et.getSeconds(),day=et.getDay();
   document.getElementById('clockEl').textContent=
     `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')} ET`;
-  const open=day>=1&&day<=5&&(h>9||(h===9&&m>=30))&&h<16;
+  const open=day>=1&&day<=5&&(h>8||(h===8&&m>=30))&&h<16;
   const el=document.getElementById('mktStatus');
   el.textContent=open?'● ABIERTO':'● CERRADO';
   el.className=open?'mkt-open':'mkt-closed';
@@ -1288,7 +1288,7 @@ function rotCell(sym, name, pct, color) {
 async function loadRotation() {
   const et  = new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
   const day = et.getDay(), h = et.getHours(), m = et.getMinutes();
-  const open = day>=1&&day<=5&&(h>9||(h===9&&m>=30))&&h<16;
+  const open = day>=1&&day<=5&&(h>8||(h===8&&m>=30))&&h<16;
 
   const allSyms = [
     ...ROT_DATA.indices.map(x=>x.sym),
@@ -1689,7 +1689,17 @@ let _insiderData = [];
 let _insiderSort = { col: 'shares', dir: -1 }; // default: # shares desc
 
 function checkInsiderAlert() {
-  const bigTrades = _insiderData.filter(r => Math.abs(r.shares) >= 500000);
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+  const bigTrades = _insiderData.filter(r => {
+    if(Math.abs(r.shares) < 500000) return false;
+    // Check if trade is within last 30 days
+    if(r.date && r.date !== '—') {
+      const tradeDate = new Date(r.date);
+      if(!isNaN(tradeDate) && tradeDate < thirtyDaysAgo) return false;
+    }
+    return true;
+  });
   const eyeEl   = document.getElementById('insiderEye');
   const alertEl = document.getElementById('insiderAlert');
   const btnEl   = document.getElementById('insiderBtn');
@@ -1742,13 +1752,23 @@ async function loadInsiderData() {
         if(d && d.data && d.data.length > 0) {
           // Take last 5 transactions per ticker
           d.data.slice(0,5).forEach(t => {
+            // Finnhub uses: 'P'=Purchase, 'S'=Sale, 'B'=Buy (some endpoints)
+            // Also check change sign: positive=buy, negative=sell
+            const txCode = t.transactionCode || '';
+            const change = t.change || 0;
+            // Normalize: treat positive change as buy, negative as sell
+            let normalType = txCode;
+            if(!txCode || txCode === '') {
+              normalType = change > 0 ? 'P' : change < 0 ? 'S' : '—';
+            }
+            if(txCode === 'B') normalType = 'P'; // some APIs use B for Buy
             _insiderData.push({
               sym,
               name:   t.name        || '—',
               title:  t.title       || '—',
               date:   t.transactionDate || '—',
-              type:   t.transactionCode || '—',
-              shares: t.change      || 0,
+              type:   normalType,
+              shares: change,
               total:  t.share       || 0,
             });
           });
@@ -1923,7 +1943,7 @@ async function init(){
   setInterval(()=>{
     const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
     const h=et.getHours(),m=et.getMinutes(),d=et.getDay();
-    if(d>=1&&d<=5&&(h>9||(h===9&&m>=30))&&h<16){
+    if(d>=1&&d<=5&&(h>8||(h===8&&m>=30))&&h<16){
       loadLivePrices();
       loadRotation();
       showRulesPopup();

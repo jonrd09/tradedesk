@@ -117,6 +117,12 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
     Finnhub
   </button>
 
+  <!-- Logs button -->
+  <button onclick="openLogsModal()" id="logsBtn"
+    style="background:var(--bg3);border:1px solid var(--border2);border-radius:20px;color:var(--text3);padding:4px 14px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--sans);display:flex;align-items:center;gap:5px;white-space:nowrap;">
+    📋 Logs <span id="logsBadge" style="display:none;background:var(--red);color:#fff;border-radius:10px;padding:1px 6px;font-size:10px;font-weight:700;">0</span>
+  </button>
+
   <!-- Insider Trading -->
   <button onclick="openInsiderModal()" id="insiderBtn"
     style="background:rgba(167,139,250,.15);border:1px solid rgba(167,139,250,.4);border-radius:20px;color:var(--purple);padding:4px 14px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--sans);display:flex;align-items:center;gap:5px;white-space:nowrap;">
@@ -301,6 +307,33 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
       <button class="btn-skip" onclick="document.getElementById('schwabModal').style.display='none'">Cerrar</button>
     </div>
     <div id="schwabKeyError" style="font-size:11px;color:var(--red);margin-top:8px;display:none;">⚠ Ingresa ambos campos.</div>
+  </div>
+</div>
+
+<!-- LOGS MODAL -->
+<div style="position:fixed;inset:0;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;z-index:1000;" id="logsModal" style="display:none;">
+  <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:var(--rl);padding:22px;width:800px;max-width:96vw;max-height:85vh;display:flex;flex-direction:column;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+      <div>
+        <div style="font-size:17px;font-weight:700;color:#fff;">📋 Sistema de Logs</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px;">Errores, advertencias y eventos del sistema</div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <button onclick="clearLogs()" style="background:var(--red-bg);border:1px solid rgba(255,77,109,.3);border-radius:20px;color:var(--red);padding:3px 12px;font-size:11px;font-weight:600;cursor:pointer;font-family:var(--sans);">🗑 Limpiar</button>
+        <button onclick="exportLogs()" style="background:var(--blue-bg);border:1px solid rgba(61,139,255,.3);border-radius:20px;color:var(--blue);padding:3px 12px;font-size:11px;font-weight:600;cursor:pointer;font-family:var(--sans);">⬇ Exportar</button>
+        <button onclick="document.getElementById('logsModal').style.display='none'" style="background:none;border:none;color:var(--text3);font-size:20px;cursor:pointer;">✕</button>
+      </div>
+    </div>
+    <div style="display:flex;gap:6px;margin-bottom:10px;">
+      <button onclick="filterLogs('all',this)" class="log-filter-btn" style="background:var(--bg3);border:1px solid var(--blue);border-radius:20px;color:var(--blue);padding:3px 12px;font-size:11px;font-weight:600;cursor:pointer;font-family:var(--sans);">Todos</button>
+      <button onclick="filterLogs('error',this)" class="log-filter-btn" style="background:var(--bg3);border:1px solid var(--border);border-radius:20px;color:var(--text3);padding:3px 12px;font-size:11px;font-weight:600;cursor:pointer;font-family:var(--sans);">🔴 Errores</button>
+      <button onclick="filterLogs('warn',this)" class="log-filter-btn" style="background:var(--bg3);border:1px solid var(--border);border-radius:20px;color:var(--text3);padding:3px 12px;font-size:11px;font-weight:600;cursor:pointer;font-family:var(--sans);">🟡 Advertencias</button>
+      <button onclick="filterLogs('info',this)" class="log-filter-btn" style="background:var(--bg3);border:1px solid var(--border);border-radius:20px;color:var(--text3);padding:3px 12px;font-size:11px;font-weight:600;cursor:pointer;font-family:var(--sans);">🟢 Info</button>
+    </div>
+    <div style="overflow-y:auto;flex:1;font-family:var(--mono);font-size:12px;" id="logsContainer">
+      <div style="text-align:center;padding:30px;color:var(--text3);">Sin logs registrados</div>
+    </div>
+    <div style="margin-top:8px;font-size:10px;color:var(--text3);" id="logsCount">0 entradas</div>
   </div>
 </div>
 
@@ -513,6 +546,7 @@ function saveKeyModal(){
   document.cookie='fk='+encodeURIComponent(k)+';max-age='+365*24*3600+';path=/;SameSite=Lax';
   document.getElementById('keyModal').style.display='none';
   updateFinnhubBtn(true);
+  addLog('info','Finnhub','API Key guardada y activada ✓');
   loadLivePrices();
 }
 
@@ -529,6 +563,7 @@ function showSchwabModal(){
       localStorage.removeItem('schwab_refresh_token');
       localStorage.removeItem('schwab_token_expiry');
       updateSchwabStatus();
+      addLog('warn','Schwab','Sesión desconectada manualmente');
     }
     return;
   }
@@ -573,7 +608,9 @@ async function handleSchwabCallback(){
     localStorage.removeItem('schwab_oauth_state');
     window.history.replaceState({},document.title,SCHWAB_REDIRECT);
     updateSchwabStatus();
-  }catch(e){console.warn('Schwab token error:',e);}
+    addLog('info','Schwab OAuth','Conexión exitosa ✓ Token obtenido');
+  }catch(e){console.warn('Schwab token error:',e);
+    addLog('error','Schwab OAuth','Error intercambiando token',e.message);}
 }
 async function getSchwabToken(){
   const token=localStorage.getItem('schwab_access_token')||'';
@@ -607,11 +644,15 @@ async function fetchSchwabCandles(sym,periodType,period,freqType,freq){
     if(!r.ok){
       const err=await r.text().catch(()=>'');
       console.warn('Schwab error:', sym, r.status, err.substring(0,100));
+      addLog('error','Schwab API',`${sym} → HTTP ${r.status}`,err.substring(0,100));
       return null;
     }
     const d=await r.json();
-    if(!d.candles||!d.candles.length){console.warn('Schwab: no candles for',sym,d);return null;}
+    if(!d.candles||!d.candles.length){console.warn('Schwab: no candles for',sym,d);
+      addLog('warn','Schwab API',`${sym} → Sin velas disponibles`);
+      return null;}
     console.log('Schwab OK:', sym, d.candles.length, 'candles');
+    addLog('info','Schwab API',`${sym} → ${d.candles.length} velas recibidas ✓`);
     return d.candles.slice(-50).map(c=>c.close);
   }catch(e){console.warn('Schwab fetch error:',sym,e.message);return null;}
 }
@@ -629,6 +670,95 @@ function updateSchwabStatus(){
       btn.title='Schwab no conectado · Click para conectar';
     }
   }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// LOGS SYSTEM
+// ═══════════════════════════════════════════════════════════════
+const _logs = [];
+const MAX_LOGS = 200;
+let _logFilter = 'all';
+
+function addLog(level, category, message, detail='') {
+  const et = new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+  const time = et.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:true});
+  const entry = { level, category, message, detail, time, ts: Date.now() };
+  _logs.unshift(entry);
+  if(_logs.length > MAX_LOGS) _logs.pop();
+
+  // Update badge — only show for errors
+  const errors = _logs.filter(l=>l.level==='error').length;
+  const badge = document.getElementById('logsBadge');
+  const btn   = document.getElementById('logsBtn');
+  if(badge && errors > 0){
+    badge.style.display='inline';
+    badge.textContent=errors;
+    if(btn){btn.style.borderColor='var(--red)';btn.style.color='var(--red)';}
+  }
+  // Refresh if modal is open
+  if(document.getElementById('logsModal')?.style.display!=='none') renderLogs();
+}
+
+function openLogsModal(){
+  document.getElementById('logsModal').style.display='flex';
+  // Reset badge
+  const badge=document.getElementById('logsBadge');
+  const btn=document.getElementById('logsBtn');
+  if(badge)badge.style.display='none';
+  if(btn){btn.style.borderColor='var(--border2)';btn.style.color='var(--text3)';}
+  renderLogs();
+}
+
+function filterLogs(f, btn){
+  _logFilter=f;
+  document.querySelectorAll('.log-filter-btn').forEach(b=>{
+    b.style.borderColor='var(--border)';b.style.color='var(--text3)';
+  });
+  if(btn){btn.style.borderColor='var(--blue)';btn.style.color='var(--blue)';}
+  renderLogs();
+}
+
+function renderLogs(){
+  const container=document.getElementById('logsContainer');
+  const countEl=document.getElementById('logsCount');
+  if(!container)return;
+
+  const filtered=_logFilter==='all'?_logs:_logs.filter(l=>l.level===_logFilter);
+
+  if(!filtered.length){
+    container.innerHTML='<div style="text-align:center;padding:30px;color:var(--text3);">Sin logs para mostrar</div>';
+    if(countEl)countEl.textContent='0 entradas';
+    return;
+  }
+
+  const icons={error:'🔴',warn:'🟡',info:'🟢'};
+  const cols={error:'var(--red)',warn:'var(--yellow)',info:'var(--green)'};
+  const bgs={error:'rgba(255,77,109,.05)',warn:'rgba(255,194,52,.05)',info:'rgba(0,209,122,.05)'};
+
+  container.innerHTML=filtered.map(l=>`
+    <div style="padding:8px 10px;border-bottom:1px solid var(--border);background:${bgs[l.level]||'transparent'};">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;">
+        <span style="font-size:12px;">${icons[l.level]||'⚪'}</span>
+        <span style="font-size:10px;color:var(--text3);min-width:90px;">${l.time}</span>
+        <span style="font-size:10px;font-weight:700;color:${cols[l.level]||'var(--text3)'};background:${bgs[l.level]};padding:1px 6px;border-radius:6px;text-transform:uppercase;">${l.category}</span>
+        <span style="font-size:12px;color:var(--text);font-weight:600;">${l.message}</span>
+      </div>
+      ${l.detail?`<div style="font-size:11px;color:var(--text3);padding-left:28px;line-height:1.5;">${l.detail}</div>`:''}
+    </div>`).join('');
+
+  if(countEl)countEl.textContent=`${filtered.length} entrada${filtered.length!==1?'s':''} · ${_logs.length} total`;
+}
+
+function clearLogs(){
+  if(confirm('¿Limpiar todos los logs?')){_logs.length=0;renderLogs();}
+}
+
+function exportLogs(){
+  const text=_logs.map(l=>`[${l.time}] ${l.level.toUpperCase()} [${l.category}] ${l.message}${l.detail?' | '+l.detail:''}`).join('\n');
+  const blob=new Blob([text],{type:'text/plain'});
+  const url=URL.createObjectURL(blob);const a=document.createElement('a');
+  a.href=url;a.download='tradedesk-logs-'+new Date().toISOString().split('T')[0]+'.txt';
+  a.click();URL.revokeObjectURL(url);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -775,8 +905,9 @@ async function buildSignals(){
           fetchSchwabCandles(sym,'day',10,'minute',30),
           new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),6000))
         ]);
-        if(result&&result.length>=10){p1h=result;dataLabel='📡 Schwab Live';}
-      }catch(e){console.warn('Schwab signals error:',sym,e.message);}
+        if(result&&result.length>=10){p1h=result;dataLabel='📡 Schwab Live';addLog('info','Señales',`${sym} → Velas Schwab Live (${result.length})`);}
+      }catch(e){console.warn('Schwab signals error:',sym,e.message);
+        addLog('error','Schwab',`Error obteniendo velas de ${sym}`,e.message);}
     }
 
     // ── 2. Fallback: Finnhub 1H ───────────────────────────────────────────
@@ -786,12 +917,12 @@ async function buildSignals(){
           fetchCandles(sym,'60',24),
           new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),4000))
         ]);
-        if(result&&result.length>=10){p1h=result;dataLabel='📡 Finnhub';}
+        if(result&&result.length>=10){p1h=result;dataLabel='📡 Finnhub';addLog('info','Señales',`${sym} → Velas Finnhub (${result.length})`);}
       }catch(e){}
     }
 
     // ── 3. Final fallback: simulated ──────────────────────────────────────
-    if(!p1h){p1h=genCandles(base,24,.005);dataLabel='⚠️ Simulado';}
+    if(!p1h){p1h=genCandles(base,24,.005);dataLabel='⚠️ Simulado';addLog('warn','Señales',`${sym} → Usando datos simulados (Schwab y Finnhub no disponibles)`);}
 
     // ── Calculate indicators ──────────────────────────────────────────────
     const n=p1h.length;

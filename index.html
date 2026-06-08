@@ -23,7 +23,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
 ::-webkit-scrollbar{width:4px;height:4px;}
 ::-webkit-scrollbar-thumb{background:var(--border2);border-radius:4px;}
 .shell{display:grid;grid-template-rows:48px 1fr;height:100vh;width:100vw;overflow:hidden;}
-.topbar{background:var(--bg2);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;padding:0 16px;overflow:hidden;}
+.topbar{background:var(--bg2);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;padding:0 16px;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;}
 .logo{font-family:var(--mono);font-size:13px;font-weight:700;color:var(--blue);white-space:nowrap;}
 .logo span{color:var(--text2);font-weight:400;}
 .main{display:grid;grid-template-columns:400px 1fr 520px;height:100%;width:100vw;overflow:hidden;}
@@ -166,7 +166,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
   <div class="card">
     <div style="text-align:center;margin-bottom:10px;">
       <div style="font-size:18px;font-weight:700;color:#fff;">Señales Activas</div>
-      <div style="font-size:11px;color:var(--text2);margin-top:3px;">E1 Cambio al Alza · E2 Cambio a la Baja · Temporalidad 1H · GOOG &amp; TSLA</div>
+      <div style="font-size:11px;color:var(--text2);margin-top:3px;">E1·E2 Tendencia · E3 RSI Extremo · E4 Squeeze · E5 Mean Reversion · 1H · GOOG &amp; TSLA</div>
     </div>
     <div id="signalArea">
       <div style="text-align:center;padding:20px;color:var(--text2);font-size:13px;">⟳ Calculando señales…</div>
@@ -361,7 +361,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
       <button class="pin-key" onclick="pinBack()" style="font-size:14px;">⌫</button>
     </div>
     <div id="pinError" style="font-size:11px;color:var(--red);margin-top:8px;min-height:14px;"></div>
-    <button onclick="closePinModal()" style="margin-top:8px;background:none;border:none;color:var(--text3);font-size:11px;cursor:pointer;">Cancelar</button>
+    <div style="display:flex;gap:10px;justify-content:center;margin-top:8px;"><button onclick="closePinModal()" style="background:none;border:none;color:var(--text3);font-size:11px;cursor:pointer;">Cancelar</button><button onclick="resetPin()" style="background:none;border:none;color:var(--red);font-size:11px;cursor:pointer;">Resetear PIN</button></div>
   </div>
 </div>
 
@@ -489,11 +489,14 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
 // ═══════════════════════════════════════════════════════════════
 // CONSTANTS
 // ═══════════════════════════════════════════════════════════════
-const SCHWAB_CLIENT_ID='vHOIY18zJ8G8ffAkjXMYuaOZ5UCHj3cZ3KejLeGJEcninPtd';
+// SCHWAB_CLIENT_ID se carga desde localStorage para no exponerlo en el código fuente.
+// Se guarda la primera vez que el usuario ingresa su App Key en el modal de Schwab.
+function getSchwabClientId(){return localStorage.getItem('schwab_client_id')||'';}
 const SCHWAB_REDIRECT='https://jonrd09.github.io/tradedesk/';
 const SCHWAB_API_BASE='https://api.schwabapi.com/marketdata/v1';
 
-const DEFAULT_PIN='2122';
+// PIN se carga desde localStorage. Si no existe, el usuario debe configurarlo.
+function getStoredPin(){return localStorage.getItem('app_pin')||'';}
 let _pinBuffer='',_pinCallback=null;
 let currentTicker='GOOG';
 let _insiderData=[];
@@ -583,7 +586,7 @@ function saveSchwabKeys(){
   // Start OAuth
   const state=Math.random().toString(36).substring(2);
   localStorage.setItem('schwab_oauth_state',state);
-  const url=`https://api.schwabapi.com/v1/oauth/authorize?client_id=${SCHWAB_CLIENT_ID}&redirect_uri=${encodeURIComponent(SCHWAB_REDIRECT)}&response_type=code&state=${state}`;
+  const _cid=getSchwabClientId();const url=`https://api.schwabapi.com/v1/oauth/authorize?client_id=${_cid}&redirect_uri=${encodeURIComponent(SCHWAB_REDIRECT)}&response_type=code&state=${state}`;
   window.location.href=url;
 }
 async function handleSchwabCallback(){
@@ -594,7 +597,7 @@ async function handleSchwabCallback(){
   const secret=localStorage.getItem('schwab_client_secret')||'';
   if(!secret)return;
   try{
-    const creds=btoa(SCHWAB_CLIENT_ID+':'+secret);
+    const creds=btoa(getSchwabClientId()+':'+secret);
     const r=await fetch('https://api.schwabapi.com/v1/oauth/token',{
       method:'POST',
       headers:{'Authorization':'Basic '+creds,'Content-Type':'application/x-www-form-urlencoded'},
@@ -619,7 +622,7 @@ async function getSchwabToken(){
   const secret=localStorage.getItem('schwab_client_secret')||'';
   if(!refresh||!secret)return null;
   try{
-    const creds=btoa(SCHWAB_CLIENT_ID+':'+secret);
+    const creds=btoa(getSchwabClientId()+':'+secret);
     const r=await fetch('https://api.schwabapi.com/v1/oauth/token',{
       method:'POST',
       headers:{'Authorization':'Basic '+creds,'Content-Type':'application/x-www-form-urlencoded'},
@@ -708,6 +711,7 @@ function openLogsModal(){
   document.getElementById('logsModal').style.display='flex';
   // Reset button to neutral after opening
   const btn=document.getElementById('logsBtn');
+  const badge=document.getElementById('logsBadge');
   if(badge)badge.style.display='none';
   if(btn){
     btn.style.borderColor='var(--border2)';
@@ -770,14 +774,30 @@ function exportLogs(){
 }
 
 // ═══════════════════════════════════════════════════════════════
-// PIN
+// PIN  — nunca hardcodeado; se guarda codificado en localStorage
 // ═══════════════════════════════════════════════════════════════
+function _xor(s,k){return s.split('').map((c,i)=>String.fromCharCode(c.charCodeAt(0)^k.charCodeAt(i%k.length))).join('');}
+function _encodePin(p){return btoa(_xor(p,'tdp_salt_2025'));}
+function _decodePin(e){try{return _xor(atob(e),'tdp_salt_2025');}catch(ex){return '';}}
+function getStoredPin(){return localStorage.getItem('app_pin')||'';}
+
 function requirePin(cb,label='Ingresa tu PIN'){
+  const stored=getStoredPin();
+  if(!stored){showPinSetup(cb,label);return;}
   _pinBuffer='';_pinCallback=cb;
   document.getElementById('pinLabel').textContent=label;
   document.getElementById('pinError').textContent='';
   for(let i=0;i<4;i++)document.getElementById('pd'+i).classList.remove('filled');
   document.getElementById('pinModal').style.display='flex';
+}
+function showPinSetup(cb,label){
+  const p=prompt('🔐 Primera vez: elige un PIN de 4 dígitos para proteger Schwab y Finnhub:');
+  if(!p||!/^\d{4}$/.test(p)){alert('PIN inválido. Debe ser exactamente 4 dígitos.');return;}
+  const p2=prompt('Confirma tu PIN:');
+  if(p!==p2){alert('Los PINs no coinciden. Intenta de nuevo.');return;}
+  try{localStorage.setItem('app_pin',_encodePin(p));}catch(e){}
+  alert('✅ PIN configurado correctamente.');
+  if(cb)cb();
 }
 function pinPress(d){
   if(_pinBuffer.length>=4)return;
@@ -785,7 +805,8 @@ function pinPress(d){
   document.getElementById('pd'+(_pinBuffer.length-1)).classList.add('filled');
   if(_pinBuffer.length===4){
     setTimeout(()=>{
-      if(_pinBuffer==='2122'){
+      const correct=_decodePin(getStoredPin());
+      if(_pinBuffer===correct){
         document.getElementById('pinModal').style.display='none';
         _pinBuffer='';
         if(_pinCallback)_pinCallback();
@@ -800,6 +821,7 @@ function pinPress(d){
 function pinBack(){if(_pinBuffer.length===0)return;document.getElementById('pd'+(_pinBuffer.length-1)).classList.remove('filled');_pinBuffer=_pinBuffer.slice(0,-1);}
 function pinClear(){_pinBuffer='';for(let i=0;i<4;i++)document.getElementById('pd'+i).classList.remove('filled');document.getElementById('pinError').textContent='';}
 function closePinModal(){document.getElementById('pinModal').style.display='none';_pinBuffer='';_pinCallback=null;}
+function resetPin(){if(confirm('¿Resetear PIN? Deberás configurar uno nuevo la próxima vez.'))try{localStorage.removeItem('app_pin');alert('PIN reseteado.');}catch(e){}}
 
 // ═══════════════════════════════════════════════════════════════
 // CLOCK & MARKET STATUS
@@ -812,7 +834,7 @@ function tick(){
   const ms=document.getElementById('mktStatus');
   if(ms){ms.textContent=open?'● ABIERTO':'● CERRADO';ms.className=open?'mkt-open':'mkt-closed';}
 }
-setInterval(tick,1000);tick();
+window._tickInterval=setInterval(tick,1000);tick();
 
 // ═══════════════════════════════════════════════════════════════
 // LIVE PRICES — Finnhub
@@ -966,6 +988,70 @@ async function buildSignals(){
       {ok:bbW>3,             tf:'1H',text:`Volatilidad BB activa (${bbW.toFixed(1)}%)`},
       {ok:lRSI<50,           tf:'1H',text:`RSI 1H bajo 50 (${lRSI.toFixed(1)})`},
     ]});
+
+    // ── E3: RSI EXTREMO — Rebote desde sobrecompra/sobreventa ──────────────
+    // CALL: RSI venía en sobreventa (<30) y cruza de vuelta sobre 35
+    const rsiFull=rsiv;
+    const prevRSI=rsiFull.slice(-2)[0]||lRSI;
+    const rsiCrossUp=prevRSI<35&&lRSI>=35;
+    const rsiCrossDown=prevRSI>65&&lRSI<=65;
+    const lBBPct=lMid?((lP-lLow)/(lUp-lLow)*100):50; // %B indicator
+    all.push({...meta,code:'E3',name:'Rebote RSI — Sobreventa a Alza',type:'call',reqs:[
+      {ok:prevRSI<35,        tf:'1H',text:`RSI venía en sobreventa (prev ${prevRSI.toFixed(1)})`},
+      {ok:rsiCrossUp,        tf:'1H',text:`RSI cruza sobre 35 (actual ${lRSI.toFixed(1)})`},
+      {ok:lBBPct<40,         tf:'1H',text:`%B Bollinger en zona baja (${lBBPct.toFixed(0)}%)`},
+      {ok:lP>pP,             tf:'1H',text:'Vela actual alcista (cierre > cierre anterior)'},
+    ]});
+    all.push({...meta,code:'E3B',name:'Rebote RSI — Sobrecompra a Baja',type:'put',reqs:[
+      {ok:prevRSI>65,        tf:'1H',text:`RSI venía en sobrecompra (prev ${prevRSI.toFixed(1)})`},
+      {ok:rsiCrossDown,      tf:'1H',text:`RSI cae bajo 65 (actual ${lRSI.toFixed(1)})`},
+      {ok:lBBPct>60,         tf:'1H',text:`%B Bollinger en zona alta (${lBBPct.toFixed(0)}%)`},
+      {ok:lP<pP,             tf:'1H',text:'Vela actual bajista (cierre < cierre anterior)'},
+    ]});
+
+    // ── E4: SQUEEZE DE VOLATILIDAD (BB dentro de KC) ──────────────────────
+    // Bollinger Bands squeeze: BBW muy comprimido + precio en extremo = explosión inminente
+    const bbwPrev=p1h.slice(-5,-1).map((_,i)=>{
+      const sl=p1h.slice(Math.max(0,n-5+i-19),n-5+i+1);
+      if(sl.length<5)return 99;
+      const m=sl.reduce((a,b)=>a+b,0)/sl.length;
+      const std=Math.sqrt(sl.reduce((s,v)=>s+(v-m)**2,0)/sl.length);
+      return m>0?(std*4/m*100):99;
+    });
+    const bbwAvg5=bbwPrev.length?bbwPrev.reduce((a,b)=>a+b,0)/bbwPrev.length:99;
+    const isSqueeze=bbW<bbwAvg5*0.7&&bbW<4; // BB más angosto que el 70% del promedio reciente
+    const breakUp=lP>lUp*0.99&&lP>pP;
+    const breakDown=lP<lLow*1.01&&lP<pP;
+    all.push({...meta,code:'E4',name:'Squeeze BB — Ruptura al Alza',type:'call',reqs:[
+      {ok:isSqueeze,         tf:'1H',text:`Squeeze detectado: BBW ${bbW.toFixed(1)}% vs prom ${bbwAvg5.toFixed(1)}%`},
+      {ok:breakUp,           tf:'1H',text:`Precio rompiendo banda superior ($${lUp.toFixed(2)})`},
+      {ok:lRSI>50,           tf:'1H',text:`RSI apoyando alza (${lRSI.toFixed(1)})`},
+      {ok:lMA20>lMA40||lP>lMA20,tf:'1H',text:'Estructura de medias no opuesta'},
+    ]});
+    all.push({...meta,code:'E4B',name:'Squeeze BB — Ruptura a la Baja',type:'put',reqs:[
+      {ok:isSqueeze,         tf:'1H',text:`Squeeze detectado: BBW ${bbW.toFixed(1)}% vs prom ${bbwAvg5.toFixed(1)}%`},
+      {ok:breakDown,         tf:'1H',text:`Precio rompiendo banda inferior ($${lLow.toFixed(2)})`},
+      {ok:lRSI<50,           tf:'1H',text:`RSI apoyando baja (${lRSI.toFixed(1)})`},
+      {ok:lMA20<lMA40||lP<lMA20,tf:'1H',text:'Estructura de medias no opuesta'},
+    ]});
+
+    // ── E5: PRECIO EN EXTREMO DE BOLLINGER (Pullback a la media) ──────────
+    // El precio toca la banda extrema → posible retroceso a la media (mean reversion)
+    const touchUpper=lP>lUp;
+    const touchLower=lP<lLow;
+    const meanRevRatio=lMid>0?Math.abs(lP-lMid)/lMid*100:0;
+    all.push({...meta,code:'E5',name:'Extremo BB — Pullback Bajista',type:'put',reqs:[
+      {ok:touchUpper,        tf:'1H',text:`Precio sobre banda superior ($${lP.toFixed(2)} > $${lUp.toFixed(2)})`},
+      {ok:lRSI>68,           tf:'1H',text:`RSI en zona extendida (${lRSI.toFixed(1)} > 68)`},
+      {ok:meanRevRatio>1.5,  tf:'1H',text:`Distancia a la media: ${meanRevRatio.toFixed(1)}% (alta)`},
+      {ok:lP<pP,             tf:'1H',text:'Primera vela bajista desde el extremo'},
+    ]});
+    all.push({...meta,code:'E5B',name:'Extremo BB — Pullback Alcista',type:'call',reqs:[
+      {ok:touchLower,        tf:'1H',text:`Precio bajo banda inferior ($${lP.toFixed(2)} < $${lLow.toFixed(2)})`},
+      {ok:lRSI<32,           tf:'1H',text:`RSI en zona extendida (${lRSI.toFixed(1)} < 32)`},
+      {ok:meanRevRatio>1.5,  tf:'1H',text:`Distancia a la media: ${meanRevRatio.toFixed(1)}% (alta)`},
+      {ok:lP>pP,             tf:'1H',text:'Primera vela alcista desde el extremo'},
+    ]});
   }
 
   const active=all.map(s=>({...s,passed:s.reqs.filter(r=>r.ok).length})).filter(s=>s.passed>=2).sort((a,b)=>b.passed-a.passed);
@@ -983,7 +1069,7 @@ async function buildSignals(){
   else{dir=`⚡ MIXTO — ${calls} CALL · ${puts} PUT · revisar tendencia`;dirCol='var(--yellow)';}
 
   let html=`<div style="text-align:center;padding:10px 0;border-bottom:1px solid var(--border);margin-bottom:12px;">
-    <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:4px;">SEÑALES ACTIVAS — E1 · E2</div>
+    <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:4px;">SEÑALES ACTIVAS — E1 · E2 · E3 · E4 · E5</div>
     <div style="font-family:var(--mono);font-size:32px;font-weight:700;color:#fff;">${active.length}</div>
     <div style="font-size:12px;color:${dirCol};margin-top:4px;">${dir}</div>
   </div>`;
@@ -1476,7 +1562,7 @@ function renderInsiderTable(data){
 // ═══════════════════════════════════════════════════════════════
 async function init(){
   // Restore Finnhub key
-  try{localStorage.removeItem('dashboard_pin');}catch(e){}
+  // (dashboard_pin key deprecated — removed)
   const _k=getKey();
   if(!_k||_k.length<8){
     document.getElementById('keyModal').style.display='flex';
@@ -1523,7 +1609,8 @@ async function init(){
   setTimeout(()=>showRulesPopup(), 1500);
 
   // Auto-refresh every 5 min during market hours
-  setInterval(()=>{
+  if(window._refreshInterval)clearInterval(window._refreshInterval);
+  window._refreshInterval=setInterval(()=>{
     const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
     const h=et.getHours(),m=et.getMinutes(),d=et.getDay();
     if(d>=1&&d<=5&&(h>8||(h===8&&m>=30))&&h<16){

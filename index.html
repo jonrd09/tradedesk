@@ -635,27 +635,38 @@ async function getSchwabToken(){
     return d.access_token;
   }catch(e){return null;}
 }
-async function fetchSchwabCandles(sym,periodType,period,freqType,freq){
+// Schwab valid combos:
+//   minute candles:  periodType=day,   period=1-10, frequencyType=minute, frequency=1|5|10|15|30
+//   daily  candles:  periodType=month, period=1,    frequencyType=daily,  frequency=1
+async function fetchSchwabCandles(sym,freqType,freq,bars=50){
   const token=await getSchwabToken();
-  if(!token){console.warn('Schwab: no token');return null;}
+  if(!token)return null;
+  let periodType,period,frequencyType,frequency;
+  if(freqType==='D'||freqType==='daily'){
+    periodType='month';period=1;frequencyType='daily';frequency=1;
+  }else if(freqType==='minute'){
+    const validFreqs=[1,5,10,15,30];
+    frequency=validFreqs.includes(freq)?freq:30;
+    periodType='day';period=10;frequencyType='minute';
+  }else{
+    return null;
+  }
   try{
-    const url=`${SCHWAB_API_BASE}/pricehistory?symbol=${sym}&periodType=${periodType}&period=${period}&frequencyType=${freqType}&frequency=${freq}&needExtendedHoursData=false`;
-    console.log('Schwab fetch:', sym, url.substring(0,80));
-    const r=await fetch(url,{headers:{'Authorization':'Bearer '+token},signal:AbortSignal.timeout(6000)});
-    console.log('Schwab response:', sym, r.status);
+    const url=`${SCHWAB_API_BASE}/pricehistory?symbol=${sym}&periodType=${periodType}&period=${period}&frequencyType=${frequencyType}&frequency=${frequency}&needExtendedHoursData=false`;
+    const r=await fetch(url,{headers:{'Authorization':'Bearer '+token},signal:AbortSignal.timeout(7000)});
     if(!r.ok){
       const err=await r.text().catch(()=>'');
-      console.warn('Schwab error:', sym, r.status, err.substring(0,100));
-      addLog('error','Schwab API',`${sym} → HTTP ${r.status}`,err.substring(0,100));
+      addLog('error','Schwab API',`${sym} ${frequencyType}/${frequency} → HTTP ${r.status}`,err.substring(0,120));
       return null;
     }
     const d=await r.json();
-    if(!d.candles||!d.candles.length){console.warn('Schwab: no candles for',sym,d);
-      addLog('warn','Schwab API',`${sym} → Sin velas disponibles`);
-      return null;}
-    console.log('Schwab OK:', sym, d.candles.length, 'candles');
-    return d.candles.slice(-50).map(c=>c.close);
-  }catch(e){console.warn('Schwab fetch error:',sym,e.message);return null;}
+    if(!d.candles||!d.candles.length){
+      addLog('warn','Schwab API',`${sym} → Sin velas`);
+      return null;
+    }
+    const sl=d.candles.slice(-bars);
+    return{c:sl.map(v=>v.close),h:sl.map(v=>v.high),l:sl.map(v=>v.low),o:sl.map(v=>v.open)};
+  }catch(e){addLog('warn','Schwab API',`${sym} fetch error`,e.message);return null;}
 }
 function updateSchwabStatus(){
   const token=localStorage.getItem('schwab_access_token')||'';
@@ -1007,18 +1018,20 @@ async function buildSignals(){
   for(const sym of['GOOG','TSLA']){
     const base=DEFAULTS[sym].price,pct=DEFAULTS[sym].pct;
     let ohlc1h=null,ohlc15=null,ohlcD=null;
-    let dataLabel='⚠️ Simulado';
+    let dataLabel='📡 Sin fuente';
 
     // Try Schwab first (30min as proxy for 1H, 5min as proxy for 15min)
     const schwabToken=await getSchwabToken();
     if(schwabToken){
       try{
-        const [r1,r2]=await Promise.all([
-          Promise.race([fetchSchwabCandles(sym,'day',20,'minute',30),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),6000))]),
-          Promise.race([fetchSchwabCandles(sym,'day',5,'minute',5),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),6000))])
+        const [r1,r2,r3]=await Promise.all([
+          Promise.race([fetchSchwabCandles(sym,'minute',30,50),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),6000))]),
+          Promise.race([fetchSchwabCandles(sym,'minute',15,50),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),6000))]),
+          Promise.race([fetchSchwabCandles(sym,'D',1,30),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),6000))])
         ]);
-        if(r1&&r1.length>=10){ohlc1h={c:r1,h:r1,l:r1,o:r1};dataLabel='📡 Schwab';}
-        if(r2&&r2.length>=5){ohlc15={c:r2,h:r2,l:r2,o:r2};}
+        if(r1&&closes(r1).length>=10){ohlc1h=r1;dataLabel='📡 Schwab';}
+        if(r2&&closes(r2).length>=5){ohlc15=r2;}
+        if(r3&&closes(r3).length>=10){ohlcD=r3;}
       }catch(e){addLog('warn','Schwab',`${sym} señales error`,e.message);}
     }
 
@@ -1042,17 +1055,12 @@ async function buildSignals(){
       }catch(e){}
     }
 
-    // Simulate if needed
-    if(!ohlc1h){
-      const sim=genCandles(base,50,.008);
-      ohlc1h={c:sim,h:sim.map(v=>v*1.003),l:sim.map(v=>v*0.997),o:sim};
-      dataLabel='⚠️ Simulado';
-      const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
-      const open=et.getDay()>=1&&et.getDay()<=5&&(et.getHours()>8||(et.getHours()===8&&et.getMinutes()>=30))&&et.getHours()<16;
-      if(open)addLog('warn','Señales',`${sym} → Datos simulados durante mercado`);
+    // Sin datos reales en cualquier timeframe = no evaluar señales
+    if(!ohlc1h||!ohlc15||!ohlcD){
+      const missing=[!ohlc1h?'1H':null,!ohlc15?'15m':null,!ohlcD?'D':null].filter(Boolean).join(', ');
+      addLog('warn','Señales',`${sym} → Sin datos reales en: ${missing}. Señales omitidas.`);
+      continue;
     }
-    if(!ohlc15){const sim=genCandles(base,50,.004);ohlc15={c:sim,h:sim.map(v=>v*1.002),l:sim.map(v=>v*0.998),o:sim};}
-    if(!ohlcD){const sim=genCandles(base,30,.015);ohlcD={c:sim,h:sim.map(v=>v*1.008),l:sim.map(v=>v*0.992),o:sim};}
 
     // ── Common indicators 1H ─────────────────────────────────────────────
     const c1h=closes(ohlc1h),h1h=highs(ohlc1h),l1h=lows(ohlc1h),o1h=opens(ohlc1h);
@@ -1252,7 +1260,7 @@ async function buildSignals(){
     .sort((a,b)=>b.passed-a.passed);
 
   if(!active.length){
-    area.innerHTML='<div style="text-align:center;padding:30px;color:var(--text2);font-size:13px;"><div style="font-size:28px;margin-bottom:10px">📊</div><div style="font-weight:600;">Sin señales activas</div><div style="font-size:11px;margin-top:6px;color:var(--text3)">Ninguna estrategia alcanza el 75% de condiciones</div></div>';
+    area.innerHTML='<div style="text-align:center;padding:30px;color:var(--text2);font-size:13px;"><div style="font-size:28px;margin-bottom:10px">📊</div><div style="font-weight:600;">Sin señales activas</div><div style="font-size:11px;margin-top:6px;color:var(--text3)">Ninguna estrategia alcanza el 75% · Verifica tu API key de Finnhub</div></div>';
     return;
   }
 

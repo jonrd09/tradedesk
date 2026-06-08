@@ -771,8 +771,9 @@ async function buildSignals(){
     const schwabToken=await getSchwabToken();
     if(schwabToken){
       try{
-        [p1h,p15m]=await Promise.race([
-          Promise.all([fetchSchwabCandles(sym,'day',5,'minute',60),fetchSchwabCandles(sym,'day',5,'minute',15)]),
+        // Schwab: 60min not supported, use 30min as proxy; 15min with 1 day
+      [p1h,p15m]=await Promise.race([
+          Promise.all([fetchSchwabCandles(sym,'day',10,'minute',30),fetchSchwabCandles(sym,'day',1,'minute',15)]),
           new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),5000))
         ]);
         if(p1h&&p15m)dataLabel='📡 Schwab Live';

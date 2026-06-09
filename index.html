@@ -1085,9 +1085,9 @@ async function buildSignals(){
       if(schwabToken){
         try{
           const [r1,r2,r3]=await Promise.all([
-            Promise.race([fetchSchwabCandles(sym,'minute',30,50),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),6000))]),
-            Promise.race([fetchSchwabCandles(sym,'minute',15,50),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),6000))]),
-            Promise.race([fetchSchwabCandles(sym,'D',1,30),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),6000))])
+            Promise.race([fetchSchwabCandles(sym,'minute',30,100),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),6000))]),
+            Promise.race([fetchSchwabCandles(sym,'minute',15,60),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),6000))]),
+            Promise.race([fetchSchwabCandles(sym,'D',1,90),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),6000))])
           ]);
           if(r1&&closes(r1).length>=10){ohlc1h=r1;dataLabel='📡 Schwab';}
           if(r2&&closes(r2).length>=5){ohlc15=r2;}
@@ -1372,9 +1372,9 @@ async function buildMomentum(){
       // Schwab only for candles
       const schwabTok=await getSchwabToken();
       if(schwabTok){
-        pDay=await Promise.race([fetchSchwabCandles(sym,'D',1,60),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),7000))]);
+        pDay=await Promise.race([fetchSchwabCandles(sym,'D',1,90),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),7000))]);
         await new Promise(r=>setTimeout(r,200));
-        p1h=await Promise.race([fetchSchwabCandles(sym,'minute',30,48),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),7000))]);
+        p1h=await Promise.race([fetchSchwabCandles(sym,'minute',30,100),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),7000))]);
         await new Promise(r=>setTimeout(r,200));
       }
     }catch(e){}
@@ -1666,7 +1666,10 @@ function addStrikeEntry(){
   if(!dist&&dist!==0)return;
   const key='strikelog_'+_strikeTicker;
   let log=[];try{log=JSON.parse(localStorage.getItem(key)||'[]');}catch(e){}
-  log.unshift({day,dist,costo,date:new Date().toLocaleDateString('es-PR')});
+  const _now=new Date();
+  const _date=_now.toLocaleDateString('es-PR',{day:'2-digit',month:'2-digit',year:'numeric'});
+  const _time=_now.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true,timeZone:'America/New_York'});
+  log.unshift({day,dist,costo,date:_date,time:_time});
   try{localStorage.setItem(key,JSON.stringify(log));}catch(e){}
   document.getElementById('strikeDist').value='';
   document.getElementById('strikeCosto').value='';
@@ -1700,6 +1703,7 @@ function saveStrikeEdit(ticker,idx){
   const key='strikelog_'+ticker;let log=[];
   try{log=JSON.parse(localStorage.getItem(key)||'[]');}catch(e){}
   if(!log[idx])return;log[idx].day=day;log[idx].dist=dist;log[idx].costo=costo;
+  // preserve original time when editing
   try{localStorage.setItem(key,JSON.stringify(log));}catch(e){}
   renderStrikeLog();updateCardAverages();
 }
@@ -1711,11 +1715,12 @@ function renderStrikeLog(){
   const avgDet=document.getElementById('strikeAvgDetail');
   const avgGlb=document.getElementById('strikeAvgGlobal');
   if(!log.length){listEl.innerHTML='<div style="text-align:center;padding:16px;color:var(--text3);font-size:12px;">Sin entradas — agrega tu primer registro</div>';avgBox.style.display='none';return;}
-  listEl.innerHTML=log.map((e,i)=>`<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border);font-size:13px;" id="sentry-${i}">
-    <span style="min-width:75px;color:var(--text);font-weight:600;">${e.day}</span>
-    <span style="font-size:11px;color:var(--text3);min-width:80px;">${e.date}</span>
+  listEl.innerHTML=log.map((e,i)=>`<div style="display:flex;align-items:center;gap:6px;padding:7px 0;border-bottom:1px solid var(--border);font-size:13px;flex-wrap:wrap;" id="sentry-${i}">
+    <span style="min-width:72px;color:var(--text);font-weight:600;">${e.day}</span>
+    <span style="font-size:11px;color:var(--text3);min-width:76px;">${e.date||''}</span>
+    <span style="font-size:11px;color:var(--blue);min-width:58px;font-family:var(--mono);">${e.time||''}</span>
     <span style="font-family:var(--mono);font-size:12px;color:var(--yellow);min-width:52px;">$${(e.costo||0).toFixed(2)}</span>
-    <span style="font-family:var(--mono);font-weight:700;color:${_strikeColor};min-width:30px;text-align:right;">${e.dist}</span>
+    <span style="font-family:var(--mono);font-weight:700;color:${_strikeColor};min-width:28px;text-align:right;">${e.dist}</span>
     <button onclick="editStrikeEntry('${_strikeTicker}',${i})" style="background:none;border:none;color:var(--blue);cursor:pointer;font-size:12px;padding:0 4px;">✏️</button>
     <button onclick="deleteStrikeEntry('${_strikeTicker}',${i})" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:12px;padding:0 4px;">✕</button>
   </div>`).join('');

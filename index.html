@@ -697,6 +697,7 @@ function updateSchwabStatus(){
   const token=localStorage.getItem('schwab_access_token')||'';
   const expiry=parseInt(localStorage.getItem('schwab_token_expiry')||'0');
   const valid=token&&Date.now()<expiry;
+  if(token&&!valid)addLog('warn','Schwab','Token expirado — reconecta Schwab para renovar');
   const btn=document.getElementById('schwabBtn');
   if(btn){
     if(valid){
@@ -712,34 +713,40 @@ function updateSchwabStatus(){
 // ═══════════════════════════════════════════════════════════════
 // LOGS SYSTEM
 // ═══════════════════════════════════════════════════════════════
-const _logs = [];
 const MAX_LOGS = 200;
+// Load persisted logs from localStorage
+let _logs = [];
+try{_logs = JSON.parse(localStorage.getItem('tdp_logs')||'[]');}catch(e){_logs=[];}
+function _saveLogs(){try{localStorage.setItem('tdp_logs',JSON.stringify(_logs.slice(0,MAX_LOGS)));}catch(e){}}
 let _logFilter = 'all';
 
 function addLog(level, category, message, detail='') {
-  // Only log errors and warnings — never info on normal operation
+  // Solo registrar problemas — nunca operación normal
   if(level === 'info') return;
 
   const et = new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
   const time = et.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:true});
-  const entry = { level, category, message, detail, time, ts: Date.now() };
+  const date = et.toLocaleDateString('es-PR',{day:'2-digit',month:'2-digit',year:'numeric'});
+  const entry = { level, category, message, detail, time, date, ts: Date.now() };
   _logs.unshift(entry);
-  if(_logs.length > MAX_LOGS) _logs.pop();
+  if(_logs.length > MAX_LOGS) _logs.length = MAX_LOGS;
+  _saveLogs(); // persist immediately
 
-  // Turn button green when there are new unread records
+  // Badge en el botón
   const btn = document.getElementById('logsBtn');
   const badge = document.getElementById('logsBadge');
+  const isError = level === 'error';
   if(btn){
-    btn.style.borderColor='var(--green)';
-    btn.style.color='var(--green)';
-    btn.style.background='var(--green-bg)';
+    btn.style.borderColor = isError ? 'var(--red)' : 'var(--yellow)';
+    btn.style.color       = isError ? 'var(--red)' : 'var(--yellow)';
+    btn.style.background  = isError ? 'var(--red-bg)' : 'rgba(255,194,52,.1)';
   }
   if(badge){
-    badge.style.display='inline';
-    badge.style.background='var(--green)';
-    badge.textContent=_logs.length;
+    badge.style.display = 'inline';
+    badge.style.background = isError ? 'var(--red)' : 'var(--yellow)';
+    badge.style.color = isError ? '#fff' : '#000';
+    badge.textContent = _logs.filter(l=>l.level==='error').length || _logs.length;
   }
-  // Refresh if modal is open
   if(document.getElementById('logsModal')?.style.display!=='none') renderLogs();
 }
 
@@ -787,7 +794,7 @@ function renderLogs(){
     <div style="padding:8px 10px;border-bottom:1px solid var(--border);background:${bgs[l.level]||'transparent'};">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;">
         <span style="font-size:12px;">${icons[l.level]||'⚪'}</span>
-        <span style="font-size:10px;color:var(--text3);min-width:90px;">${l.time}</span>
+        <span style="font-size:10px;color:var(--text3);min-width:130px;">${l.date||''} ${l.time}</span>
         <span style="font-size:10px;font-weight:700;color:${cols[l.level]||'var(--text3)'};background:${bgs[l.level]};padding:1px 6px;border-radius:6px;text-transform:uppercase;">${l.category}</span>
         <span style="font-size:12px;color:var(--text);font-weight:600;">${l.message}</span>
       </div>
@@ -798,11 +805,11 @@ function renderLogs(){
 }
 
 function clearLogs(){
-  if(confirm('¿Limpiar todos los logs?')){_logs.length=0;renderLogs();}
+  if(confirm('¿Limpiar todos los logs?')){_logs.length=0;try{localStorage.removeItem('tdp_logs');}catch(e){}renderLogs();}
 }
 
 function exportLogs(){
-  const text=_logs.map(l=>`[${l.time}] ${l.level.toUpperCase()} [${l.category}] ${l.message}${l.detail?' | '+l.detail:''}`).join('\n');
+  const text=_logs.map(l=>`[${l.date||''} ${l.time}] ${l.level.toUpperCase()} [${l.category}] ${l.message}${l.detail?' | '+l.detail:''}`).join('\n');
   const blob=new Blob([text],{type:'text/plain'});
   const url=URL.createObjectURL(blob);const a=document.createElement('a');
   a.href=url;a.download='tradedesk-logs-'+new Date().toISOString().split('T')[0]+'.txt';
@@ -892,11 +899,19 @@ async function fetchQuote(sym){
   if(!key||key.length<8)return null;
   try{
     const r=await fetch(`https://finnhub.io/api/v1/quote?symbol=${sym}&token=${key}`,{signal:AbortSignal.timeout(5000)});
-    if(!r.ok)return null;
+    if(!r.ok){
+      if(r.status===429)addLog('error','Finnhub',`Rate limit (429) — precio ${sym}`,'Demasiadas llamadas simultáneas');
+      else if(r.status===403)addLog('error','Finnhub',`Key inválida (403) — precio ${sym}`,'Verifica tu API key en finnhub.io');
+      else addLog('warn','Finnhub',`Error precio ${sym} → HTTP ${r.status}`);
+      return null;
+    }
     const d=await r.json();
-    if(!d||!d.c||d.c<=0)return null;
+    if(!d||!d.c||d.c<=0){addLog('warn','Finnhub',`Precio vacío para ${sym}`);return null;}
     return{price:d.c,prev:d.pc,pct:+((d.c-d.pc)/d.pc*100).toFixed(2),change:+(d.c-d.pc).toFixed(2)};
-  }catch(e){return null;}
+  }catch(e){
+    if(e.name==='TimeoutError'||e.message?.includes('timeout'))addLog('warn','Finnhub',`Timeout precio ${sym}`,'Sin respuesta en 5s');
+    return null;
+  }
 }
 async function loadLivePrices(){
   const key=getKey();
@@ -1485,11 +1500,19 @@ async function fetchRotationQuote(sym){
   const key=getKey();if(!key||key.length<8)return null;
   try{
     const r=await fetch(`https://finnhub.io/api/v1/quote?symbol=${sym}&token=${key}`,{signal:AbortSignal.timeout(4000)});
-    if(!r.ok)return null;
+    if(!r.ok){
+      if(r.status===429)addLog('error','Finnhub',`Rate limit excedido (429) — ${sym}`,'Demasiadas llamadas. Reducir frecuencia.');
+      else if(r.status===403)addLog('error','Finnhub',`API key inválida (403) — ${sym}`,'Verifica tu key en finnhub.io');
+      else addLog('warn','Finnhub',`Error quote ${sym} → HTTP ${r.status}`);
+      return null;
+    }
     const d=await r.json();
-    if(!d||!d.c||d.c<=0)return null;
+    if(!d||!d.c||d.c<=0){addLog('warn','Finnhub',`Quote vacío para ${sym}`,'Sin precio disponible');return null;}
     return{price:d.c,prev:d.pc,pct:+((d.c-d.pc)/d.pc*100).toFixed(2)};
-  }catch(e){return null;}
+  }catch(e){
+    if(e.name==='TimeoutError'||e.message.includes('timeout'))addLog('warn','Finnhub',`Timeout en quote ${sym}`,'Sin respuesta en 4s');
+    return null;
+  }
 }
 function rotCell(sym,name,pct,color){
   const up=pct>=0;const col=up?'var(--green)':'var(--red)';const bdr=color?`border-left:2px solid ${color}`:`border-left:2px solid ${col}`;
@@ -2025,13 +2048,24 @@ async function init(){
 
   // Auto-refresh every 5 min during market hours
   if(window._refreshInterval)clearInterval(window._refreshInterval);
-  window._refreshInterval=setInterval(()=>{
+  let _refreshFailCount=0;
+  window._refreshInterval=setInterval(async()=>{
     const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
     const h=et.getHours(),m=et.getMinutes(),d=et.getDay();
-    if(d>=1&&d<=5&&(h>8||(h===8&&m>=30))&&h<16){
-      loadLivePrices();
-      loadRotation();
-      showRulesPopup();
+    const isOpen=d>=1&&d<=5&&(h*60+m)>=570&&(h*60+m)<960;
+    const isPre=d>=1&&d<=5&&(h*60+m)>=240&&(h*60+m)<570;
+    if(isOpen||isPre){
+      try{
+        await loadLivePrices();
+        await buildSignals();
+        await buildMomentum();
+        if(isOpen){loadRotation();showRulesPopup();}
+        _refreshFailCount=0;
+      }catch(e){
+        _refreshFailCount++;
+        addLog('error','Auto-refresh',`Ciclo falló (${_refreshFailCount}x consecutivo)`,e.message||'Error desconocido');
+        if(_refreshFailCount>=3)addLog('error','Auto-refresh','3+ ciclos fallidos — posible problema de red o token expirado');
+      }
     }
   },5*60*1000);
 }

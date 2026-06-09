@@ -474,7 +474,10 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
         <tbody id="insiderTableBody"><tr><td colspan="7" style="text-align:center;padding:30px;color:var(--text3);">Haz clic en ↻ Actualizar para cargar datos</td></tr></tbody>
       </table>
     </div>
-    <div style="margin-top:8px;font-size:10px;color:var(--text3);text-align:right;" id="insiderLastUpdate"></div>
+    <div style="margin-top:8px;display:flex;align-items:center;justify-content:flex-end;gap:8px;">
+      <span style="font-size:10px;color:var(--text3);" id="insiderLastUpdate"></span>
+      <button onclick="loadInsiderData(true)" title="Forzar actualización ahora" style="background:none;border:1px solid var(--border2);border-radius:10px;color:var(--text3);font-size:10px;padding:2px 8px;cursor:pointer;">🔄 Actualizar</button>
+    </div>
   </div>
 </div>
 <script>
@@ -921,7 +924,7 @@ async function loadLivePrices(){
   const results=[];
   for(const s of syms){
     results.push(await fetchQuote(s).catch(()=>null));
-    await new Promise(r=>setTimeout(r,500));
+    await new Promise(r=>setTimeout(r,1000));
   }
   syms.forEach((sym,i)=>{
     const q=results[i];
@@ -1524,13 +1527,13 @@ async function loadRotation(){
   allSyms.forEach(s=>{const p=ROT_FALLBACK[s]||100,pv=ROT_PREV[s]||p;quotes[s]={price:p,prev:pv,pct:+((p-pv)/pv*100).toFixed(2)};});
   const key=getKey();
   if(key&&key.length>8){
-    for(let i=0;i<allSyms.length;i+=3){
-      const batch=allSyms.slice(i,i+3);
+    // 1 símbolo a la vez con 1.2s de pausa — evita 429 con plan gratuito Finnhub
+    for(let i=0;i<allSyms.length;i++){
       try{
-        const res=await Promise.all(batch.map(s=>fetchRotationQuote(s).catch(()=>null)));
-        batch.forEach((s,j)=>{if(res[j])quotes[s]=res[j];});
+        const res=await fetchRotationQuote(allSyms[i]).catch(()=>null);
+        if(res)quotes[allSyms[i]]=res;
       }catch(e){}
-      if(i+3<allSyms.length)await new Promise(r=>setTimeout(r,800));
+      if(i<allSyms.length-1)await new Promise(r=>setTimeout(r,1200));
     }
   }
   const indEl=document.getElementById('rotIndices');
@@ -1815,18 +1818,62 @@ function openInsiderModal(){
   const alertEl=document.getElementById('insiderAlert');if(alertEl)alertEl.style.display='none';
   if(!_insiderData.length)loadInsiderData();
 }
-async function loadInsiderData(){
+// Insider cache key — stores data + timestamp in localStorage
+const INSIDER_CACHE_KEY='tdp_insider_cache';
+
+function _getInsiderCache(){
+  try{return JSON.parse(localStorage.getItem(INSIDER_CACHE_KEY)||'null');}catch(e){return null;}
+}
+function _saveInsiderCache(data){
+  try{localStorage.setItem(INSIDER_CACHE_KEY,JSON.stringify({data,ts:Date.now(),savedOn:new Date().toLocaleDateString('es-PR')}));}catch(e){}
+}
+function _insiderCacheValid(){
+  const c=_getInsiderCache();
+  if(!c||!c.ts||!c.data)return false;
+  const now=new Date();
+  const saved=new Date(c.ts);
+  // Valid if: saved this week (Mon–Sun) and saved day is Monday or later this week
+  // Refresh every Monday: if today is Mon and last save was before this Monday → invalid
+  const dayNow=now.getDay(); // 0=Sun,1=Mon...6=Sat
+  const msPerDay=86400000;
+  // Find last Monday (or today if today is Monday)
+  const daysSinceMon=dayNow===0?6:dayNow-1;
+  const lastMonday=new Date(now.getTime()-daysSinceMon*msPerDay);
+  lastMonday.setHours(0,0,0,0);
+  return saved>=lastMonday; // cache still valid if saved on or after this week's Monday
+}
+
+async function loadInsiderData(forceRefresh=false){
   const key=getKey();
   const tbody=document.getElementById('insiderTableBody');
-  if(!key||key.length<8){tbody.innerHTML='<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--yellow);">⚠ Configura tu API key de Finnhub primero</td></tr>';return;}
-  tbody.innerHTML='<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--text2);">⟳ Cargando datos de insiders…</td></tr>';
+  if(!key||key.length<8){
+    tbody.innerHTML='<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--yellow);">⚠ Configura tu API key de Finnhub primero</td></tr>';
+    return;
+  }
+
+  // Use cached data if still valid (refreshes every Monday)
+  if(!forceRefresh&&_insiderCacheValid()){
+    const c=_getInsiderCache();
+    _insiderData=c.data;
+    checkInsiderAlert();
+    renderInsiderTable(_insiderData);
+    const upEl=document.getElementById('insiderLastUpdate');
+    if(upEl)upEl.textContent=`📦 Caché del ${c.savedOn} · ${_insiderData.length} transacciones · Próxima actualización: lunes`;
+    return;
+  }
+
+  // Fetch fresh data — sequential 1 by 1 with 1.2s delay to avoid 429
+  tbody.innerHTML='<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--text2);">⟳ Actualizando datos de insiders… (puede tardar ~30s)</td></tr>';
   _insiderData=[];
-  for(let i=0;i<INSIDER_TICKERS.length;i+=4){
-    const batch=INSIDER_TICKERS.slice(i,i+4);
-    await Promise.all(batch.map(async sym=>{
-      try{
-        const r=await fetch(`https://finnhub.io/api/v1/stock/insider-transactions?symbol=${sym}&token=${key}`,{signal:AbortSignal.timeout(6000)});
-        if(!r.ok)return;const d=await r.json();
+  for(let i=0;i<INSIDER_TICKERS.length;i++){
+    const sym=INSIDER_TICKERS[i];
+    try{
+      const r=await fetch(`https://finnhub.io/api/v1/stock/insider-transactions?symbol=${sym}&token=${key}`,{signal:AbortSignal.timeout(8000)});
+      if(!r.ok){
+        if(r.status===429)addLog('error','Finnhub',`Rate limit insider (429) — ${sym}`);
+        else if(r.status===403)addLog('error','Finnhub',`Key inválida insider (403) — ${sym}`);
+      }else{
+        const d=await r.json();
         if(d&&d.data&&d.data.length>0){
           d.data.slice(0,5).forEach(t=>{
             const txCode=t.transactionCode||'';const change=t.change||0;
@@ -1834,16 +1881,17 @@ async function loadInsiderData(){
             _insiderData.push({sym,name:t.name||'—',title:t.title||'—',date:t.transactionDate||'—',type:nt,shares:change,total:t.share||0});
           });
         }
-      }catch(e){}
-    }));
-    if(i+4<INSIDER_TICKERS.length)await new Promise(r=>setTimeout(r,200));
+      }
+    }catch(e){}
+    if(i<INSIDER_TICKERS.length-1)await new Promise(r=>setTimeout(r,1200));
   }
   _insiderData.sort((a,b)=>b.date.localeCompare(a.date));
   _insiderData=_insiderData.filter(r=>r.type==='P'||r.type==='S');
+  _saveInsiderCache(_insiderData); // persist for the week
   checkInsiderAlert();
   renderInsiderTable(_insiderData);
   const upEl=document.getElementById('insiderLastUpdate');
-  if(upEl)upEl.textContent='Actualizado: '+new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})+' · '+_insiderData.length+' transacciones';
+  if(upEl)upEl.textContent=`✅ Actualizado: ${new Date().toLocaleDateString('es-PR')} · ${_insiderData.length} transacciones · Próxima actualización: lunes`;
 }
 function checkInsiderAlert(){
   const now=new Date();const cutoff=new Date();cutoff.setDate(cutoff.getDate()-30);
@@ -2036,7 +2084,7 @@ async function init(){
   if(_k&&_k.length>8){
     await loadLivePrices();
     // Delay rotation load to avoid rate limit burst on startup
-    setTimeout(()=>loadRotation(),3000);
+    setTimeout(()=>loadRotation(),5000);
   }else{
     // No key — don't make any API calls
     document.getElementById('signalArea').innerHTML='<div style="text-align:center;padding:30px;color:var(--text2);font-size:13px;"><div style="font-size:28px;margin-bottom:10px">🔑</div><div style="font-weight:600;">Configura tu API key</div><div style="font-size:11px;margin-top:6px;color:var(--text3)">Haz clic en el botón Finnhub en el topbar</div></div>';

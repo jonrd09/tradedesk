@@ -160,7 +160,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
     <div style="text-align:center;margin-bottom:8px;">
       <div style="font-size:18px;font-weight:700;color:#fff;">🚀 Momentum Scanner</div>
     </div>
-    <div style="font-size:11px;color:var(--text3);text-align:center;">GOOG · TSLA · NVDA · AAPL · MSFT · SPY · AVGO · MU</div>
+    <div style="font-size:11px;color:var(--text3);text-align:center;">GOOG · TSLA · NVDA · AAPL · MSFT · AVGO · MU · AMD</div>
   </div>
   <div style="padding:10px;" id="momentumArea">
     <div style="text-align:center;padding:20px;color:var(--text2);font-size:12px;">⟳ Calculando…</div>
@@ -520,10 +520,14 @@ const DEFAULTS={
   SPY: {price:594.52,pct: 0.00,name:'S&P 500 ETF'},
 };
 const MOM_STOCKS={
-  GOOG:{price:365.76,name:'Alphabet'},TSLA:{price:391.00,name:'Tesla'},
-  NVDA:{price:131.38,name:'Nvidia'}, AAPL:{price:201.45,name:'Apple'},
-  MSFT:{price:448.17,name:'Microsoft'},SPY:{price:594.52,name:'S&P 500 ETF'},
-  AVGO:{price:241.18,name:'Broadcom'},MU:{price:112.50,name:'Micron'},
+  GOOG:{price:365.76,name:'Alphabet',  lev2:'GGLL', lev2name:'GGLL 2x', inv:'GGLS', invname:'GGLS Inv'},
+  TSLA:{price:391.00,name:'Tesla',     lev2:'TSLL', lev2name:'TSLL 2x', inv:'TSLQ', invname:'TSLQ Inv'},
+  NVDA:{price:131.38,name:'Nvidia',    lev2:'NVDL', lev2name:'NVDL 2x', inv:'NVDS', invname:'NVDS Inv'},
+  AAPL:{price:201.45,name:'Apple',     lev2:'AAPU', lev2name:'AAPU 2x', inv:'AAPD', invname:'AAPD Inv'},
+  MSFT:{price:448.17,name:'Microsoft', lev2:'MSFU', lev2name:'MSFU 2x', inv:'MSFD', invname:'MSFD Inv'},
+  AVGO:{price:241.18,name:'Broadcom',  lev2:'AVGL', lev2name:'AVGL 2x', inv:'AVGD', invname:'AVGD Inv'},
+  MU:  {price:112.50,name:'Micron',    lev2:'MUU',  lev2name:'MUU 2x',  inv:'MUD',  invname:'MUD Inv'},
+  AMD: {price:142.50,name:'AMD',       lev2:'AMDL', lev2name:'AMDL 2x', inv:'AMDS', invname:'AMDS Inv'},
 };
 const ROT_DATA={
   indices:[{sym:'QQQ',name:'Nasdaq 100',color:'#3d8bff'},{sym:'SPY',name:'S&P 500',color:'#00d17a'},{sym:'IWM',name:'Russell 2K',color:'#ffc234'},{sym:'DIA',name:'Dow Jones',color:'#a78bfa'}],
@@ -1018,6 +1022,16 @@ function bbw(closes){
   return mid>0?(up-lo)/mid*100:0;
 }
 // Check if BB upper band slope is up or down (last 3 values)
+function bb_daily_prev_upper(closes){
+  const bb=bollinger(closes.slice(0,-1));
+  const vals=bb.upper.filter(v=>v!=null);
+  return vals.length?vals[vals.length-1]:closes[closes.length-1];
+}
+function bb_daily_prev_lower(closes){
+  const bb=bollinger(closes.slice(0,-1));
+  const vals=bb.lower.filter(v=>v!=null);
+  return vals.length?vals[vals.length-1]:closes[closes.length-1];
+}
 function bbUpperSlope(closes){
   const bb=bollinger(closes);
   const vals=bb.upper.filter(v=>v!=null);
@@ -1368,33 +1382,86 @@ async function buildMomentum(){
     const bbWd=lBBMid?(lBBUp-lBBLow)/lBBMid*100:0;
     const lPh=_c1.slice(-1)[0];
     const lMA100h=ma100h.filter(v=>v!=null).slice(-1)[0],lMA200h=ma200h.filter(v=>v!=null).slice(-1)[0];
+    // ── BB Daily Breakout conditions ────────────────────────────────────────
+    // Cond 1: Precio cierra FUERA de la banda superior (alcista) o inferior (bajista)
+    const closesAboveBBUp = lPd > lBBUp;
+    const closesBelowBBLow = lPd < lBBLow;
+    // Cond 2: Banda de BB expandiéndose (volatilidad activa)
+    const bbExpanding = bbWd > 4;
+    // Cond 3: Vela diaria de confirmación — cierre mayor que apertura (bull) o menor (bear)
+    const pOd = opens(pDay).slice(-1)[0] || lPd;
+    const bullCandle = lPd > pOd;
+    const bearCandle = lPd < pOd;
+    // Cond 4: MA20 diaria orientada en dirección del movimiento
+    const ma20Rising = lMA20d > (ma20d.filter(v=>v!=null).slice(-3)[0]||lMA20d);
+    const ma20Falling = lMA20d < (ma20d.filter(v=>v!=null).slice(-3)[0]||lMA20d);
+    // Cond 5: Precio lleva al menos 2 cierres consecutivos fuera de la banda
+    const prevPd = _cd[_cd.length-2]||lPd;
+    const prevBBUp = bb_daily_prev_upper(_cd);
+    const prevBBLow = bb_daily_prev_lower(_cd);
+    const twoClosesAbove = closesAboveBBUp && prevPd > prevBBUp;
+    const twoClosesBelow = closesBelowBBLow && prevPd < prevBBLow;
+
     const bullR=[
-      {ok:lMA100d>lMA40d&&lPd<lMA100d,text:'Venía bajista: precio entre MA100 y MA200'},
-      {ok:lMA20d>lMA40d&&pMA20d<=pMA40d,text:'MA20 cruza por arriba de MA40 (día)'},
-      {ok:lPh>lMA100h&&lPh>lMA200h,text:'Precio rompe MA100 y MA200 en hora'},
-      {ok:lPd>lMA20d&&lPd>lMA40d,text:'Precio rompe MA20 y MA40 en día'},
-      {ok:bbWd>3,text:`Volatilidad Bollinger activa (${bbWd.toFixed(1)}%)`},
+      {ok:closesAboveBBUp,  text:`Precio fuera de banda superior ($${lPd.toFixed(2)} > $${lBBUp.toFixed(2)})`},
+      {ok:bbExpanding,      text:`BB expandiéndose (BBW ${bbWd.toFixed(1)}% > 4%)`},
+      {ok:bullCandle,       text:`Vela diaria alcista (cierre $${lPd.toFixed(2)} > apertura $${pOd.toFixed(2)})`},
+      {ok:ma20Rising,       text:`MA20 diaria orientada al alza`},
+      {ok:twoClosesAbove,   text:`2+ cierres consecutivos sobre la banda`},
     ];
     const bearR=[
-      {ok:lMA100d<lMA40d&&lPd>lMA100d,text:'Venía alcista: precio entre MA100 y MA200'},
-      {ok:lMA20d<lMA40d&&pMA20d>=pMA40d,text:'MA20 cruza por debajo de MA40 (día)'},
-      {ok:lPh<lMA100h&&lPh<lMA200h,text:'Precio rompe MA100 y MA200 en hora'},
-      {ok:lPd<lMA20d&&lPd<lMA40d,text:'Precio rompe MA20 y MA40 en día'},
-      {ok:bbWd>3,text:`Volatilidad Bollinger activa (${bbWd.toFixed(1)}%)`},
+      {ok:closesBelowBBLow, text:`Precio fuera de banda inferior ($${lPd.toFixed(2)} < $${lBBLow.toFixed(2)})`},
+      {ok:bbExpanding,      text:`BB expandiéndose (BBW ${bbWd.toFixed(1)}% > 4%)`},
+      {ok:bearCandle,       text:`Vela diaria bajista (cierre $${lPd.toFixed(2)} < apertura $${pOd.toFixed(2)})`},
+      {ok:ma20Falling,      text:`MA20 diaria orientada a la baja`},
+      {ok:twoClosesBelow,   text:`2+ cierres consecutivos bajo la banda`},
     ];
     const bp=bullR.filter(r=>r.ok).length,brp=bearR.filter(r=>r.ok).length;
-    if(bp>=2||brp>=2){
-      const type=bp>=brp?'call':'put';
-      results.push({sym,name:info.name,price:base,type,reqs:bp>=brp?bullR:bearR,passed:Math.max(bp,brp)});
+    const pct80=Math.round(Math.max(bp,brp)/5*100);
+    if(pct80>=80){
+      const type=bp>=brp?'bull':'bear';
+      const lev=type==='bull'?info.lev2:info.inv;
+      const levName=type==='bull'?info.lev2name:info.invname;
+      results.push({sym,name:info.name,price:base,type,reqs:bp>=brp?bullR:bearR,passed:Math.max(bp,brp),lev,levName});
     }
   }
   results.sort((a,b)=>b.passed-a.passed);
   if(!results.length){area.innerHTML='<div style="text-align:center;padding:20px;color:var(--text2);font-size:12px;"><div style="font-size:22px;margin-bottom:8px">📊</div><div>Sin Momentum detectado</div><div style="font-size:11px;margin-top:6px;color:var(--text3)">Requiere Schwab conectado</div></div>';return;}
   area.innerHTML=results.map(r=>{
     const pct=Math.round(r.passed/5*100);
-    const col=pct>=80?'#00d17a':pct>=60?'#ffc234':'#ff4d6d';
-    const hdr=r.type==='call'?'mom-bull':'mom-bear';
-    return`<div class="mom-card"><div class="mom-hdr ${hdr}"><div style="display:flex;align-items:center;gap:6px;"><span style="font-family:var(--mono);font-size:15px;font-weight:700;color:#fff">${r.sym}</span><span style="font-size:9px;background:rgba(0,0,0,.25);color:rgba(255,255,255,.9);padding:1px 7px;border-radius:8px;font-weight:600;">${r.type==='call'?'📈 CALL':'📉 PUT'}</span><span style="font-size:9px;color:rgba(255,255,255,.6);">📡 Schwab</span></div><div style="text-align:right;"><div style="font-family:var(--mono);font-size:16px;font-weight:700;color:#fff">${pct}%</div><div style="font-size:10px;color:rgba(255,255,255,.7)">${r.passed}/5</div></div></div><div class="mom-body">${r.reqs.map(q=>`<div class="mom-req"><span style="font-size:12px;flex-shrink:0">${q.ok?'✅':'❌'}</span><span style="color:${q.ok?'var(--text)':'var(--text3)'};font-size:13px;line-height:1.4">${q.text}</span></div>`).join('')}<div style="height:3px;background:var(--bg4);border-radius:2px;margin-top:6px;overflow:hidden;"><div style="height:100%;width:${pct}%;background:${col};border-radius:2px;"></div></div><div style="text-align:right;font-size:10px;color:var(--text3);margin-top:2px;">⚠ Confirmar con panorama completo</div></div></div>`;
+    const col='#00d17a'; // siempre verde porque filtramos >=80%
+    const hdr=r.type==='bull'?'mom-bull':'mom-bear';
+    const dir=r.type==='bull'?'📈 ALCISTA':'📉 BAJISTA';
+    const dirCol=r.type==='bull'?'#00d17a':'#ff4d6d';
+    return`<div class="mom-card">
+      <div class="mom-hdr ${hdr}">
+        <div>
+          <div style="display:flex;align-items:center;gap:6px;">
+            <span style="font-family:var(--mono);font-size:16px;font-weight:700;color:#fff">${r.sym}</span>
+            <span style="font-size:10px;background:rgba(0,0,0,.3);color:#fff;padding:2px 8px;border-radius:8px;font-weight:700;">${dir}</span>
+          </div>
+          <div style="font-size:11px;color:rgba(255,255,255,.7);margin-top:2px;">$${r.price.toFixed(2)} · ${r.name} · 📡 Schwab</div>
+        </div>
+        <div style="text-align:right;">
+          <div style="font-family:var(--mono);font-size:20px;font-weight:700;color:#fff">${pct}%</div>
+          <div style="font-size:10px;color:rgba(255,255,255,.7)">${r.passed}/5 cond.</div>
+        </div>
+      </div>
+      <div class="mom-body">
+        ${r.reqs.map(q=>`<div class="mom-req">
+          <span style="font-size:12px;flex-shrink:0">${q.ok?'✅':'❌'}</span>
+          <span style="color:${q.ok?'var(--text)':'var(--text3)'};font-size:12px;line-height:1.4">${q.text}</span>
+        </div>`).join('')}
+        <div style="height:3px;background:var(--bg4);border-radius:2px;margin-top:8px;overflow:hidden;">
+          <div style="height:100%;width:${pct}%;background:${col};border-radius:2px;"></div>
+        </div>
+        <div style="margin-top:8px;background:rgba(0,0,0,.25);border-radius:var(--r);padding:8px 10px;display:flex;align-items:center;justify-content:space-between;">
+          <span style="font-size:11px;color:rgba(255,255,255,.6);">Ticker a comprar:</span>
+          <span style="font-family:var(--mono);font-size:16px;font-weight:700;color:${dirCol};">${r.lev}</span>
+          <span style="font-size:10px;color:rgba(255,255,255,.5);">${r.levName}</span>
+        </div>
+      </div>
+    </div>`;
   }).join('');
 }
 

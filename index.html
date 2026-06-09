@@ -644,37 +644,49 @@ async function getSchwabToken(){
   }catch(e){return null;}
 }
 // Schwab valid combos:
-//   minute candles:  periodType=day,   period=1-10, frequencyType=minute, frequency=1|5|10|15|30
-//   daily  candles:  periodType=month, period=1,    frequencyType=daily,  frequency=1
+//   minute: periodType=day,   period=1-10, frequencyType=minute, frequency=1|5|10|15|30
+//   daily:  periodType=year,  period=1,    frequencyType=daily,  frequency=1
+//           periodType=month, period=6,    frequencyType=daily,  frequency=1  (fallback)
 async function fetchSchwabCandles(sym,freqType,freq,bars=50){
   const token=await getSchwabToken();
   if(!token)return null;
-  let periodType,period,frequencyType,frequency;
+
+  let configs=[];
   if(freqType==='D'||freqType==='daily'){
-    periodType='month';period=1;frequencyType='daily';frequency=1;
+    // Try multiple valid daily combos in order
+    configs=[
+      {periodType:'year', period:1, frequencyType:'daily',  frequency:1},
+      {periodType:'month',period:6, frequencyType:'daily',  frequency:1},
+      {periodType:'month',period:3, frequencyType:'daily',  frequency:1},
+    ];
   }else if(freqType==='minute'){
     const validFreqs=[1,5,10,15,30];
-    frequency=validFreqs.includes(freq)?freq:30;
-    periodType='day';period=10;frequencyType='minute';
+    const f=validFreqs.includes(freq)?freq:30;
+    configs=[
+      {periodType:'day',period:10,frequencyType:'minute',frequency:f},
+      {periodType:'day',period:5, frequencyType:'minute',frequency:f},
+    ];
   }else{
     return null;
   }
-  try{
-    const url=`${SCHWAB_API_BASE}/pricehistory?symbol=${sym}&periodType=${periodType}&period=${period}&frequencyType=${frequencyType}&frequency=${frequency}&needExtendedHoursData=false`;
-    const r=await fetch(url,{headers:{'Authorization':'Bearer '+token},signal:AbortSignal.timeout(7000)});
-    if(!r.ok){
-      const err=await r.text().catch(()=>'');
-      addLog('error','Schwab API',`${sym} ${frequencyType}/${frequency} → HTTP ${r.status}`,err.substring(0,120));
-      return null;
-    }
-    const d=await r.json();
-    if(!d.candles||!d.candles.length){
-      addLog('warn','Schwab API',`${sym} → Sin velas`);
-      return null;
-    }
-    const sl=d.candles.slice(-bars);
-    return{c:sl.map(v=>v.close),h:sl.map(v=>v.high),l:sl.map(v=>v.low),o:sl.map(v=>v.open)};
-  }catch(e){addLog('warn','Schwab API',`${sym} fetch error`,e.message);return null;}
+
+  for(const cfg of configs){
+    try{
+      const url=`${SCHWAB_API_BASE}/pricehistory?symbol=${sym}&periodType=${cfg.periodType}&period=${cfg.period}&frequencyType=${cfg.frequencyType}&frequency=${cfg.frequency}&needExtendedHoursData=false`;
+      const r=await fetch(url,{headers:{'Authorization':'Bearer '+token},signal:AbortSignal.timeout(7000)});
+      if(!r.ok){
+        const err=await r.text().catch(()=>'');
+        addLog('warn','Schwab API',`${sym} ${cfg.frequencyType}/${cfg.frequency} (${cfg.periodType}/${cfg.period}) → ${r.status}`,err.substring(0,100));
+        continue; // try next config
+      }
+      const d=await r.json();
+      if(!d.candles||!d.candles.length){continue;}
+      const sl=d.candles.slice(-bars);
+      return{c:sl.map(v=>v.close),h:sl.map(v=>v.high),l:sl.map(v=>v.low),o:sl.map(v=>v.open)};
+    }catch(e){continue;}
+  }
+  addLog('warn','Schwab API',`${sym} ${freqType} → Todos los configs fallaron`);
+  return null;
 }
 function updateSchwabStatus(){
   const token=localStorage.getItem('schwab_access_token')||'';
@@ -877,7 +889,7 @@ async function loadLivePrices(){
   const results=[];
   for(const s of syms){
     results.push(await fetchQuote(s).catch(()=>null));
-    await new Promise(r=>setTimeout(r,200));
+    await new Promise(r=>setTimeout(r,500));
   }
   syms.forEach((sym,i)=>{
     const q=results[i];
@@ -1055,28 +1067,8 @@ async function buildSignals(){
           if(r3&&closes(r3).length>=10){ohlcD=r3;}
         }catch(e){addLog('warn','Schwab',`${sym} señales error`,e.message);}
       }
-      // Finnhub fallback — secuencial con delay para no exceder rate limit
-      if(!ohlc1h){
-        try{
-          const r=await Promise.race([fetchCandles(sym,'60',50),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),5000))]);
-          if(r&&closes(r).length>=10){ohlc1h=r;dataLabel='📡 Finnhub';}
-        }catch(e){}
-        await new Promise(r=>setTimeout(r,300));
-      }
-      if(!ohlc15){
-        try{
-          const r=await Promise.race([fetchCandles(sym,'15',50),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),5000))]);
-          if(r&&closes(r).length>=5)ohlc15=r;
-        }catch(e){}
-        await new Promise(r=>setTimeout(r,300));
-      }
-      if(!ohlcD){
-        try{
-          const r=await Promise.race([fetchCandles(sym,'D',30),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),5000))]);
-          if(r&&closes(r).length>=20)ohlcD=r;
-        }catch(e){}
-        await new Promise(r=>setTimeout(r,300));
-      }
+      // Finnhub no soporta velas intraday en plan gratuito — Schwab es el único proveedor de velas
+      // Si Schwab no devolvió algún timeframe, no hay fallback para velas
     }
 
     // Sin datos reales en cualquier timeframe = no evaluar señales
@@ -1350,10 +1342,14 @@ async function buildMomentum(){
     const base=info.price;
     let pDay=null,p1h=null;
     try{
-      pDay=await Promise.race([fetchCandles(sym,'D',60),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),4000))]);
-      await new Promise(r=>setTimeout(r,250));
-      p1h=await Promise.race([fetchCandles(sym,'60',48),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),4000))]);
-      await new Promise(r=>setTimeout(r,250));
+      // Schwab only for candles
+      const schwabTok=await getSchwabToken();
+      if(schwabTok){
+        pDay=await Promise.race([fetchSchwabCandles(sym,'D',1,60),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),7000))]);
+        await new Promise(r=>setTimeout(r,200));
+        p1h=await Promise.race([fetchSchwabCandles(sym,'minute',30,48),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),7000))]);
+        await new Promise(r=>setTimeout(r,200));
+      }
     }catch(e){}
     if(!pDay||closes(pDay).length<20){const s=genCandles(base,60,.012);pDay={c:s,h:s,l:s,o:s};}
     if(!p1h||closes(p1h).length<10){const s=genCandles(base,48,.005);p1h={c:s,h:s,l:s,o:s};}
@@ -1422,13 +1418,13 @@ async function loadRotation(){
   allSyms.forEach(s=>{const p=ROT_FALLBACK[s]||100,pv=ROT_PREV[s]||p;quotes[s]={price:p,prev:pv,pct:+((p-pv)/pv*100).toFixed(2)};});
   const key=getKey();
   if(key&&key.length>8){
-    for(let i=0;i<allSyms.length;i+=6){
-      const batch=allSyms.slice(i,i+6);
+    for(let i=0;i<allSyms.length;i+=3){
+      const batch=allSyms.slice(i,i+3);
       try{
         const res=await Promise.all(batch.map(s=>fetchRotationQuote(s).catch(()=>null)));
         batch.forEach((s,j)=>{if(res[j])quotes[s]=res[j];});
       }catch(e){}
-      if(i+6<allSyms.length)await new Promise(r=>setTimeout(r,600));
+      if(i+3<allSyms.length)await new Promise(r=>setTimeout(r,800));
     }
   }
   const indEl=document.getElementById('rotIndices');

@@ -536,10 +536,10 @@ const MOM_STOCKS={
 const ROT_DATA={
   indices:[{sym:'QQQ',name:'Nasdaq 100',color:'#3d8bff'},{sym:'SPY',name:'S&P 500',color:'#00d17a'},{sym:'IWM',name:'Russell 2K',color:'#ffc234'},{sym:'DIA',name:'Dow Jones',color:'#a78bfa'}],
   sectores:[{sym:'XLK',name:'Tecnología'},{sym:'XLF',name:'Financiero'},{sym:'XLV',name:'Salud'},{sym:'XLE',name:'Energía'},{sym:'XLU',name:'Utilities'},{sym:'XLI',name:'Industrial'},{sym:'XLC',name:'Comunicación'},{sym:'XLP',name:'Consumo Básico'},{sym:'XLY',name:'Consumo Discr.'},{sym:'XLB',name:'Materiales'},{sym:'SOXX',name:'Semiconductores'},{sym:'XBI',name:'Biotech'}],
-  refugios:[{sym:'GLD',name:'Oro',color:'#ffc234'},{sym:'TLT',name:'Bonos T',color:'#a78bfa'},{sym:'VIX',name:'VIX',color:'#ff4d6d'},{sym:'UUP',name:'Dólar',color:'#3d8bff'}]
+  refugios:[{sym:'GLD',name:'Oro',color:'#ffc234'},{sym:'TLT',name:'Bonos T',color:'#a78bfa'},{sym:'VIXY',name:'VIX ETF',color:'#ff4d6d'},{sym:'UUP',name:'Dólar',color:'#3d8bff'}]
 };
-const ROT_FALLBACK={QQQ:474.20,SPY:594.52,IWM:208.45,DIA:431.60,XLK:193.17,XLF:51.49,XLV:145.30,XLE:91.20,XLU:68.40,XLI:132.50,XLC:88.90,XLP:79.60,XLY:195.40,XLB:89.30,SOXX:245.80,XBI:98.70,GLD:305.40,TLT:88.20,VIX:14.80,UUP:27.30};
-const ROT_PREV={QQQ:496.90,SPY:613.10,IWM:215.30,DIA:441.80,XLK:199.40,XLF:50.80,XLV:144.20,XLE:92.80,XLU:67.50,XLI:134.20,XLC:90.10,XLP:78.90,XLY:200.80,XLB:91.20,SOXX:253.40,XBI:100.20,GLD:301.50,TLT:89.40,VIX:12.60,UUP:27.80};
+const ROT_FALLBACK={QQQ:474.20,SPY:594.52,IWM:208.45,DIA:431.60,XLK:193.17,XLF:51.49,XLV:145.30,XLE:91.20,XLU:68.40,XLI:132.50,XLC:88.90,XLP:79.60,XLY:195.40,XLB:89.30,SOXX:245.80,XBI:98.70,GLD:305.40,TLT:88.20,VIXY:14.20,UUP:27.30};
+const ROT_PREV={QQQ:496.90,SPY:613.10,IWM:215.30,DIA:441.80,XLK:199.40,XLF:50.80,XLV:144.20,XLE:92.80,XLU:67.50,XLI:134.20,XLC:90.10,XLP:78.90,XLY:200.80,XLB:91.20,SOXX:253.40,XBI:100.20,GLD:301.50,TLT:89.40,VIXY:12.40,UUP:27.80};
 const INSIDER_TICKERS=['TSLA','AAPL','MSFT','NVDA','AMD','COIN','AMZN','NFLX','META','AVGO','MU','QCOM','GOOG','PLTR','UBER','PYPL','CRM','HOOD','UNH','OKLO','URA','ORCL'];
 
 // ═══════════════════════════════════════════════════════════════
@@ -909,7 +909,12 @@ async function fetchQuote(sym){
       return null;
     }
     const d=await r.json();
-    if(!d||!d.c||d.c<=0){addLog('warn','Finnhub',`Precio vacío para ${sym}`);return null;}
+    if(!d||!d.c||d.c<=0){
+      const _etq=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+      const _mq=_etq.getHours()*60+_etq.getMinutes(),_dq=_etq.getDay();
+      if(_dq>=1&&_dq<=5&&_mq>=570&&_mq<960)addLog('warn','Finnhub',`Precio vacío para ${sym} durante mercado`);
+      return null;
+    }
     return{price:d.c,prev:d.pc,pct:+((d.c-d.pc)/d.pc*100).toFixed(2),change:+(d.c-d.pc).toFixed(2)};
   }catch(e){
     if(e.name==='TimeoutError'||e.message?.includes('timeout'))addLog('warn','Finnhub',`Timeout precio ${sym}`,'Sin respuesta en 5s');
@@ -1510,7 +1515,12 @@ async function fetchRotationQuote(sym){
       return null;
     }
     const d=await r.json();
-    if(!d||!d.c||d.c<=0){addLog('warn','Finnhub',`Quote vacío para ${sym}`,'Sin precio disponible');return null;}
+    if(!d||!d.c||d.c<=0){
+      const _et3=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+      const _m3=_et3.getHours()*60+_et3.getMinutes(),_d3=_et3.getDay();
+      if(_d3>=1&&_d3<=5&&_m3>=570&&_m3<960)addLog('warn','Finnhub',`Quote vacío para ${sym} durante mercado`);
+      return null;
+    }
     return{price:d.c,prev:d.pc,pct:+((d.c-d.pc)/d.pc*100).toFixed(2)};
   }catch(e){
     if(e.name==='TimeoutError'||e.message.includes('timeout'))addLog('warn','Finnhub',`Timeout en quote ${sym}`,'Sin respuesta en 4s');
@@ -1552,10 +1562,10 @@ async function loadRotation(){
   if(sigEl){
     const techPct=(quotes['XLK']||{pct:0}).pct,utilPct=(quotes['XLU']||{pct:0}).pct;
     const goldPct=(quotes['GLD']||{pct:0}).pct,bondPct=(quotes['TLT']||{pct:0}).pct;
-    const vixPct=(quotes['VIX']||{pct:0}).pct,semiPct=(quotes['SOXX']||{pct:0}).pct;
+    const vixPct=(quotes['VIXY']||{pct:0}).pct,semiPct=(quotes['SOXX']||{pct:0}).pct;
     let sig='〰️ MIXTO — Sin señal clara. Opera con confirmación técnica.',col='var(--text2)',bg='var(--bg3)',bdr='var(--border)';
-    if(vixPct>5&&goldPct>0&&bondPct>0&&techPct<0){sig='🚨 FUGA AL REFUGIO — VIX↑ Oro↑ Bonos↑ Tech↓';col='var(--red)';bg='var(--red-bg)';bdr='rgba(255,77,109,.3)';}
-    else if(techPct>1&&semiPct>1&&vixPct<0){sig='🚀 RISK ON — Tech↑ Semis↑ VIX↓. Favorable para CALLS.';col='var(--green)';bg='var(--green-bg)';bdr='rgba(0,209,122,.3)';}
+    if(vixPct>5&&goldPct>0&&bondPct>0&&techPct<0){sig='🚨 FUGA AL REFUGIO — VIXY↑ Oro↑ Bonos↑ Tech↓';col='var(--red)';bg='var(--red-bg)';bdr='rgba(255,77,109,.3)';}
+    else if(techPct>1&&semiPct>1&&vixPct<0){sig='🚀 RISK ON — Tech↑ Semis↑ VIXY↓. Favorable para CALLS.';col='var(--green)';bg='var(--green-bg)';bdr='rgba(0,209,122,.3)';}
     else if(utilPct>techPct+1&&goldPct>0){sig='🛡️ ROTACIÓN DEFENSIVA — Utilities y Oro lideran.';col='var(--yellow)';bg='var(--yellow-bg)';bdr='rgba(255,194,52,.3)';}
     else if(semiPct<-2&&techPct<-1){sig='⚠️ PRESIÓN TECH/SEMIS — Cuidado con CALLS en tech.';col='var(--yellow)';bg='var(--yellow-bg)';bdr='rgba(255,194,52,.3)';}
     sigEl.innerHTML=`<div style="background:${bg};border:1px solid ${bdr};border-radius:var(--r);padding:9px 12px;font-size:12px;color:${col};font-weight:600;line-height:1.5;margin-top:8px;">${sig}</div>`;

@@ -173,7 +173,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
   <div class="card">
     <div style="text-align:center;margin-bottom:10px;">
       <div style="font-size:18px;font-weight:700;color:#fff;">Señales Activas</div>
-      <div style="font-size:11px;color:var(--text2);margin-top:3px;">E1·E2 Tendencia · E3·E4 Rebote MA20D · E5·E6 Imán Premarket · E7·E8 Imán Tendencia · GOOG · TSLA · SPY</div>
+      <div style="font-size:11px;color:var(--text2);margin-top:3px;">E1·E2 Cambio de Tendencia · E7·E8 Efecto Imán · GOOG · TSLA · SPY</div>
     </div>
     <div id="signalArea">
       <div style="text-align:center;padding:20px;color:var(--text2);font-size:13px;">⟳ Calculando señales…</div>
@@ -690,7 +690,7 @@ async function fetchSchwabCandles(sym,freqType,freq,bars=50){
       const d=await r.json();
       if(!d.candles||!d.candles.length){continue;}
       const sl=d.candles.slice(-bars);
-      return{c:sl.map(v=>v.close),h:sl.map(v=>v.high),l:sl.map(v=>v.low),o:sl.map(v=>v.open)};
+      return{c:sl.map(v=>v.close),h:sl.map(v=>v.high),l:sl.map(v=>v.low),o:sl.map(v=>v.open),v:sl.map(v=>v.volume||0)};
     }catch(e){continue;}
   }
   addLog('warn','Schwab API',`${sym} ${freqType} → Todos los configs fallaron`);
@@ -1082,241 +1082,169 @@ function bbLowerSlope(closes){
 }
 
 // ═══════════════════════════════════════════════════════════════
-// BUILD SIGNALS — E1 a E8
+// BUILD SIGNALS — E1 · E2 · E7 · E8
 // ═══════════════════════════════════════════════════════════════
 async function buildSignals(){
   const area=document.getElementById('signalArea');
   area.innerHTML='<div style="text-align:center;padding:20px;color:var(--text2);font-size:13px;">⟳ Obteniendo datos reales…</div>';
   const all=[];
 
-  // ── Fetch all timeframes needed ──────────────────────────────────────────
   for(const sym of['GOOG','TSLA','SPY']){
-    const base=DEFAULTS[sym].price,pct=DEFAULTS[sym].pct;
     let ohlc1h=null,ohlc15=null,ohlcD=null;
     let dataLabel='📡 Sin fuente';
 
-    // En modo test usar solo caché inyectado, sin llamadas API
     if(_testMode){
       const c60=_candleCache[sym+'_60'],c15=_candleCache[sym+'_15'],cD=_candleCache[sym+'_D'];
-      if(c60)ohlc1h=c60.data;
-      if(c15)ohlc15=c15.data;
-      if(cD)ohlcD=cD.data;
+      if(c60)ohlc1h=c60.data;if(c15)ohlc15=c15.data;if(cD)ohlcD=cD.data;
       dataLabel='🧪 Test';
     }else{
-      // Try Schwab first (30min as proxy for 1H, 15min, daily)
       const schwabToken=await getSchwabToken();
       if(schwabToken){
         try{
           const [r1,r2,r3]=await Promise.all([
             Promise.race([fetchSchwabCandles(sym,'minute',30,100),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),6000))]),
-            Promise.race([fetchSchwabCandles(sym,'minute',15,60),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),6000))]),
-            Promise.race([fetchSchwabCandles(sym,'D',1,90),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),6000))])
+            Promise.race([fetchSchwabCandles(sym,'minute',15,60), new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),6000))]),
+            Promise.race([fetchSchwabCandles(sym,'D',1,90),       new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),6000))])
           ]);
           if(r1&&closes(r1).length>=10){ohlc1h=r1;dataLabel='📡 Schwab';}
-          if(r2&&closes(r2).length>=5){ohlc15=r2;}
-          if(r3&&closes(r3).length>=10){ohlcD=r3;}
+          if(r2&&closes(r2).length>=5) ohlc15=r2;
+          if(r3&&closes(r3).length>=10) ohlcD=r3;
         }catch(e){addLog('warn','Schwab',`${sym} señales error`,e.message);}
       }
-      // Finnhub no soporta velas intraday en plan gratuito — Schwab es el único proveedor de velas
-      // Si Schwab no devolvió algún timeframe, no hay fallback para velas
     }
 
-    // Sin datos reales = no evaluar señales
     if(!ohlc1h||!ohlc15||!ohlcD){
       const missing=[!ohlc1h?'1H':null,!ohlc15?'15m':null,!ohlcD?'D':null].filter(Boolean).join(', ');
       addLog('warn','Señales',`${sym} → Sin datos en: ${missing}. Señales omitidas.`);
       continue;
     }
 
-    // ── Common indicators 1H ─────────────────────────────────────────────
+    // ── Indicadores 1H ──────────────────────────────────────────────────────
     const c1h=closes(ohlc1h),h1h=highs(ohlc1h),l1h=lows(ohlc1h),o1h=opens(ohlc1h);
     const n1h=c1h.length;
     const ma20_1h=sma(c1h,Math.min(20,n1h-1));
     const ma40_1h=sma(c1h,Math.min(40,n1h-1));
     const bb1h=bollinger(c1h);
-    const lP1h=c1h[n1h-1],pP1h=c1h[n1h-2]||lP1h;
-    const lH1h=h1h[n1h-1],lL1h=l1h[n1h-1];
+    const lP1h=c1h[n1h-1], pP1h=c1h[n1h-2]||lP1h;
+    const lH1h=h1h[n1h-1], lL1h=l1h[n1h-1];
     const lMA20_1h=ma20_1h.filter(v=>v!=null).slice(-1)[0]||lP1h;
     const lMA40_1h=ma40_1h.filter(v=>v!=null).slice(-1)[0]||lP1h;
-    const lUp1h=bb1h.upper.filter(v=>v!=null).slice(-1)[0]||lP1h;
+    const lUp1h =bb1h.upper.filter(v=>v!=null).slice(-1)[0]||lP1h;
     const lLow1h=bb1h.lower.filter(v=>v!=null).slice(-1)[0]||lP1h;
-    const lMid1h=bb1h.mid.filter(v=>v!=null).slice(-1)[0]||lP1h;
-    const bbW1h=lMid1h?(lUp1h-lLow1h)/lMid1h*100:0;
     const upSlope1h=bbUpperSlope(c1h)>0;
     const loSlope1h=bbLowerSlope(c1h)<0;
     const stoch1h=stochastic(h1h,l1h,c1h,12,3);
     const lK1h=stoch1h.k.slice(-1)[0]||50;
-    const pK1h=stoch1h.k.slice(-2)[0]||lK1h;
     const lD1h=stoch1h.d.slice(-1)[0]||50;
-    const pD1h=stoch1h.d.slice(-2)[0]||lD1h;
+    // Precio real del último close de Schwab
+    const realPrice=lP1h;
+    const realPricePrev=cD&&closes(ohlcD).length>1?closes(ohlcD).slice(-2)[0]:lP1h;
+    const realPct=realPricePrev>0?+((lP1h-realPricePrev)/realPricePrev*100).toFixed(2):0;
 
-    // ── Common indicators 15min ──────────────────────────────────────────
+    // ── Indicadores 15min ────────────────────────────────────────────────────
     const c15=closes(ohlc15),h15=highs(ohlc15),l15=lows(ohlc15);
     const n15=c15.length;
     const ma20_15=sma(c15,Math.min(20,n15-1));
     const bb15=bollinger(c15);
     const lP15=c15[n15-1];
     const lMA20_15=ma20_15.filter(v=>v!=null).slice(-1)[0]||lP15;
-    const lUp15=bb15.upper.filter(v=>v!=null).slice(-1)[0]||lP15;
+    const lUp15 =bb15.upper.filter(v=>v!=null).slice(-1)[0]||lP15;
     const lLow15=bb15.lower.filter(v=>v!=null).slice(-1)[0]||lP15;
-    const bbW15=lUp15&&lLow15&&lMA20_15?(lUp15-lLow15)/lMA20_15*100:0;
     const upSlope15=bbUpperSlope(c15)>0;
     const loSlope15=bbLowerSlope(c15)<0;
-    // Count consecutive green/red candles in 15min (last 3)
-    const last3_15=c15.slice(-4);
-    const opens15=opens(ohlc15).slice(-4);
-    const greenCandles15=last3_15.slice(1).filter((v,i)=>v>opens15[i+1]).length;
-    const redCandles15=last3_15.slice(1).filter((v,i)=>v<opens15[i+1]).length;
-
-    // ── Common indicators Daily ──────────────────────────────────────────
-    const cD=closes(ohlcD),hD=highs(ohlcD),lD_arr=lows(ohlcD);
-    const nD=cD.length;
-    const ma20D=sma(cD,Math.min(20,nD-1));
-    const lMA20D=ma20D.filter(v=>v!=null).slice(-1)[0]||cD[nD-1];
-    const lPD=cD[nD-1];
-    const distToMA20D=lMA20D>0?Math.abs(lPD-lMA20D)/lMA20D*100:99;
-    const priceAboveMA20D=lPD>lMA20D;
-    const priceBelowMA20D=lPD<lMA20D;
-    // Check last 3 daily closes below MA20 (bajista en diario)
-    const last3D=cD.slice(-3);
-    const ma20D_last3=ma20D.filter(v=>v!=null).slice(-3);
-    const dailyBearish3=last3D.every((v,i)=>v<(ma20D_last3[i]||v));
-    const dailyBullish3=last3D.every((v,i)=>v>(ma20D_last3[i]||v));
-
-    // ── ET clock for premarket check ─────────────────────────────────────
-    const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
-    const etH=et.getHours(),etM=et.getMinutes();
-    const inPremarket=(etH===9&&etM>=15&&etM<30);
-
-    const meta={sym,price:base,pct,dataLabel,name:DEFAULTS[sym].name,lRSI1h:0,bbW1h};
-
-    // ════════════════════════════════════════════════════════════════
-    // E1 — CAMBIO DE TENDENCIA AL ALZA (BB 1H + confirmación 15min)
-    // ════════════════════════════════════════════════════════════════
-    const tlBear=trendlineFromPivots(h1h,'highs',4);
-    const tlBearVal=tlBear?trendlineAt(tlBear,n1h-1):null;
-    const breakAboveTL=tlBearVal!==null&&lP1h>tlBearVal*(1+0.0015)&&pP1h<=tlBearVal*(1+0.0015);
-    const closesAboveMA20_1h=lP1h>lMA20_1h&&pP1h<=lMA20_1h; // cruzó MA20 esta vela
-    const confirmCandle1h_bull=lP1h>lMA20_1h&&lP1h>o1h[n1h-1]; // vela verde sobre MA20
-    const confirm15bull=lP15>lMA20_15&&upSlope15&&greenCandles15>=2;
-    all.push({...meta,code:'E1',name:'Cambio de Tendencia al Alza',type:'call',reqs:[
-      {ok:!!tlBear&&tlBear.pivotCount>=4, tf:'1H',text:`Línea bajista detectada (${tlBear?tlBear.pivotCount:0} máximos desc.)`},
-      {ok:breakAboveTL,                   tf:'1H',text:`Precio rompe línea bajista con ≥0.15% margen`},
-      {ok:confirmCandle1h_bull,           tf:'1H',text:`Vela alcista cierra sobre MA20 ($${lMA20_1h.toFixed(2)})`},
-      {ok:confirm15bull,                  tf:'15m',text:`15min alcista: sobre MA20 + BB↑ + ${greenCandles15} velas verdes`},
-    ]});
-
-    // ════════════════════════════════════════════════════════════════
-    // E2 — CAMBIO DE TENDENCIA A LA BAJA (BB 1H + confirmación 15min)
-    // ════════════════════════════════════════════════════════════════
-    const tlBull=trendlineFromPivots(l1h,'lows',4);
-    const tlBullVal=tlBull?trendlineAt(tlBull,n1h-1):null;
-    const breakBelowTL=tlBullVal!==null&&lP1h<tlBullVal*(1-0.0015)&&pP1h>=tlBullVal*(1-0.0015);
-    const confirmCandle1h_bear=lP1h<lMA20_1h&&lP1h<o1h[n1h-1]; // vela roja bajo MA20
-    const confirm15bear=lP15<lMA20_15&&loSlope15&&redCandles15>=2;
-    all.push({...meta,code:'E2',name:'Cambio de Tendencia a la Baja',type:'put',reqs:[
-      {ok:!!tlBull&&tlBull.pivotCount>=4, tf:'1H',text:`Línea alcista detectada (${tlBull?tlBull.pivotCount:0} mínimos asc.)`},
-      {ok:breakBelowTL,                   tf:'1H',text:`Precio rompe línea alcista con ≥0.15% margen`},
-      {ok:confirmCandle1h_bear,           tf:'1H',text:`Vela bajista cierra bajo MA20 ($${lMA20_1h.toFixed(2)})`},
-      {ok:confirm15bear,                  tf:'15m',text:`15min bajista: bajo MA20 + BB↓ + ${redCandles15} velas rojas`},
-    ]});
-
-    // ════════════════════════════════════════════════════════════════
-    // E3 — REBOTE PUNTO MEDIO AL ALZA (MA20 Diaria como soporte)
-    // ════════════════════════════════════════════════════════════════
-    const bearish1h_E3=!upSlope1h&&lP1h<lMA20_1h; // ambas condiciones
-    const approachingMA20D_bull=distToMA20D<=0.5&&priceBelowMA20D;
-    const respectsMA20D_bull=priceBelowMA20D&&lD_arr[nD-1]>lMA20D*0.998; // toca pero no cierra bajo
-    const rebound15=lP15>lMA20_15&&upSlope15&&lP1h>o1h[n1h-1];
-    all.push({...meta,code:'E3',name:'Rebote Punto Medio al Alza',type:'call',reqs:[
-      {ok:bearish1h_E3,       tf:'1H', text:`Tendencia bajista 1H: BB↓ y precio bajo MA20 ($${lMA20_1h.toFixed(2)})`},
-      {ok:approachingMA20D_bull,tf:'D', text:`Precio acercándose a MA20 diaria ($${lMA20D.toFixed(2)}) dist: ${distToMA20D.toFixed(2)}%`},
-      {ok:respectsMA20D_bull, tf:'D',  text:`Precio respeta MA20 diaria sin cerrar por debajo`},
-      {ok:rebound15,          tf:'15m',text:`Rebote confirmado: vela alcista en 15min + 1H sobre MA20`},
-    ]});
-
-    // ════════════════════════════════════════════════════════════════
-    // E4 — REBOTE PUNTO MEDIO A LA BAJA (MA20 Diaria como resistencia)
-    // ════════════════════════════════════════════════════════════════
-    const bullish1h_E4=upSlope1h&&lP1h>lMA20_1h; // ambas condiciones
-    const approachingMA20D_bear=distToMA20D<=0.5&&priceAboveMA20D;
-    const respectsMA20D_bear=priceAboveMA20D&&hD[nD-1]<lMA20D*1.002; // toca pero no cierra sobre
-    const rejection15=lP15<lMA20_15&&loSlope15&&lP1h<o1h[n1h-1];
-    all.push({...meta,code:'E4',name:'Rebote Punto Medio a la Baja',type:'put',reqs:[
-      {ok:bullish1h_E4,        tf:'1H', text:`Tendencia alcista 1H: BB↑ y precio sobre MA20 ($${lMA20_1h.toFixed(2)})`},
-      {ok:approachingMA20D_bear,tf:'D', text:`Precio acercándose a MA20 diaria ($${lMA20D.toFixed(2)}) dist: ${distToMA20D.toFixed(2)}%`},
-      {ok:respectsMA20D_bear,  tf:'D',  text:`Precio respeta MA20 diaria sin cerrar por encima`},
-      {ok:rejection15,         tf:'15m',text:`Rechazo confirmado: vela bajista en 15min + 1H bajo MA20`},
-    ]});
-
-    // ════════════════════════════════════════════════════════════════
-    // E5 — EFECTO IMÁN PREMARKET (Gap UP extremo → PUT)
-    // ════════════════════════════════════════════════════════════════
-    // BB lateral: BBW15 muy bajo (comprimido) en velas previas
-    const bbwPrev15=bbW15;
-    const lateralBB15_E5=bbwPrev15<2.5; // muy comprimido
-    // Gap: precio de apertura vs banda superior 15min
-    const openPrice=o1h[n1h-1]||lP1h;
-    const gapUpPct=lUp15>0?(openPrice-lUp15)/lUp15*100:0;
-    const extremeGapUp=gapUpPct>=2&&gapUpPct<=8; // entre 2% y 3%+ sobre banda superior
-    const startingDown=lP15<openPrice; // primera vela bajando desde la apertura
-    all.push({...meta,code:'E5',name:'Efecto Imán — Gap UP Extremo (PUT)',type:'put',reqs:[
-      {ok:inPremarket,    tf:'Pre', text:`Ventana premarket activa (9:15–9:30 AM ET)`},
-      {ok:lateralBB15_E5,tf:'15m', text:`BB lateral sin volatilidad (BBW ${bbwPrev15.toFixed(1)}% < 2.5%)`},
-      {ok:extremeGapUp,  tf:'15m', text:`Gap UP: apertura ${gapUpPct.toFixed(1)}% sobre banda superior (2–8%)`},
-      {ok:startingDown,  tf:'15m', text:`Precio comienza a bajar desde el extremo`},
-    ]});
-
-    // ════════════════════════════════════════════════════════════════
-    // E6 — EFECTO IMÁN PREMARKET (Gap DOWN extremo → CALL)
-    // ════════════════════════════════════════════════════════════════
-    const lateralBB15_E6=bbwPrev15<2.5;
-    const gapDownPct=lLow15>0?(lLow15-openPrice)/lLow15*100:0;
-    const extremeGapDown=gapDownPct>=2&&gapDownPct<=8;
-    const startingUp=lP15>openPrice;
-    all.push({...meta,code:'E6',name:'Efecto Imán — Gap DOWN Extremo (CALL)',type:'call',reqs:[
-      {ok:inPremarket,     tf:'Pre', text:`Ventana premarket activa (9:15–9:30 AM ET)`},
-      {ok:lateralBB15_E6, tf:'15m', text:`BB lateral sin volatilidad (BBW ${bbwPrev15.toFixed(1)}% < 2.5%)`},
-      {ok:extremeGapDown, tf:'15m', text:`Gap DOWN: apertura ${gapDownPct.toFixed(1)}% bajo banda inferior (2–8%)`},
-      {ok:startingUp,     tf:'15m', text:`Precio comienza a subir desde el extremo`},
-    ]});
-
-    // ════════════════════════════════════════════════════════════════
-    // E7 — EFECTO IMÁN TENDENCIA BAJISTA (MA20/40 1H + BB 15min → CALL)
-    // ════════════════════════════════════════════════════════════════
-    // Tendencia bajista varios días: MA20 < MA40 en 1H y precio bajo ambas, 3+ días
-    const bearTrend_E7=lMA20_1h<lMA40_1h&&lP1h<lMA20_1h&&lP1h<lMA40_1h&&dailyBearish3;
-    // Salto fuerte a la baja: precio actual 2%+ alejado de MA20 en 1H
-    const distFromMA20_1h_down=lMA20_1h>0?(lMA20_1h-lP1h)/lMA20_1h*100:0;
-    const bigDropFromMA20=distFromMA20_1h_down>=2;
-    // Primera vela 15min completamente fuera de banda inferior
-    const candleFullyBelowBB15=lP15<lLow15&&(opens(ohlc15).slice(-1)[0]||lP15)<lLow15;
-    // Stochastics %K cruza por encima de línea %D (señal alcista)
+    const o15_arr=opens(ohlc15);
+    const greenCandles15=c15.slice(-4).filter((v,i)=>i>0&&v>o15_arr[n15-4+i]).length;
+    const redCandles15  =c15.slice(-4).filter((v,i)=>i>0&&v<o15_arr[n15-4+i]).length;
+    // Stochastics 15min
     const stoch15=stochastic(h15,l15,c15,12,3);
     const lK15=stoch15.k.slice(-1)[0]||50;
     const pK15=stoch15.k.slice(-2)[0]||lK15;
     const lD15=stoch15.d.slice(-1)[0]||50;
-    const stochCrossUp15=pK15<lD15&&lK15>=lD15; // %K cruza por encima de %D (línea roja)
-    all.push({...meta,code:'E7',name:'Efecto Imán — Tendencia Bajista (CALL)',type:'call',reqs:[
-      {ok:bearTrend_E7,        tf:'1H', text:`Tendencia bajista: MA20<MA40, precio bajo ambas, 3+ días`},
-      {ok:bigDropFromMA20,     tf:'1H', text:`Precio alejado ${distFromMA20_1h_down.toFixed(1)}% de MA20 (mín 2%)`},
-      {ok:candleFullyBelowBB15,tf:'15m',text:`Primera vela 15min completamente bajo banda inferior BB`},
-      {ok:stochCrossUp15,      tf:'15m',text:`Stochastics (12,%K3): %K cruza por encima de línea señal`},
+
+    // ── Indicadores Daily ────────────────────────────────────────────────────
+    const cD=closes(ohlcD),hD=highs(ohlcD),lD_arr=lows(ohlcD),oD=opens(ohlcD);
+    const nD=cD.length;
+    const ma20D=sma(cD,Math.min(20,nD-1));
+    const ma40D=sma(cD,Math.min(40,nD-1));
+    const lMA20D=ma20D.filter(v=>v!=null).slice(-1)[0]||cD[nD-1];
+    const lMA40D=ma40D.filter(v=>v!=null).slice(-1)[0]||cD[nD-1];
+    // Volumen diario (Schwab lo incluye en velas)
+    const vol=ohlcD.v||[];
+    const lVol=vol[vol.length-1]||0;
+    const avgVol10=vol.length>=10?vol.slice(-10).reduce((a,b)=>a+b,0)/10:0;
+    const volConfirm=avgVol10>0?lVol>avgVol10*1.2:true; // 20% sobre promedio o sin datos
+    // Días bajistas/alcistas consecutivos (más flexible — al menos 2 de los últimos 3)
+    const last3D=cD.slice(-3),last3O=oD.slice(-3);
+    const bearDays=last3D.filter((v,i)=>v<last3O[i]).length; // velas rojas
+    const bullDays=last3D.filter((v,i)=>v>last3O[i]).length; // velas verdes
+    const dailyBearish=bearDays>=2; // al menos 2 de 3 días bajistas
+    const dailyBullish=bullDays>=2; // al menos 2 de 3 días alcistas
+
+    const meta={sym,price:realPrice,pct:realPct,dataLabel,name:DEFAULTS[sym].name};
+
+    // ════════════════════════════════════════════════════════════════════════
+    // E1 — CAMBIO DE TENDENCIA AL ALZA
+    // Línea bajista detectada → ruptura con buffer → cierre sobre MA20 → 15min alcista
+    // ════════════════════════════════════════════════════════════════════════
+    const tlBear=trendlineFromPivots(h1h,'highs',4);
+    const tlBearVal=tlBear?trendlineAt(tlBear,n1h-1):null;
+    // Buffer: precio debe estar 0.1%–0.5% sobre la línea en alguna de las últimas 3 velas
+    const last3above=tlBearVal!==null&&c1h.slice(-3).some(p=>p>tlBearVal*(1.001)&&p<tlBearVal*(1.008));
+    const confirmBull1h=lP1h>lMA20_1h&&lP1h>o1h[n1h-1]; // vela verde sobre MA20
+    const confirm15bull=lP15>lMA20_15&&upSlope15&&greenCandles15>=2;
+    all.push({...meta,code:'E1',name:'Cambio de Tendencia al Alza',type:'call',reqs:[
+      {ok:!!tlBear&&tlBear.pivotCount>=4, tf:'1H', text:`Línea bajista: ${tlBear?tlBear.pivotCount:0} máximos desc. detectados`},
+      {ok:last3above,                     tf:'1H', text:`Precio 0.1–0.5% sobre línea bajista (buffer 3 velas)`},
+      {ok:confirmBull1h,                  tf:'1H', text:`Vela alcista cierra sobre MA20 ($${lMA20_1h.toFixed(2)})`},
+      {ok:confirm15bull,                  tf:'15m',text:`15min alcista: MA20 + BB↑ + ${greenCandles15} velas verdes`},
     ]});
 
-    // ════════════════════════════════════════════════════════════════
-    // E8 — EFECTO IMÁN TENDENCIA ALCISTA (MA20/40 1H + BB 15min → PUT)
-    // ════════════════════════════════════════════════════════════════
-    const bullTrend_E8=lMA20_1h>lMA40_1h&&lP1h>lMA20_1h&&lP1h>lMA40_1h&&dailyBullish3;
-    const distFromMA20_1h_up=lMA20_1h>0?(lP1h-lMA20_1h)/lMA20_1h*100:0;
-    const bigRiseFromMA20=distFromMA20_1h_up>=2;
-    const candleFullyAboveBB15=lP15>lUp15&&(opens(ohlc15).slice(-1)[0]||lP15)>lUp15;
+    // ════════════════════════════════════════════════════════════════════════
+    // E2 — CAMBIO DE TENDENCIA A LA BAJA
+    // Línea alcista detectada → ruptura con buffer → cierre bajo MA20 → 15min bajista
+    // ════════════════════════════════════════════════════════════════════════
+    const tlBull=trendlineFromPivots(l1h,'lows',4);
+    const tlBullVal=tlBull?trendlineAt(tlBull,n1h-1):null;
+    const last3below=tlBullVal!==null&&c1h.slice(-3).some(p=>p<tlBullVal*(0.999)&&p>tlBullVal*(0.992));
+    const confirmBear1h=lP1h<lMA20_1h&&lP1h<o1h[n1h-1]; // vela roja bajo MA20
+    const confirm15bear=lP15<lMA20_15&&loSlope15&&redCandles15>=2;
+    all.push({...meta,code:'E2',name:'Cambio de Tendencia a la Baja',type:'put',reqs:[
+      {ok:!!tlBull&&tlBull.pivotCount>=4, tf:'1H', text:`Línea alcista: ${tlBull?tlBull.pivotCount:0} mínimos asc. detectados`},
+      {ok:last3below,                     tf:'1H', text:`Precio 0.1–0.5% bajo línea alcista (buffer 3 velas)`},
+      {ok:confirmBear1h,                  tf:'1H', text:`Vela bajista cierra bajo MA20 ($${lMA20_1h.toFixed(2)})`},
+      {ok:confirm15bear,                  tf:'15m',text:`15min bajista: MA20 + BB↓ + ${redCandles15} velas rojas`},
+    ]});
+
+    // ════════════════════════════════════════════════════════════════════════
+    // E7 — EFECTO IMÁN TENDENCIA BAJISTA (CALL)
+    // Días bajando + precio muy alejado de MA20 → vela 15min fuera de BB + Stoch cruce
+    // ════════════════════════════════════════════════════════════════════════
+    const bearTrend_E7=lMA20_1h<lMA40_1h&&lP1h<lMA20_1h&&lP1h<lMA40_1h&&dailyBearish;
+    const distDown=lMA20_1h>0?(lMA20_1h-lP1h)/lMA20_1h*100:0;
+    const bigDropFromMA20=distDown>=2;
+    const candleBelowBB15=lP15<lLow15; // cierre bajo banda inferior
+    const stochCrossUp15=pK15<lD15&&lK15>=lD15; // %K cruza por encima de %D
+    all.push({...meta,code:'E7',name:'Efecto Imán — Tendencia Bajista (CALL)',type:'call',reqs:[
+      {ok:bearTrend_E7,    tf:'1H', text:`Tendencia bajista: MA20<MA40, precio bajo ambas + ${bearDays}/3 días rojos`},
+      {ok:bigDropFromMA20, tf:'1H', text:`Precio alejado ${distDown.toFixed(1)}% de MA20 (mín 2%) — imán activo`},
+      {ok:candleBelowBB15, tf:'15m',text:`Vela 15min cierra bajo banda inferior BB ($${lLow15.toFixed(2)})`},
+      {ok:stochCrossUp15,  tf:'15m',text:`Stochastics %K (${lK15.toFixed(0)}) cruza por encima de %D (${lD15.toFixed(0)})`},
+    ]});
+
+    // ════════════════════════════════════════════════════════════════════════
+    // E8 — EFECTO IMÁN TENDENCIA ALCISTA (PUT)
+    // Días subiendo + precio muy alejado de MA20 → vela 15min fuera de BB + Stoch cruce
+    // ════════════════════════════════════════════════════════════════════════
+    const bullTrend_E8=lMA20_1h>lMA40_1h&&lP1h>lMA20_1h&&lP1h>lMA40_1h&&dailyBullish;
+    const distUp=lMA20_1h>0?(lP1h-lMA20_1h)/lMA20_1h*100:0;
+    const bigRiseFromMA20=distUp>=2;
+    const candleAboveBB15=lP15>lUp15; // cierre sobre banda superior
     const stochCrossDown15=pK15>lD15&&lK15<=lD15; // %K cruza por debajo de %D
     all.push({...meta,code:'E8',name:'Efecto Imán — Tendencia Alcista (PUT)',type:'put',reqs:[
-      {ok:bullTrend_E8,         tf:'1H', text:`Tendencia alcista: MA20>MA40, precio sobre ambas, 3+ días`},
-      {ok:bigRiseFromMA20,      tf:'1H', text:`Precio alejado ${distFromMA20_1h_up.toFixed(1)}% de MA20 (mín 2%)`},
-      {ok:candleFullyAboveBB15, tf:'15m',text:`Primera vela 15min completamente sobre banda superior BB`},
-      {ok:stochCrossDown15,     tf:'15m',text:`Stochastics (12,%K3): %K cruza por debajo de línea señal`},
+      {ok:bullTrend_E8,     tf:'1H', text:`Tendencia alcista: MA20>MA40, precio sobre ambas + ${bullDays}/3 días verdes`},
+      {ok:bigRiseFromMA20,  tf:'1H', text:`Precio alejado ${distUp.toFixed(1)}% de MA20 (mín 2%) — imán activo`},
+      {ok:candleAboveBB15,  tf:'15m',text:`Vela 15min cierra sobre banda superior BB ($${lUp15.toFixed(2)})`},
+      {ok:stochCrossDown15, tf:'15m',text:`Stochastics %K (${lK15.toFixed(0)}) cruza por debajo de %D (${lD15.toFixed(0)})`},
     ]});
   }
 
@@ -1326,7 +1254,7 @@ async function buildSignals(){
     .sort((a,b)=>b.passed-a.passed);
 
   if(!active.length){
-    area.innerHTML='<div style="text-align:center;padding:30px;color:var(--text2);font-size:13px;"><div style="font-size:28px;margin-bottom:10px">📊</div><div style="font-weight:600;">Sin señales activas</div><div style="font-size:11px;margin-top:6px;color:var(--text3)">Ninguna estrategia alcanza el 75% · Verifica tu API key de Finnhub</div></div>';
+    area.innerHTML='<div style="text-align:center;padding:30px;color:var(--text2);font-size:13px;"><div style="font-size:28px;margin-bottom:10px">📊</div><div style="font-weight:600;">Sin señales activas</div><div style="font-size:11px;margin-top:6px;color:var(--text3)">Ninguna de las 4 estrategias alcanza el 75% actualmente</div></div>';
     return;
   }
 
@@ -1338,7 +1266,7 @@ async function buildSignals(){
   else{dir=`⚡ MIXTO — ${calls} CALL · ${puts} PUT`;dirCol='var(--yellow)';}
 
   let html=`<div style="text-align:center;padding:10px 0;border-bottom:1px solid var(--border);margin-bottom:12px;">
-    <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:4px;">SEÑALES ACTIVAS — E1·E2·E3·E4·E5·E6·E7·E8</div>
+    <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:4px;">SEÑALES ACTIVAS — E1 · E2 · E7 · E8</div>
     <div style="font-family:var(--mono);font-size:32px;font-weight:700;color:#fff;">${active.length}</div>
     <div style="font-size:12px;color:${dirCol};margin-top:4px;">${dir}</div>
   </div>`;
@@ -1346,7 +1274,7 @@ async function buildSignals(){
   active.forEach(s=>{
     const total=s.reqs.length;
     const disp=Math.round(s.passed/total*100);
-    const col=disp>=100?'var(--green)':disp>=75?'var(--green)':disp>=50?'var(--yellow)':' var(--red)';
+    const col=disp===100?'var(--green)':disp>=75?'var(--green)':'var(--yellow)';
     const hdr=s.type==='call'?'sig-call':'sig-put';
     const fullSignal=s.passed===total;
     html+=`<div class="sig-card" style="margin-bottom:10px;${fullSignal?'box-shadow:0 0 0 2px var(--green);':''}>
@@ -1355,11 +1283,13 @@ async function buildSignals(){
           <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
             <span style="font-family:var(--mono);font-size:17px;font-weight:700;color:#fff">${s.sym}</span>
             ${fullSignal?'<span class="badge" style="background:rgba(0,209,122,.4);">✅ SEÑAL COMPLETA</span>':''}
-            ${s.passed>=3&&!fullSignal?'<span class="badge">★ ALTA</span>':''}
+            ${s.passed===3&&!fullSignal?'<span class="badge" style="background:rgba(255,194,52,.3);">★ 75% — EN FORMACIÓN</span>':''}
             <span class="badge">${s.type.toUpperCase()} · ${s.code}</span>
           </div>
           <div style="font-size:12px;color:rgba(255,255,255,.85);margin-top:2px;font-weight:600;">${s.name}</div>
-          <div style="font-size:11px;color:rgba(255,255,255,.65);margin-top:1px;">$${s.price.toFixed(2)} (${s.pct>=0?'+':''}${s.pct.toFixed(2)}%) · ${s.dataLabel}</div>
+          <div style="font-size:11px;color:rgba(255,255,255,.65);margin-top:1px;">
+            $${s.price.toFixed(2)} <span style="color:${s.pct>=0?'rgba(0,209,122,.9)':'rgba(255,77,109,.9)'}">(${s.pct>=0?'+':''}${s.pct.toFixed(2)}%)</span> · ${s.dataLabel}
+          </div>
         </div>
         <div style="text-align:right;">
           <div style="font-family:var(--mono);font-size:26px;font-weight:700;color:${col}">${disp}%</div>
@@ -1972,7 +1902,8 @@ async function runTestMode(){
     const h=closes.map((v,i)=>Math.max(v,i>0?closes[i-1]:v)*( 1+spreadPct));
     const l=closes.map((v,i)=>Math.min(v,i>0?closes[i-1]:v)*(1-spreadPct));
     const o=closes.map((_,i)=>i===0?closes[0]:closes[i-1]);
-    return{c:closes,h,l,o};
+    const v=closes.map(()=>Math.floor(1e6+Math.random()*5e6));
+    return{c:closes,h,l,o,v};
   }
   // Build a clean descending series with 4+ pivot highs going lower each time
   function bearSeries(start,n,dropPerBar){

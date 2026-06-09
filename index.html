@@ -1791,52 +1791,80 @@ function renderInsiderTable(data){
 // ═══════════════════════════════════════════════════════════════
 async function runTestMode(){
   const btn=document.getElementById('testBtn');
-  if(btn){btn.textContent='⟳ Cargando…';btn.style.opacity='.6';btn.disabled=true;}
+  if(btn){btn.textContent='⟳ Probando…';btn.style.opacity='.6';btn.disabled=true;}
 
-  // Inject synthetic but realistic OHLC data that triggers multiple strategies
-  // Based on real GOOG/TSLA/SPY price action patterns
-  // 1H data: 50 candles simulating a confirmed bearish-to-bullish trendline break (E1)
-  function mkOHLC(closes,spread=0.005){
-    return{c:closes,h:closes.map(v=>v*(1+spread)),l:closes.map(v=>v*(1-spread)),o:closes.map((_,i)=>i===0?closes[0]:closes[i-1])};
+  // Helper: build OHLC with explicit control over each candle
+  function ohlc(closes,spreadPct=0.004){
+    const h=closes.map((v,i)=>Math.max(v,i>0?closes[i-1]:v)*( 1+spreadPct));
+    const l=closes.map((v,i)=>Math.min(v,i>0?closes[i-1]:v)*(1-spreadPct));
+    const o=closes.map((_,i)=>i===0?closes[0]:closes[i-1]);
+    return{c:closes,h,l,o};
+  }
+  // Build a clean descending series with 4+ pivot highs going lower each time
+  function bearSeries(start,n,dropPerBar){
+    return Array.from({length:n},(_,i)=>+(start - i*dropPerBar + (i%3===0?dropPerBar*0.3:0)).toFixed(2));
+  }
+  // Build a clean ascending series
+  function bullSeries(start,n,risePerBar){
+    return Array.from({length:n},(_,i)=>+(start + i*risePerBar).toFixed(2));
   }
 
-  // GOOG — E1 pattern: 4 descending highs then break above trendline + MA20
-  const googBase=365;
-  const goog1h=[...Array(30)].map((_,i)=>googBase - 8 + i*0.1 - Math.sin(i*0.4)*3)  // slight downtrend
-    .concat([...Array(15)].map((_,i)=>googBase - 3 + i*1.2))  // breakout begins
-    .concat([googBase+13, googBase+14.5, googBase+15.2, googBase+16, googBase+16.8]); // confirmed breakout
-  const goog15=[...Array(35)].map((_,i)=>googBase+10+i*0.3);  // 15min fully bullish
-  const googD=[...Array(25)].map((_,i)=>googBase-15+i*0.8);   // daily approaching MA20
-
-  // TSLA — E7 pattern: strong downtrend, price far from MA20, stoch cross up
-  const tslaBase=391;
-  const tsla1h=[...Array(50)].map((_,i)=>tslaBase+20 - i*1.1); // sustained downtrend
-  const tsla15h=tsla1h.map(v=>v*1.001);
-  const tsla15l=tsla1h.map(v=>v*0.999);
-  const tsla15=[...Array(40)].map((_,i)=>tslaBase-20 - 2 + i*0.08); // below BB lower
-  const tslaD=[...Array(25)].map((_,i)=>tslaBase+5 - i*0.9);
-
-  // SPY — E3 pattern: bearish 1H, price near daily MA20 acting as support
-  const spyBase=594;
-  const spy1h=[...Array(50)].map((_,i)=>spyBase+5 - i*0.15); // slight downtrend, below MA20
-  const spy15=[...Array(40)].map((_,i)=>spyBase-1+i*0.05);   // 15min starting to rebound
-  const spyD=[...Array(25)].map((_,i)=>spyBase-8+i*0.35);    // daily near MA20
-
-  // Inject into cache so fetchCandles returns this data
   const now=Math.floor(Date.now()/1000);
-  _candleCache['GOOG_60']={data:mkOHLC(goog1h,0.003),ts:now};
-  _candleCache['GOOG_15']={data:mkOHLC(goog15,0.002),ts:now};
-  _candleCache['GOOG_D']={data:mkOHLC(googD,0.008),ts:now};
-  _candleCache['TSLA_60']={data:mkOHLC(tsla1h,0.004),ts:now};
-  _candleCache['TSLA_15']={data:{c:tsla15,h:tsla15.map(v=>v*1.003),l:tsla15.map(v=>v*0.997),o:tsla15.map((_,i)=>i===0?tsla15[0]:tsla15[i-1])},ts:now};
-  _candleCache['TSLA_D']={data:mkOHLC(tslaD,0.01),ts:now};
-  _candleCache['SPY_60']={data:mkOHLC(spy1h,0.002),ts:now};
-  _candleCache['SPY_15']={data:mkOHLC(spy15,0.002),ts:now};
-  _candleCache['SPY_D']={data:mkOHLC(spyD,0.006),ts:now};
 
-  // Mark as test mode in UI
-  const area=document.getElementById('signalArea');
-  area.innerHTML='<div style="text-align:center;padding:12px;color:var(--purple);font-size:12px;border:1px solid rgba(167,139,250,.3);border-radius:var(--r);margin-bottom:12px;">🧪 MODO TEST — Datos sintéticos para verificar lógica · No son señales reales</div>';
+  // ── GOOG → E1: Cambio de Tendencia al Alza ──────────────────────────────
+  // Need: 4+ descending highs in 1H, then price breaks above trendline AND closes above MA20
+  // MA20 of last 20 bars needs to be below final price
+  // Build: 30 bars descending (creates trendline + MA20 below price at end), last 5 bars breakout
+  const gBase=365;
+  // 30 descending bars to establish downtrend + MA20
+  const gDown=bearSeries(gBase+15, 30, 0.6);
+  // 5 bars of strong breakout — last bar closes significantly above MA20
+  const gBreak=[gBase-3, gBase-1, gBase+2, gBase+5, gBase+8];
+  const g1h=[...gDown, ...gBreak]; // 35 bars total, last bar = gBase+8
+  // 15min: fully bullish — price above MA20, BB upper rising, 3+ green candles
+  const g15=bullSeries(gBase+2, 40, 0.18);
+  // Daily: 25 bars, price ending near MA20 (within 0.5%)
+  const gD=bearSeries(gBase+8, 25, 0.25);
+  _candleCache['GOOG_60']={data:ohlc(g1h,0.003),ts:now};
+  _candleCache['GOOG_15']={data:ohlc(g15,0.002),ts:now};
+  _candleCache['GOOG_D']={data:ohlc(gD,0.006),ts:now};
+
+  // ── TSLA → E7: Efecto Imán Tendencia Bajista (CALL) ─────────────────────
+  // Need: MA20 < MA40 in 1H, price 2%+ below MA20, 1st 15m candle fully below BB lower,
+  // stoch %K crosses above %D
+  const tBase=391;
+  // 50 bars strong downtrend: MA20 well below MA40, price at bottom
+  const t1h=bearSeries(tBase+25, 50, 0.9); // ends at ~tBase-20
+  const tFinal=t1h[t1h.length-1]; // ~tBase-20
+  // 15min: 40 bars descending then last candle well below BB lower with stoch setup
+  // Build descending 15min so stoch %K was low and is now crossing %D
+  const t15down=bearSeries(tFinal+8, 32, 0.3);
+  // Last 8 bars: price at extreme low then tiny bounce for stoch cross
+  const t15end=[tFinal-4,tFinal-5,tFinal-6,tFinal-7,tFinal-7.5,tFinal-7.2,tFinal-6.8,tFinal-6.5];
+  const t15=[...t15down,...t15end];
+  // Daily: 25 bars descending (dailyBearish3 — last 3 closes below MA20)
+  const tD=bearSeries(tBase+10, 25, 0.8);
+  _candleCache['TSLA_60']={data:ohlc(t1h,0.004),ts:now};
+  _candleCache['TSLA_15']={data:ohlc(t15,0.003),ts:now};
+  _candleCache['TSLA_D']={data:ohlc(tD,0.008),ts:now};
+
+  // ── SPY → E3: Rebote Punto Medio al Alza ────────────────────────────────
+  // Need: bearish 1H (BB upper slope down + price below MA20),
+  // daily price within 0.5% of MA20 (below it), respects MA20D, rebound in 15min
+  const sBase=594;
+  // 1H: 40 bars slight downtrend so price ends below MA20 and BB upper is sloping down
+  const s1h=bearSeries(sBase+4, 40, 0.22); // ends ~sBase-4.4
+  const sFinal=s1h[s1h.length-1];
+  // Daily: price needs to end JUST below MA20 daily (within 0.5%)
+  // MA20 of a 25-bar daily series ending at sBase will be ~sBase
+  // Make series end at sBase*0.997 (0.3% below MA20)
+  const sDbase=sBase+6;
+  const sD=bearSeries(sDbase, 25, 0.28); // MA20 ≈ sBase+6 - 12*0.28 = sBase+2.6, last = sBase+6-24*0.28 = sBase-0.72
+  // 15min: rebounding — price above MA20_15, BB upper rising, 3 green candles
+  const s15=bullSeries(sFinal-2, 40, 0.15);
+  _candleCache['SPY_60']={data:ohlc(s1h,0.002),ts:now};
+  _candleCache['SPY_15']={data:ohlc(s15,0.002),ts:now};
+  _candleCache['SPY_D']={data:ohlc(sD,0.005),ts:now};
 
   // Run signals with injected data
   await buildSignals();
@@ -1844,10 +1872,10 @@ async function runTestMode(){
   // Restore button
   if(btn){btn.textContent='🧪 Test';btn.style.opacity='1';btn.disabled=false;}
 
-  // Prepend test banner to results
-  const existingArea=document.getElementById('signalArea');
-  const banner='<div style="text-align:center;padding:8px 12px;color:var(--purple);font-size:11px;font-weight:700;border:1px solid rgba(167,139,250,.3);border-radius:var(--r);margin-bottom:12px;background:rgba(167,139,250,.08);">🧪 MODO TEST — Datos sintéticos · No son señales reales</div>';
-  existingArea.innerHTML=banner+existingArea.innerHTML;
+  // Prepend test banner
+  const area=document.getElementById('signalArea');
+  const banner='<div style="text-align:center;padding:8px 12px;color:var(--purple);font-size:11px;font-weight:700;border:1px solid rgba(167,139,250,.3);border-radius:var(--r);margin-bottom:10px;background:rgba(167,139,250,.08);">🧪 MODO TEST — Datos sintéticos · No son señales reales</div>';
+  area.innerHTML=banner+area.innerHTML;
 }
 
 async function init(){

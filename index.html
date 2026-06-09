@@ -1351,8 +1351,11 @@ async function buildMomentum(){
         await new Promise(r=>setTimeout(r,200));
       }
     }catch(e){}
-    if(!pDay||closes(pDay).length<20){const s=genCandles(base,60,.012);pDay={c:s,h:s,l:s,o:s};}
-    if(!p1h||closes(p1h).length<10){const s=genCandles(base,48,.005);p1h={c:s,h:s,l:s,o:s};}
+    // Sin datos reales de Schwab = saltar este símbolo
+    if(!pDay||closes(pDay).length<20||!p1h||closes(p1h).length<10){
+      addLog('warn','Momentum',`${sym} → Sin datos Schwab, omitido`);
+      continue;
+    }
     const _cd=closes(pDay),_c1=closes(p1h);
     const ma20d=sma(_cd,20),ma40d=sma(_cd,40),ma100d=sma(_cd,Math.min(50,_cd.length-1));
     const bbd=bollinger(_cd);
@@ -1386,12 +1389,12 @@ async function buildMomentum(){
     }
   }
   results.sort((a,b)=>b.passed-a.passed);
-  if(!results.length){area.innerHTML='<div style="text-align:center;padding:20px;color:var(--text2);font-size:12px;"><div style="font-size:22px;margin-bottom:8px">📊</div><div>Sin Momentum detectado</div></div>';return;}
+  if(!results.length){area.innerHTML='<div style="text-align:center;padding:20px;color:var(--text2);font-size:12px;"><div style="font-size:22px;margin-bottom:8px">📊</div><div>Sin Momentum detectado</div><div style="font-size:11px;margin-top:6px;color:var(--text3)">Requiere Schwab conectado</div></div>';return;}
   area.innerHTML=results.map(r=>{
     const pct=Math.round(r.passed/5*100);
     const col=pct>=80?'#00d17a':pct>=60?'#ffc234':'#ff4d6d';
     const hdr=r.type==='call'?'mom-bull':'mom-bear';
-    return`<div class="mom-card"><div class="mom-hdr ${hdr}"><div style="display:flex;align-items:center;gap:6px;"><span style="font-family:var(--mono);font-size:15px;font-weight:700;color:#fff">${r.sym}</span><span style="font-size:9px;background:rgba(0,0,0,.25);color:rgba(255,255,255,.9);padding:1px 7px;border-radius:8px;font-weight:600;">${r.type==='call'?'📈 CALL':'📉 PUT'}</span></div><div style="text-align:right;"><div style="font-family:var(--mono);font-size:16px;font-weight:700;color:#fff">${pct}%</div><div style="font-size:10px;color:rgba(255,255,255,.7)">${r.passed}/5</div></div></div><div class="mom-body">${r.reqs.map(q=>`<div class="mom-req"><span style="font-size:12px;flex-shrink:0">${q.ok?'✅':'❌'}</span><span style="color:${q.ok?'var(--text)':'var(--text3)'};font-size:13px;line-height:1.4">${q.text}</span></div>`).join('')}<div style="height:3px;background:var(--bg4);border-radius:2px;margin-top:6px;overflow:hidden;"><div style="height:100%;width:${pct}%;background:${col};border-radius:2px;"></div></div><div style="text-align:right;font-size:10px;color:var(--text3);margin-top:2px;">⚠ Confirmar con panorama completo</div></div></div>`;
+    return`<div class="mom-card"><div class="mom-hdr ${hdr}"><div style="display:flex;align-items:center;gap:6px;"><span style="font-family:var(--mono);font-size:15px;font-weight:700;color:#fff">${r.sym}</span><span style="font-size:9px;background:rgba(0,0,0,.25);color:rgba(255,255,255,.9);padding:1px 7px;border-radius:8px;font-weight:600;">${r.type==='call'?'📈 CALL':'📉 PUT'}</span><span style="font-size:9px;color:rgba(255,255,255,.6);">📡 Schwab</span></div><div style="text-align:right;"><div style="font-family:var(--mono);font-size:16px;font-weight:700;color:#fff">${pct}%</div><div style="font-size:10px;color:rgba(255,255,255,.7)">${r.passed}/5</div></div></div><div class="mom-body">${r.reqs.map(q=>`<div class="mom-req"><span style="font-size:12px;flex-shrink:0">${q.ok?'✅':'❌'}</span><span style="color:${q.ok?'var(--text)':'var(--text3)'};font-size:13px;line-height:1.4">${q.text}</span></div>`).join('')}<div style="height:3px;background:var(--bg4);border-radius:2px;margin-top:6px;overflow:hidden;"><div style="height:100%;width:${pct}%;background:${col};border-radius:2px;"></div></div><div style="text-align:right;font-size:10px;color:var(--text3);margin-top:2px;">⚠ Confirmar con panorama completo</div></div></div>`;
   }).join('');
 }
 

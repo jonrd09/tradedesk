@@ -2082,7 +2082,25 @@ async function init(){
 
   // Load data
   if(_k&&_k.length>8){
+    const _et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+    const _h=_et.getHours(),_m=_et.getMinutes(),_d=_et.getDay();
+    const _mins=_h*60+_m;
+    const _isOpen=_d>=1&&_d<=5&&_mins>=570&&_mins<960;
+    const _isPre=_d>=1&&_d<=5&&_mins>=240&&_mins<570;
+
+    // Always load live prices first
     await loadLivePrices();
+
+    // Load signals and momentum if market is open or premarket
+    if(_isOpen||_isPre){
+      await buildSignals();
+      await buildMomentum();
+    }else{
+      // Market closed — show message but don't call Schwab for candles
+      document.getElementById('signalArea').innerHTML='<div style="text-align:center;padding:30px;color:var(--text2);font-size:13px;"><div style="font-size:28px;margin-bottom:10px">🌙</div><div style="font-weight:600;">Mercado cerrado</div><div style="font-size:11px;margin-top:6px;color:var(--text3)">Las señales se activarán automáticamente a las 9:30 AM ET</div></div>';
+      document.getElementById('momentumArea').innerHTML='<div style="text-align:center;padding:20px;color:var(--text3);font-size:12px;">Disponible durante horario de mercado</div>';
+    }
+
     // Delay rotation load to avoid rate limit burst on startup
     setTimeout(()=>loadRotation(),5000);
   }else{

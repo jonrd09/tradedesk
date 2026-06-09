@@ -504,6 +504,7 @@ const SCHWAB_API_BASE='https://api.schwabapi.com/marketdata/v1';
 // PIN se carga desde localStorage. Si no existe, el usuario debe configurarlo.
 function getStoredPin(){return localStorage.getItem('app_pin')||'';}
 let _pinBuffer='',_pinCallback=null;
+let _testMode=false;
 let currentTicker='GOOG';
 let _insiderData=[];
 let _insiderSort={col:'shares',dir:-1};
@@ -1032,42 +1033,50 @@ async function buildSignals(){
     let ohlc1h=null,ohlc15=null,ohlcD=null;
     let dataLabel='📡 Sin fuente';
 
-    // Try Schwab first (30min as proxy for 1H, 5min as proxy for 15min)
-    const schwabToken=await getSchwabToken();
-    if(schwabToken){
-      try{
-        const [r1,r2,r3]=await Promise.all([
-          Promise.race([fetchSchwabCandles(sym,'minute',30,50),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),6000))]),
-          Promise.race([fetchSchwabCandles(sym,'minute',15,50),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),6000))]),
-          Promise.race([fetchSchwabCandles(sym,'D',1,30),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),6000))])
-        ]);
-        if(r1&&closes(r1).length>=10){ohlc1h=r1;dataLabel='📡 Schwab';}
-        if(r2&&closes(r2).length>=5){ohlc15=r2;}
-        if(r3&&closes(r3).length>=10){ohlcD=r3;}
-      }catch(e){addLog('warn','Schwab',`${sym} señales error`,e.message);}
-    }
-
-    // Finnhub fallback — secuencial con delay para no exceder rate limit (60 req/min)
-    if(!ohlc1h){
-      try{
-        const r=await Promise.race([fetchCandles(sym,'60',50),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),5000))]);
-        if(r&&closes(r).length>=10){ohlc1h=r;dataLabel='📡 Finnhub';}
-      }catch(e){}
-      await new Promise(r=>setTimeout(r,300));
-    }
-    if(!ohlc15){
-      try{
-        const r=await Promise.race([fetchCandles(sym,'15',50),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),5000))]);
-        if(r&&closes(r).length>=5)ohlc15=r;
-      }catch(e){}
-      await new Promise(r=>setTimeout(r,300));
-    }
-    if(!ohlcD){
-      try{
-        const r=await Promise.race([fetchCandles(sym,'D',30),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),5000))]);
-        if(r&&closes(r).length>=20)ohlcD=r;
-      }catch(e){}
-      await new Promise(r=>setTimeout(r,300));
+    // En modo test usar solo caché inyectado, sin llamadas API
+    if(_testMode){
+      const c60=_candleCache[sym+'_60'],c15=_candleCache[sym+'_15'],cD=_candleCache[sym+'_D'];
+      if(c60)ohlc1h=c60.data;
+      if(c15)ohlc15=c15.data;
+      if(cD)ohlcD=cD.data;
+      dataLabel='🧪 Test';
+    }else{
+      // Try Schwab first (30min as proxy for 1H, 15min, daily)
+      const schwabToken=await getSchwabToken();
+      if(schwabToken){
+        try{
+          const [r1,r2,r3]=await Promise.all([
+            Promise.race([fetchSchwabCandles(sym,'minute',30,50),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),6000))]),
+            Promise.race([fetchSchwabCandles(sym,'minute',15,50),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),6000))]),
+            Promise.race([fetchSchwabCandles(sym,'D',1,30),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),6000))])
+          ]);
+          if(r1&&closes(r1).length>=10){ohlc1h=r1;dataLabel='📡 Schwab';}
+          if(r2&&closes(r2).length>=5){ohlc15=r2;}
+          if(r3&&closes(r3).length>=10){ohlcD=r3;}
+        }catch(e){addLog('warn','Schwab',`${sym} señales error`,e.message);}
+      }
+      // Finnhub fallback — secuencial con delay para no exceder rate limit
+      if(!ohlc1h){
+        try{
+          const r=await Promise.race([fetchCandles(sym,'60',50),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),5000))]);
+          if(r&&closes(r).length>=10){ohlc1h=r;dataLabel='📡 Finnhub';}
+        }catch(e){}
+        await new Promise(r=>setTimeout(r,300));
+      }
+      if(!ohlc15){
+        try{
+          const r=await Promise.race([fetchCandles(sym,'15',50),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),5000))]);
+          if(r&&closes(r).length>=5)ohlc15=r;
+        }catch(e){}
+        await new Promise(r=>setTimeout(r,300));
+      }
+      if(!ohlcD){
+        try{
+          const r=await Promise.race([fetchCandles(sym,'D',30),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),5000))]);
+          if(r&&closes(r).length>=20)ohlcD=r;
+        }catch(e){}
+        await new Promise(r=>setTimeout(r,300));
+      }
     }
 
     // Sin datos reales en cualquier timeframe = no evaluar señales
@@ -1866,8 +1875,10 @@ async function runTestMode(){
   _candleCache['SPY_15']={data:ohlc(s15,0.002),ts:now};
   _candleCache['SPY_D']={data:ohlc(sD,0.005),ts:now};
 
-  // Run signals with injected data
+  // Run signals with injected data — bypass all API calls
+  _testMode=true;
   await buildSignals();
+  _testMode=false;
 
   // Restore button
   if(btn){btn.textContent='🧪 Test';btn.style.opacity='1';btn.disabled=false;}

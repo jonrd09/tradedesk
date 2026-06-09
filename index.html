@@ -37,6 +37,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
 .clock{font-family:var(--mono);font-size:12px;color:var(--text2);white-space:nowrap;}
 .mkt-open{background:var(--green-bg);color:var(--green);font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;}
 .mkt-closed{background:var(--red-bg);color:var(--red);font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;}
+.mkt-pre{background:rgba(255,194,52,.15);color:#ffc234;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;}
 .mom-card{border-radius:var(--r);overflow:hidden;margin-bottom:8px;border:1px solid var(--border);}
 .mom-hdr{padding:8px 12px;display:flex;align-items:center;justify-content:space-between;}
 .mom-bull{background:linear-gradient(135deg,rgba(0,123,69,.85),rgba(0,168,90,.85));}
@@ -676,7 +677,7 @@ async function fetchSchwabCandles(sym,freqType,freq,bars=50){
 
   for(const cfg of configs){
     try{
-      const url=`${SCHWAB_API_BASE}/pricehistory?symbol=${sym}&periodType=${cfg.periodType}&period=${cfg.period}&frequencyType=${cfg.frequencyType}&frequency=${cfg.frequency}&needExtendedHoursData=false`;
+      const url=`${SCHWAB_API_BASE}/pricehistory?symbol=${sym}&periodType=${cfg.periodType}&period=${cfg.period}&frequencyType=${cfg.frequencyType}&frequency=${cfg.frequency}&needExtendedHoursData=true`;
       const r=await fetch(url,{headers:{'Authorization':'Bearer '+token},signal:AbortSignal.timeout(7000)});
       if(!r.ok){
         const err=await r.text().catch(()=>'');
@@ -865,9 +866,21 @@ function tick(){
   const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
   document.getElementById('clockEl').textContent=et.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:true})+' ET';
   const d=et.getDay(),h=et.getHours(),m=et.getMinutes();
-  const open=d>=1&&d<=5&&(h>8||(h===8&&m>=30))&&h<16;
+  const isWeekday=d>=1&&d<=5;
+  const minsSinceMidnight=h*60+m;
+  // Market regular: 9:30AM-4:00PM ET
+  const isOpen=isWeekday&&minsSinceMidnight>=570&&minsSinceMidnight<960;
+  // Premarket: 4:00AM-9:30AM ET
+  const isPre=isWeekday&&minsSinceMidnight>=240&&minsSinceMidnight<570;
+  // After hours: 4:00PM-8:00PM ET
+  const isAfter=isWeekday&&minsSinceMidnight>=960&&minsSinceMidnight<1200;
   const ms=document.getElementById('mktStatus');
-  if(ms){ms.textContent=open?'● ABIERTO':'● CERRADO';ms.className=open?'mkt-open':'mkt-closed';}
+  if(ms){
+    if(isOpen){ms.textContent='● ABIERTO';ms.className='mkt-open';}
+    else if(isPre){ms.textContent='● PRE-MARKET';ms.className='mkt-pre';}
+    else if(isAfter){ms.textContent='● AFTER-HOURS';ms.className='mkt-pre';}
+    else{ms.textContent='● CERRADO';ms.className='mkt-closed';}
+  }
 }
 window._tickInterval=setInterval(tick,1000);tick();
 
@@ -1085,10 +1098,10 @@ async function buildSignals(){
       // Si Schwab no devolvió algún timeframe, no hay fallback para velas
     }
 
-    // Sin datos reales en cualquier timeframe = no evaluar señales
+    // Sin datos reales = no evaluar señales
     if(!ohlc1h||!ohlc15||!ohlcD){
       const missing=[!ohlc1h?'1H':null,!ohlc15?'15m':null,!ohlcD?'D':null].filter(Boolean).join(', ');
-      addLog('warn','Señales',`${sym} → Sin datos reales en: ${missing}. Señales omitidas.`);
+      addLog('warn','Señales',`${sym} → Sin datos en: ${missing}. Señales omitidas.`);
       continue;
     }
 

@@ -1533,21 +1533,22 @@ async function buildMomentum(){
     if(area.innerHTML.includes('⟳'))
       area.innerHTML='<div style="text-align:center;padding:20px;color:var(--text3);font-size:12px;"><div style="color:var(--yellow);">⏱ Tiempo agotado</div><div style="font-size:11px;margin-top:4px;">Schwab tardó demasiado</div></div>';
   },60000);
+  // Get token once before loop — avoids concurrent refresh race
+  const _momToken=await getSchwabToken();
+  if(!_momToken){
+    clearTimeout(_momTimeout);
+    area.innerHTML='<div style="text-align:center;padding:20px;color:var(--text2);font-size:12px;"><div style="font-size:22px;margin-bottom:8px">🔗</div><div style="color:var(--yellow);font-weight:600;">Schwab desconectado</div><div style="font-size:11px;margin-top:4px;color:var(--text3);">Reconecta desde el botón Schwabs</div></div>';
+    return;
+  }
+
   for(const[sym,info]of Object.entries(MOM_STOCKS)){
     const base=info.price;
     let pDay=null,p1h=null;
     try{
-      const schwabTok=await getSchwabToken();
-      if(!schwabTok&&sym===Object.keys(MOM_STOCKS)[0]){
-        area.innerHTML='<div style="text-align:center;padding:20px;color:var(--text2);font-size:12px;"><div style="font-size:22px;margin-bottom:8px">🔗</div><div style="color:var(--yellow);font-weight:600;">Schwab desconectado</div><div style="font-size:11px;margin-top:4px;color:var(--text3);">Reconecta desde el botón Schwabs</div></div>';
-        return;
-      }
-      if(schwabTok){
-        pDay=await Promise.race([fetchSchwabCandles(sym,'D',1,90),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),12000))]);
-        await new Promise(r=>setTimeout(r,200));
-        p1h=await Promise.race([fetchSchwabCandles(sym,'minute',60,100),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),12000))]);
-        await new Promise(r=>setTimeout(r,200));
-      }
+      pDay=await Promise.race([fetchSchwabCandles(sym,'D',1,90),   new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),12000))]);
+      await new Promise(r=>setTimeout(r,200));
+      p1h=await Promise.race([fetchSchwabCandles(sym,'minute',60,100),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),12000))]);
+      await new Promise(r=>setTimeout(r,200));
     }catch(e){}
     // Sin datos reales de Schwab = saltar este símbolo
     if(!pDay||closes(pDay).length<20||!p1h||closes(p1h).length<10){
@@ -2484,7 +2485,7 @@ async function init(){
       try{
         await loadLivePrices();
         await buildSignals();
-        await buildMomentum();
+        await buildMomentum(); // sequential — token already valid from buildSignals
         if(isOpen){loadRotation();showRulesPopup();}
         _refreshFailCount=0;
       }catch(e){

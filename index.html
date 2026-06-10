@@ -1032,7 +1032,7 @@ async function loadLivePrices(){
   const results=[];
   for(const s of syms){
     results.push(await fetchQuote(s).catch(()=>null));
-    await new Promise(r=>setTimeout(r,1000));
+    await new Promise(r=>setTimeout(r,1500));
   }
   syms.forEach((sym,i)=>{
     const q=results[i];
@@ -1699,7 +1699,7 @@ async function loadRotation(){
         const res=await fetchRotationQuote(allSyms[i]).catch(()=>null);
         if(res)quotes[allSyms[i]]=res;
       }catch(e){}
-      if(i<allSyms.length-1)await new Promise(r=>setTimeout(r,1200));
+      if(i<allSyms.length-1)await new Promise(r=>setTimeout(r,2000));
     }
   }
   const indEl=document.getElementById('rotIndices');
@@ -2486,7 +2486,15 @@ async function init(){
         await loadLivePrices();
         await buildSignals();
         await buildMomentum(); // sequential — token already valid from buildSignals
-        if(isOpen){loadRotation();showRulesPopup();}
+        if(isOpen){
+          showRulesPopup();
+          // Rotation only every 15min — Finnhub free plan rate limit
+          const _lastRot=parseInt(localStorage.getItem('_lastRotTs')||'0');
+          if(Date.now()-_lastRot>15*60*1000){
+            localStorage.setItem('_lastRotTs',String(Date.now()));
+            setTimeout(()=>loadRotation(),3000); // stagger after signals
+          }
+        }
         _refreshFailCount=0;
       }catch(e){
         _refreshFailCount++;

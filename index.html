@@ -145,6 +145,12 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
   <span id="mktStatus" class="mkt-closed">● —</span>
   <span class="clock" id="clockEl">—</span>
 
+  <!-- Premarket button -->
+  <button id="premarketBtn" onclick="openPremarketModal()"
+    style="background:rgba(255,194,52,.12);border:1px solid rgba(255,194,52,.4);border-radius:20px;color:var(--yellow);padding:4px 14px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--sans);white-space:nowrap;">
+    📰 Premarket
+  </button>
+
   <!-- TEST button -->
   <button id="testBtn" onclick="runTestMode()"
     style="background:rgba(167,139,250,.15);border:1px solid rgba(167,139,250,.5);border-radius:20px;color:var(--purple);padding:4px 14px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--sans);white-space:nowrap;">
@@ -1985,6 +1991,156 @@ async function runTestMode(){
   area.innerHTML=banner+area.innerHTML;
 }
 
+// ═══════════════════════════════════════════════════════════════
+// PREMARKET REPORT — Generado con Claude API + web search
+// ═══════════════════════════════════════════════════════════════
+function getAnthropicKey(){return localStorage.getItem('anthropic_api_key')||'';}
+function saveAnthropicKey(){
+  const k=document.getElementById('pmKeyInput').value.trim();
+  if(!k||!k.startsWith('sk-')){alert('Key inválida. Debe comenzar con sk-');return;}
+  localStorage.setItem('anthropic_api_key',k);
+  document.getElementById('pmKeySetup').style.display='none';
+  alert('✅ API Key guardada. Ahora puedes generar el reporte.');
+}
+
+function openPremarketModal(){
+  document.getElementById('premarketModal').style.display='flex';
+  const key=getAnthropicKey();
+  document.getElementById('pmKeySetup').style.display=key?'none':'block';
+  // Load cached report if exists
+  const cached=localStorage.getItem('pm_report_cache');
+  const cachedDate=localStorage.getItem('pm_report_date');
+  const today=new Date().toLocaleDateString('es-PR');
+  if(cached&&cachedDate){
+    document.getElementById('pmContent').innerHTML=cached;
+    document.getElementById('pmLastGenerated').textContent=`Generado el ${cachedDate}${cachedDate===today?' · HOY':' · (no es de hoy)'}`;
+  }
+}
+
+function closePremarketModal(){
+  document.getElementById('premarketModal').style.display='none';
+}
+
+async function generatePremarket(){
+  const key=getAnthropicKey();
+  if(!key){
+    document.getElementById('pmKeySetup').style.display='block';
+    return;
+  }
+
+  const btn=document.getElementById('pmGenBtn');
+  btn.textContent='⟳ Generando…';btn.disabled=true;btn.style.opacity='.6';
+
+  const content=document.getElementById('pmContent');
+  content.innerHTML=`<div style="text-align:center;padding:40px;color:var(--text2);">
+    <div style="font-size:28px;margin-bottom:12px;">🤖</div>
+    <div style="font-weight:600;">Consultando datos del mercado…</div>
+    <div style="font-size:11px;margin-top:8px;color:var(--text3);">Buscando noticias de GOOG · TSLA · SPY · Macro · ~15 segundos</div>
+  </div>`;
+
+  const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+  const dateStr=et.toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
+  const timeStr=et.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true});
+
+  const prompt=`Hoy es ${dateStr}, son las ${timeStr} ET (premarket).
+
+Genera un reporte completo de premarket en ESPAÑOL para un trader de opciones que opera GOOG, TSLA y SPY. 
+Busca en web las noticias y datos más recientes de HOY.
+
+El reporte debe seguir EXACTAMENTE este formato en HTML (usa estas clases CSS inline para estilo dark mode):
+
+<div style="font-family:system-ui;color:#e8edf5;line-height:1.7;">
+
+<div style="background:rgba(255,194,52,.1);border:1px solid rgba(255,194,52,.3);border-radius:10px;padding:14px 18px;margin-bottom:16px;">
+<div style="font-size:15px;font-weight:700;color:#ffc234;margin-bottom:4px;">📊 PREMARKET — ${dateStr}</div>
+<div style="font-size:12px;color:#8899b4;">Generado a las ${timeStr} ET</div>
+</div>
+
+Luego genera estas 5 secciones con el mismo estilo de cards:
+
+1. 🎯 SECCIÓN FIJA — TUS 3 TICKERS (GOOG, TSLA, SPY)
+Para cada uno: precio premarket, sesgo del día (ALCISTA/BAJISTA/NEUTRAL), por qué, IV, recomendación call/put/esperar.
+
+2. 🌍 MACRO — LOS FACTORES CLAVE HOY
+Los 2-3 eventos macro más importantes que muevan el mercado hoy (Fed, inflación, geopolítica, earnings importantes, datos económicos).
+
+3. 📉 MOVERS DESTACADOS
+Los 3-5 movimientos más relevantes de premarket (subidas y bajadas con %).
+
+4. 📅 EVENTOS CLAVE DE LA SEMANA
+Earnings importantes, datos económicos, decisiones de bancos centrales.
+
+5. 🎯 SESGO GENERAL DEL DÍA
+Una conclusión directa: ¿es día de calls, puts, o esperar? ¿Por qué?
+
+Usa cards con bordes y fondos suaves (rgba) para cada sección. 
+Verde (#00d17a) para alcista/positivo, Rojo (#ff4d6d) para bajista/negativo, Amarillo (#ffc234) para neutral/precaución.
+Sé directo, concreto y accionable. Sin introducciones. Sin disclaimers. Solo el reporte.`;
+
+  try{
+    const resp=await fetch('https://api.anthropic.com/v1/messages',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+      body:JSON.stringify({
+        model:'claude-sonnet-4-5',
+        max_tokens:4000,
+        tools:[{type:'web_search_20250305',name:'web_search'}],
+        messages:[{role:'user',content:prompt}]
+      })
+    });
+
+    if(!resp.ok){
+      const err=await resp.json().catch(()=>({}));
+      if(resp.status===401){
+        content.innerHTML=`<div style="padding:20px;color:var(--red);text-align:center;">
+          <div style="font-size:24px;margin-bottom:8px;">🔑</div>
+          <div style="font-weight:700;">API Key inválida</div>
+          <div style="font-size:12px;margin-top:6px;color:var(--text3);">Ve a console.anthropic.com y verifica tu key</div>
+        </div>`;
+        localStorage.removeItem('anthropic_api_key');
+        document.getElementById('pmKeySetup').style.display='block';
+      }else{
+        content.innerHTML=`<div style="padding:20px;color:var(--red);">Error ${resp.status}: ${err.error?.message||'Error desconocido'}</div>`;
+      }
+      return;
+    }
+
+    const data=await resp.json();
+    // Extract text from content blocks (may include tool_use and tool_result blocks)
+    const reportHtml=data.content
+      .filter(b=>b.type==='text')
+      .map(b=>b.text)
+      .join('');
+
+    if(!reportHtml.trim()){
+      content.innerHTML='<div style="padding:20px;color:var(--yellow);">⚠ No se generó contenido. Intenta de nuevo.</div>';
+      return;
+    }
+
+    content.innerHTML=reportHtml;
+
+    // Cache the report
+    const today=new Date().toLocaleDateString('es-PR');
+    localStorage.setItem('pm_report_cache',reportHtml);
+    localStorage.setItem('pm_report_date',today);
+    document.getElementById('pmLastGenerated').textContent=`Generado el ${today} · HOY`;
+
+  }catch(e){
+    content.innerHTML=`<div style="padding:20px;color:var(--red);">
+      <div style="font-weight:700;">Error de conexión</div>
+      <div style="font-size:12px;margin-top:4px;">${e.message}</div>
+    </div>`;
+    addLog('error','Premarket API',`Error generando reporte`,e.message);
+  }finally{
+    btn.textContent='🤖 Generar reporte';btn.disabled=false;btn.style.opacity='1';
+  }
+}
+
+// Close on backdrop click
+document.addEventListener('click',e=>{
+  if(e.target.id==='premarketModal')closePremarketModal();
+});
+
 async function init(){
   // Restore Finnhub key
   // (dashboard_pin key deprecated — removed)
@@ -2078,5 +2234,51 @@ async function init(){
 }
 init();
 </script>
+<!-- ══════════════════════════════════════════════════════
+     PREMARKET MODAL
+══════════════════════════════════════════════════════ -->
+<div id="premarketModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:2000;align-items:center;justify-content:center;">
+  <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:var(--rl);width:780px;max-width:96vw;max-height:90vh;display:flex;flex-direction:column;">
+
+    <!-- Header -->
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border);">
+      <div>
+        <div style="font-size:16px;font-weight:700;color:#fff;">📰 Reporte Premarket</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px;" id="pmLastGenerated">—</div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <button onclick="generatePremarket()" id="pmGenBtn"
+          style="background:var(--yellow);color:#000;border:none;border-radius:var(--r);padding:7px 16px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--sans);">
+          🤖 Generar reporte
+        </button>
+        <button onclick="closePremarketModal()"
+          style="background:none;border:1px solid var(--border2);border-radius:var(--r);color:var(--text2);padding:6px 12px;font-size:12px;cursor:pointer;">✕</button>
+      </div>
+    </div>
+
+    <!-- API Key config (shown if no key) -->
+    <div id="pmKeySetup" style="display:none;padding:16px 20px;background:rgba(255,194,52,.08);border-bottom:1px solid rgba(255,194,52,.2);">
+      <div style="font-size:12px;color:var(--yellow);font-weight:700;margin-bottom:8px;">⚠ API Key de Anthropic requerida</div>
+      <div style="font-size:11px;color:var(--text2);margin-bottom:10px;">Crea tu cuenta en console.anthropic.com → API Keys → copia la key aquí:</div>
+      <div style="display:flex;gap:8px;">
+        <input id="pmKeyInput" type="password" placeholder="sk-ant-api03-..." 
+          style="flex:1;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--text);padding:7px 10px;font-size:12px;font-family:var(--mono);outline:none;">
+        <button onclick="saveAnthropicKey()"
+          style="background:var(--green);color:#001a0e;border:none;border-radius:var(--r);padding:7px 16px;font-size:12px;font-weight:700;cursor:pointer;">Guardar</button>
+      </div>
+    </div>
+
+    <!-- Content area -->
+    <div id="pmContent" style="flex:1;overflow-y:auto;padding:20px;font-size:13px;line-height:1.7;color:var(--text);">
+      <div style="text-align:center;padding:40px;color:var(--text3);">
+        <div style="font-size:32px;margin-bottom:12px;">📊</div>
+        <div style="font-weight:600;font-size:14px;color:var(--text2);">Sin reporte generado</div>
+        <div style="font-size:11px;margin-top:6px;">Presiona "🤖 Generar reporte" para crear el análisis del día</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
 </body>
 </html>

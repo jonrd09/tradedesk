@@ -2463,46 +2463,17 @@ async function init(){
   // Show rules popup on first load
   setTimeout(()=>showRulesPopup(), 1500);
 
-  // Auto-refresh every 5 min during market hours
-  if(window._refreshInterval)clearInterval(window._refreshInterval);
-  let _refreshFailCount=0;
-  // Proactively refresh Schwab token every 20 min to avoid expiry mid-session
+  // Auto-refresh eliminado — usa F5 o Ctrl+R para actualizar manualmente
+  // El token de Schwab se renueva automáticamente cuando es necesario
+  // Token proactive refresh each 20min to keep session alive
   if(window._tokenInterval)clearInterval(window._tokenInterval);
   window._tokenInterval=setInterval(async()=>{
     const tok=localStorage.getItem('schwab_access_token');
     const exp=parseInt(localStorage.getItem('schwab_token_expiry')||'0');
-    if(tok&&exp&&Date.now()>exp-600000){ // refresh if <10min left
+    if(tok&&exp&&Date.now()>exp-600000){
       await getSchwabToken();
     }
   },20*60*1000);
-
-  window._refreshInterval=setInterval(async()=>{
-    const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
-    const h=et.getHours(),m=et.getMinutes(),d=et.getDay();
-    const isOpen=d>=1&&d<=5&&(h*60+m)>=570&&(h*60+m)<960;
-    const isPre=d>=1&&d<=5&&(h*60+m)>=240&&(h*60+m)<570;
-    if(isOpen||isPre){
-      try{
-        await loadLivePrices();
-        await buildSignals();
-        await buildMomentum(); // sequential — token already valid from buildSignals
-        if(isOpen){
-          showRulesPopup();
-          // Rotation only every 15min — Finnhub free plan rate limit
-          const _lastRot=parseInt(localStorage.getItem('_lastRotTs')||'0');
-          if(Date.now()-_lastRot>15*60*1000){
-            localStorage.setItem('_lastRotTs',String(Date.now()));
-            setTimeout(()=>loadRotation(),3000); // stagger after signals
-          }
-        }
-        _refreshFailCount=0;
-      }catch(e){
-        _refreshFailCount++;
-        addLog('error','Auto-refresh',`Ciclo falló (${_refreshFailCount}x consecutivo)`,e.message||'Error desconocido');
-        if(_refreshFailCount>=3)addLog('error','Auto-refresh','3+ ciclos fallidos — posible problema de red o token expirado');
-      }
-    }
-  },5*60*1000);
 }
 init();
 </script>

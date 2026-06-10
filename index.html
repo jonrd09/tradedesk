@@ -1134,6 +1134,12 @@ async function buildSignals(){
   const area=document.getElementById('signalArea');
   area.innerHTML='<div style="text-align:center;padding:20px;color:var(--text2);font-size:13px;">⟳ Obteniendo datos reales…</div>';
   const all=[];
+  // Global safety timeout — never leave spinner stuck
+  const _sigTimeout=setTimeout(()=>{
+    if(area.innerHTML.includes('⟳'))
+      area.innerHTML='<div style="text-align:center;padding:30px;color:var(--text2);font-size:13px;"><div style="font-size:28px;margin-bottom:10px">⏱</div><div style="font-weight:600;color:var(--yellow);">Tiempo agotado</div><div style="font-size:12px;margin-top:8px;color:var(--text3);">Schwab tardó demasiado. Revisa tu conexión o intenta en unos minutos.</div></div>';
+  },35000);
+  try{
 
   for(const sym of['GOOG','TSLA','SPY']){
     let ohlc1h=null,ohlc15=null,ohlcD=null;
@@ -1154,9 +1160,9 @@ async function buildSignals(){
       if(schwabToken){
         try{
           const [r1,r2,r3]=await Promise.all([
-            Promise.race([fetchSchwabCandles(sym,'minute',30,100),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),6000))]),
-            Promise.race([fetchSchwabCandles(sym,'minute',15,60), new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),6000))]),
-            Promise.race([fetchSchwabCandles(sym,'D',1,90),       new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),6000))])
+            Promise.race([fetchSchwabCandles(sym,'minute',30,100),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),10000))]),
+            Promise.race([fetchSchwabCandles(sym,'minute',15,60), new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),10000))]),
+            Promise.race([fetchSchwabCandles(sym,'D',1,90),       new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),10000))])
           ]);
           if(r1&&closes(r1).length>=10){ohlc1h=r1;dataLabel='📡 Schwab';}
           if(r2&&closes(r2).length>=5) ohlc15=r2;
@@ -1301,6 +1307,13 @@ async function buildSignals(){
   }
 
   // ── Render ───────────────────────────────────────────────────────────────
+  // End of data fetching loop
+  }catch(_sigErr){
+    addLog('error','Señales',`Error inesperado en buildSignals`,_sigErr.message);
+    area.innerHTML='<div style="text-align:center;padding:30px;color:var(--text2);font-size:13px;"><div style="font-size:28px;margin-bottom:10px">⚠️</div><div style="font-weight:600;color:var(--red);">Error en señales</div><div style="font-size:12px;margin-top:8px;color:var(--text3);">${_sigErr.message}</div></div>';
+    clearTimeout(_sigTimeout);return;
+  }finally{clearTimeout(_sigTimeout);}
+
   // If all syms were skipped (no data), all is empty — show message
   if(all.length===0&&!_testMode){
     area.innerHTML='<div style="text-align:center;padding:30px;color:var(--text2);font-size:13px;"><div style="font-size:28px;margin-bottom:10px">🔗</div><div style="font-weight:600;color:var(--yellow);">Sin datos disponibles</div><div style="font-size:12px;margin-top:8px;color:var(--text3);">Verifica la conexión con Schwab — el token puede haber expirado</div></div>';
@@ -1376,6 +1389,10 @@ async function buildMomentum(){
   area.innerHTML='<div style="text-align:center;padding:16px;color:var(--text2);font-size:12px;">⟳ Calculando…</div>';
   const results=[];
   const _momSkipped=[];
+  const _momTimeout=setTimeout(()=>{
+    if(area.innerHTML.includes('⟳'))
+      area.innerHTML='<div style="text-align:center;padding:20px;color:var(--text3);font-size:12px;"><div style="color:var(--yellow);">⏱ Tiempo agotado</div><div style="font-size:11px;margin-top:4px;">Schwab tardó demasiado</div></div>';
+  },60000);
   for(const[sym,info]of Object.entries(MOM_STOCKS)){
     const base=info.price;
     let pDay=null,p1h=null;
@@ -1386,9 +1403,9 @@ async function buildMomentum(){
         return;
       }
       if(schwabTok){
-        pDay=await Promise.race([fetchSchwabCandles(sym,'D',1,90),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),7000))]);
+        pDay=await Promise.race([fetchSchwabCandles(sym,'D',1,90),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),12000))]);
         await new Promise(r=>setTimeout(r,200));
-        p1h=await Promise.race([fetchSchwabCandles(sym,'minute',30,100),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),7000))]);
+        p1h=await Promise.race([fetchSchwabCandles(sym,'minute',30,100),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),10000))]);
         await new Promise(r=>setTimeout(r,200));
       }
     }catch(e){}
@@ -1454,6 +1471,7 @@ async function buildMomentum(){
   }
   results.sort((a,b)=>b.passed-a.passed);
   if(!results.length){area.innerHTML='<div style="text-align:center;padding:20px;color:var(--text2);font-size:12px;"><div style="font-size:22px;margin-bottom:8px">📊</div><div>Sin Momentum detectado</div><div style="font-size:11px;margin-top:6px;color:var(--text3)">Requiere Schwab conectado</div></div>';return;}
+  clearTimeout(_momTimeout);
   // Log skipped symbols once as a summary (not once per symbol per call)
   if(_momSkipped.length>0){
     const schwabOk=await getSchwabToken();

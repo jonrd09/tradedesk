@@ -716,37 +716,36 @@ async function fetchSchwabCandles(sym,freqType,freq,bars=50){
   }else if(freqType==='minute'){
     const validFreqs=[1,5,10,15,30,60];
     const f=validFreqs.includes(freq)?freq:30;
-    // For 1H (freq=60): try native 60min first, fallback to 30min
-    if(f===60){
-      configs=[
-        {periodType:'day',period:10,frequencyType:'minute',frequency:60,_bars2x:false},
-        {periodType:'day',period:10,frequencyType:'minute',frequency:30,_bars2x:true}, // 2x bars, merge pairs
-      ];
-    }else{
-      configs=[
-        {periodType:'day',period:10,frequencyType:'minute',frequency:f},
-        {periodType:'day',period:5, frequencyType:'minute',frequency:f},
-      ];
-    }
+    // Schwab valid minute frequencies: 1,5,10,15,30 — 60 is NOT supported
+    // For 1H simulation: use 30min and merge pairs inside the loop
+    const _want1h=(f===60);
+    const _f=_want1h?30:f; // always use 30min if 1H was requested
+    configs=[
+      {periodType:'day',period:10,frequencyType:'minute',frequency:_f,_merge1h:_want1h},
+      {periodType:'day',period:5, frequencyType:'minute',frequency:_f,_merge1h:_want1h},
+    ];
   }else{
     return null;
   }
 
   for(const cfg of configs){
     try{
-      const fetchBars=cfg._bars2x?bars*2:bars;
+      const fetchBars=cfg._merge1h?bars*2:bars;
       const url=`${SCHWAB_API_BASE}/pricehistory?symbol=${sym}&periodType=${cfg.periodType}&period=${cfg.period}&frequencyType=${cfg.frequencyType}&frequency=${cfg.frequency}&needExtendedHoursData=true`;
       const r=await fetch(url,{headers:{'Authorization':'Bearer '+token},signal:AbortSignal.timeout(10000)});
       if(!r.ok){
-        const err=await r.text().catch(()=>'');
-        addLog('warn','Schwab API',`${sym} ${cfg.frequencyType}/${cfg.frequency} → ${r.status}`,err.substring(0,80));
+        // Only log if this is the LAST config (no more fallbacks)
+        if(cfg===configs[configs.length-1]){
+          const err=await r.text().catch(()=>'');
+          addLog('warn','Schwab API',`${sym} ${cfg.frequencyType}/${cfg.frequency} → ${r.status} (sin datos)`,err.substring(0,80));
+        }
         continue;
       }
       const d=await r.json();
       if(!d.candles||!d.candles.length){continue;}
       let candles=d.candles;
       // Merge 30min pairs into 1H candles if needed
-      if(cfg._bars2x&&cfg.frequency===30){
+      if(cfg._merge1h&&cfg.frequency===30){
         const merged=[];
         // Align to even index (pair start)
         const start=candles.length%2===0?0:1;

@@ -707,39 +707,65 @@ async function fetchSchwabCandles(sym,freqType,freq,bars=50){
 
   let configs=[];
   if(freqType==='D'||freqType==='daily'){
-    // Try multiple valid daily combos in order
+    // Daily: start with month/3 (faster), fallback to longer periods
     configs=[
-      {periodType:'year', period:1, frequencyType:'daily',  frequency:1},
-      {periodType:'month',period:6, frequencyType:'daily',  frequency:1},
       {periodType:'month',period:3, frequencyType:'daily',  frequency:1},
+      {periodType:'month',period:6, frequencyType:'daily',  frequency:1},
+      {periodType:'year', period:1, frequencyType:'daily',  frequency:1},
     ];
   }else if(freqType==='minute'){
-    const validFreqs=[1,5,10,15,30];
+    const validFreqs=[1,5,10,15,30,60];
     const f=validFreqs.includes(freq)?freq:30;
-    configs=[
-      {periodType:'day',period:10,frequencyType:'minute',frequency:f},
-      {periodType:'day',period:5, frequencyType:'minute',frequency:f},
-    ];
+    // For 1H (freq=60): try native 60min first, fallback to 30min
+    if(f===60){
+      configs=[
+        {periodType:'day',period:10,frequencyType:'minute',frequency:60,_bars2x:false},
+        {periodType:'day',period:10,frequencyType:'minute',frequency:30,_bars2x:true}, // 2x bars, merge pairs
+      ];
+    }else{
+      configs=[
+        {periodType:'day',period:10,frequencyType:'minute',frequency:f},
+        {periodType:'day',period:5, frequencyType:'minute',frequency:f},
+      ];
+    }
   }else{
     return null;
   }
 
   for(const cfg of configs){
     try{
+      const fetchBars=cfg._bars2x?bars*2:bars;
       const url=`${SCHWAB_API_BASE}/pricehistory?symbol=${sym}&periodType=${cfg.periodType}&period=${cfg.period}&frequencyType=${cfg.frequencyType}&frequency=${cfg.frequency}&needExtendedHoursData=true`;
-      const r=await fetch(url,{headers:{'Authorization':'Bearer '+token},signal:AbortSignal.timeout(7000)});
+      const r=await fetch(url,{headers:{'Authorization':'Bearer '+token},signal:AbortSignal.timeout(10000)});
       if(!r.ok){
         const err=await r.text().catch(()=>'');
-        addLog('warn','Schwab API',`${sym} ${cfg.frequencyType}/${cfg.frequency} (${cfg.periodType}/${cfg.period}) → ${r.status}`,err.substring(0,100));
-        continue; // try next config
+        addLog('warn','Schwab API',`${sym} ${cfg.frequencyType}/${cfg.frequency} → ${r.status}`,err.substring(0,80));
+        continue;
       }
       const d=await r.json();
       if(!d.candles||!d.candles.length){continue;}
-      const sl=d.candles.slice(-bars);
+      let candles=d.candles;
+      // Merge 30min pairs into 1H candles if needed
+      if(cfg._bars2x&&cfg.frequency===30){
+        const merged=[];
+        // Align to even index (pair start)
+        const start=candles.length%2===0?0:1;
+        for(let i=start;i<candles.length-1;i+=2){
+          const a=candles[i],b=candles[i+1];
+          merged.push({
+            open:a.open, high:Math.max(a.high,b.high),
+            low:Math.min(a.low,b.low), close:b.close,
+            volume:(a.volume||0)+(b.volume||0)
+          });
+        }
+        candles=merged;
+      }
+      const sl=candles.slice(-bars);
+      if(sl.length<5)continue;
       return{c:sl.map(v=>v.close),h:sl.map(v=>v.high),l:sl.map(v=>v.low),o:sl.map(v=>v.open),v:sl.map(v=>v.volume||0)};
     }catch(e){continue;}
   }
-  addLog('warn','Schwab API',`${sym} ${freqType} → Todos los configs fallaron`);
+  addLog('warn','Schwab API',`${sym} ${freqType} → Sin datos`);
   return null;
 }
 function updateSchwabStatus(){
@@ -1160,7 +1186,7 @@ async function buildSignals(){
       if(schwabToken){
         try{
           const [r1,r2,r3]=await Promise.all([
-            Promise.race([fetchSchwabCandles(sym,'minute',30,100),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),10000))]),
+            Promise.race([fetchSchwabCandles(sym,'minute',60,100),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),12000))]),
             Promise.race([fetchSchwabCandles(sym,'minute',15,60), new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),10000))]),
             Promise.race([fetchSchwabCandles(sym,'D',1,90),       new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),10000))])
           ]);
@@ -1239,93 +1265,124 @@ async function buildSignals(){
     const dailyBearish=bearDays>=2; // al menos 2 de 3 días bajistas
     const dailyBullish=bullDays>=2; // al menos 2 de 3 días alcistas
 
-    const meta={sym,price:realPrice,pct:realPct,dataLabel,name:DEFAULTS[sym].name};
+    // Try to get real-time price from Finnhub for display
+    let livePrice=realPrice,livePct=realPct;
+    const fKey=getKey();
+    if(fKey&&fKey.length>8){
+      try{
+        const qr=await fetch(`https://finnhub.io/api/v1/quote?symbol=${sym}&token=${fKey}`,{signal:AbortSignal.timeout(3000)});
+        if(qr.ok){const qd=await qr.json();if(qd&&qd.c>0){livePrice=qd.c;livePct=qd.pc>0?+((qd.c-qd.pc)/qd.pc*100).toFixed(2):realPct;}}
+      }catch(e){}
+    }
+    const meta={sym,price:livePrice,pct:livePct,dataLabel:livePrice!==realPrice?'📡 Schwab+Live':'📡 Schwab',name:DEFAULTS[sym].name,
+      // Store raw data for mini chart
+      _c1h:c1h.slice(-30),_bb1h_up:bb1h.upper.filter(v=>v!=null).slice(-30),
+      _bb1h_lo:bb1h.lower.filter(v=>v!=null).slice(-30),_ma20_1h:ma20_1h.filter(v=>v!=null).slice(-30)
+    };
 
     // ════════════════════════════════════════════════════════════════════════
-    // E1 — CAMBIO DE TENDENCIA AL ALZA
-    // Línea bajista detectada → ruptura con buffer → cierre sobre MA20 → 15min alcista
+    // E1 — CAMBIO DE TENDENCIA AL ALZA (7 condiciones)
     // ════════════════════════════════════════════════════════════════════════
     const tlBear=trendlineFromPivots(h1h,'highs',4);
     const tlBearVal=tlBear?trendlineAt(tlBear,n1h-1):null;
-    // Buffer: precio debe estar 0.1%–0.5% sobre la línea en alguna de las últimas 3 velas
     const last3above=tlBearVal!==null&&c1h.slice(-3).some(p=>p>tlBearVal*(1.001)&&p<tlBearVal*(1.008));
-    const confirmBull1h=lP1h>lMA20_1h&&lP1h>o1h[n1h-1]; // vela verde sobre MA20
+    const confirmBull1h=lP1h>lMA20_1h&&lP1h>o1h[n1h-1];
+    const bbExpanding1h_bull=bbUpperSlope(c1h)>0;
     const confirm15bull=lP15>lMA20_15&&upSlope15&&greenCandles15>=2;
+    const stochBull15=lK15>lD15&&lK15>30; // Worden apoyando alza
+    const volBull=volConfirm;
     all.push({...meta,code:'E1',name:'Cambio de Tendencia al Alza',type:'call',reqs:[
-      {ok:!!tlBear&&tlBear.pivotCount>=4, tf:'1H', text:`Línea bajista: ${tlBear?tlBear.pivotCount:0} máximos desc. detectados`},
-      {ok:last3above,                     tf:'1H', text:`Precio 0.1–0.5% sobre línea bajista (buffer 3 velas)`},
+      {ok:!!tlBear&&tlBear.pivotCount>=4, tf:'1H', text:`Tendencia bajista: ${tlBear?tlBear.pivotCount:0} máximos desc.`},
+      {ok:last3above,                     tf:'1H', text:`Precio rompiendo línea bajista (buffer 3 velas)`},
       {ok:confirmBull1h,                  tf:'1H', text:`Vela alcista cierra sobre MA20 ($${lMA20_1h.toFixed(2)})`},
-      {ok:confirm15bull,                  tf:'15m',text:`15min alcista: MA20 + BB↑ + ${greenCandles15} velas verdes`},
+      {ok:bbExpanding1h_bull,             tf:'1H', text:`BB expandiéndose al alza en 1H`},
+      {ok:confirm15bull,                  tf:'15m',text:`15min: MA20 + BB↑ + ${greenCandles15} velas verdes`},
+      {ok:stochBull15,                    tf:'15m',text:`Worden apoyando alza (%K ${lK15.toFixed(0)} > %D ${lD15.toFixed(0)})`},
+      {ok:volBull,                        tf:'1D', text:`Volumen${avgVol10>0?` ${(lVol/avgVol10*100).toFixed(0)}% del promedio`:'confirma'}`},
     ]});
 
     // ════════════════════════════════════════════════════════════════════════
-    // E2 — CAMBIO DE TENDENCIA A LA BAJA
-    // Línea alcista detectada → ruptura con buffer → cierre bajo MA20 → 15min bajista
+    // E2 — CAMBIO DE TENDENCIA A LA BAJA (7 condiciones)
     // ════════════════════════════════════════════════════════════════════════
     const tlBull=trendlineFromPivots(l1h,'lows',4);
     const tlBullVal=tlBull?trendlineAt(tlBull,n1h-1):null;
     const last3below=tlBullVal!==null&&c1h.slice(-3).some(p=>p<tlBullVal*(0.999)&&p>tlBullVal*(0.992));
-    const confirmBear1h=lP1h<lMA20_1h&&lP1h<o1h[n1h-1]; // vela roja bajo MA20
+    const confirmBear1h=lP1h<lMA20_1h&&lP1h<o1h[n1h-1];
+    const bbExpanding1h_bear=bbLowerSlope(c1h)<0;
     const confirm15bear=lP15<lMA20_15&&loSlope15&&redCandles15>=2;
+    const stochBear15=lK15<lD15&&lK15<70; // Worden apoyando baja
+    const volBear=volConfirm;
     all.push({...meta,code:'E2',name:'Cambio de Tendencia a la Baja',type:'put',reqs:[
-      {ok:!!tlBull&&tlBull.pivotCount>=4, tf:'1H', text:`Línea alcista: ${tlBull?tlBull.pivotCount:0} mínimos asc. detectados`},
-      {ok:last3below,                     tf:'1H', text:`Precio 0.1–0.5% bajo línea alcista (buffer 3 velas)`},
+      {ok:!!tlBull&&tlBull.pivotCount>=4, tf:'1H', text:`Tendencia alcista: ${tlBull?tlBull.pivotCount:0} mínimos asc.`},
+      {ok:last3below,                     tf:'1H', text:`Precio rompiendo línea alcista (buffer 3 velas)`},
       {ok:confirmBear1h,                  tf:'1H', text:`Vela bajista cierra bajo MA20 ($${lMA20_1h.toFixed(2)})`},
-      {ok:confirm15bear,                  tf:'15m',text:`15min bajista: MA20 + BB↓ + ${redCandles15} velas rojas`},
+      {ok:bbExpanding1h_bear,             tf:'1H', text:`BB expandiéndose a la baja en 1H`},
+      {ok:confirm15bear,                  tf:'15m',text:`15min: MA20 + BB↓ + ${redCandles15} velas rojas`},
+      {ok:stochBear15,                    tf:'15m',text:`Worden apoyando baja (%K ${lK15.toFixed(0)} < %D ${lD15.toFixed(0)})`},
+      {ok:volBear,                        tf:'1D', text:`Volumen${avgVol10>0?` ${(lVol/avgVol10*100).toFixed(0)}% del promedio`:'confirma'}`},
     ]});
 
     // ════════════════════════════════════════════════════════════════════════
-    // E7 — EFECTO IMÁN TENDENCIA BAJISTA (CALL)
-    // Días bajando + precio muy alejado de MA20 → vela 15min fuera de BB + Stoch cruce
+    // E7 — EFECTO IMÁN TENDENCIA BAJISTA (CALL) — 7 condiciones
     // ════════════════════════════════════════════════════════════════════════
     const bearTrend_E7=lMA20_1h<lMA40_1h&&lP1h<lMA20_1h&&lP1h<lMA40_1h&&dailyBearish;
     const distDown=lMA20_1h>0?(lMA20_1h-lP1h)/lMA20_1h*100:0;
     const bigDropFromMA20=distDown>=2;
-    const candleBelowBB15=lP15<lLow15; // cierre bajo banda inferior
-    const stochCrossUp15=pK15<lD15&&lK15>=lD15; // %K cruza por encima de %D
-    all.push({...meta,code:'E7',name:'Efecto Imán — Tendencia Bajista (CALL)',type:'call',reqs:[
-      {ok:bearTrend_E7,    tf:'1H', text:`Tendencia bajista: MA20<MA40, precio bajo ambas + ${bearDays}/3 días rojos`},
-      {ok:bigDropFromMA20, tf:'1H', text:`Precio alejado ${distDown.toFixed(1)}% de MA20 (mín 2%) — imán activo`},
-      {ok:candleBelowBB15, tf:'15m',text:`Vela 15min cierra bajo banda inferior BB ($${lLow15.toFixed(2)})`},
-      {ok:stochCrossUp15,  tf:'15m',text:`Stochastics %K (${lK15.toFixed(0)}) cruza por encima de %D (${lD15.toFixed(0)})`},
+    const expuesto1h_bear=lP1h<lLow1h; // precio bajo banda inferior 1H
+    const expuestoD_bear=cD[nD-1]<(bollinger(cD).lower.filter(v=>v!=null).slice(-1)[0]||cD[nD-1]*0.99);
+    const candleBelowBB15=lP15<lLow15;
+    const noTocaMA20_bear=c1h.slice(-3).every(p=>p<lMA20_1h*0.995); // últimas 3 velas bajo MA20
+    const stochCrossUp15=pK15<lD15&&lK15>=lD15;
+    all.push({...meta,code:'E7',name:'Efecto Imán — Bajista (CALL)',type:'call',reqs:[
+      {ok:bearTrend_E7,      tf:'1H', text:`Tendencia 3D: MA20<MA40, ${bearDays}/3 días rojos`},
+      {ok:bigDropFromMA20,   tf:'1H', text:`Salto MM20H: alejado ${distDown.toFixed(1)}% de MA20`},
+      {ok:expuesto1h_bear,   tf:'1H', text:`Expuesto 1H: precio bajo banda inferior BB`},
+      {ok:expuestoD_bear,    tf:'1D', text:`Expuesto 1D: precio bajo banda inferior BB diaria`},
+      {ok:candleBelowBB15,   tf:'15m',text:`Vela expuesta: 15min bajo banda inferior ($${lLow15.toFixed(2)})`},
+      {ok:noTocaMA20_bear,   tf:'1H', text:`No toca MM20: 3 velas sin rozar MA20 (imán vigente)`},
+      {ok:stochCrossUp15,    tf:'15m',text:`Cruce Worden: %K (${lK15.toFixed(0)}) ↑ cruza %D (${lD15.toFixed(0)})`},
     ]});
 
     // ════════════════════════════════════════════════════════════════════════
-    // E8 — EFECTO IMÁN TENDENCIA ALCISTA (PUT)
-    // Días subiendo + precio muy alejado de MA20 → vela 15min fuera de BB + Stoch cruce
+    // E8 — EFECTO IMÁN TENDENCIA ALCISTA (PUT) — 7 condiciones
     // ════════════════════════════════════════════════════════════════════════
     const bullTrend_E8=lMA20_1h>lMA40_1h&&lP1h>lMA20_1h&&lP1h>lMA40_1h&&dailyBullish;
     const distUp=lMA20_1h>0?(lP1h-lMA20_1h)/lMA20_1h*100:0;
     const bigRiseFromMA20=distUp>=2;
-    const candleAboveBB15=lP15>lUp15; // cierre sobre banda superior
-    const stochCrossDown15=pK15>lD15&&lK15<=lD15; // %K cruza por debajo de %D
-    all.push({...meta,code:'E8',name:'Efecto Imán — Tendencia Alcista (PUT)',type:'put',reqs:[
-      {ok:bullTrend_E8,     tf:'1H', text:`Tendencia alcista: MA20>MA40, precio sobre ambas + ${bullDays}/3 días verdes`},
-      {ok:bigRiseFromMA20,  tf:'1H', text:`Precio alejado ${distUp.toFixed(1)}% de MA20 (mín 2%) — imán activo`},
-      {ok:candleAboveBB15,  tf:'15m',text:`Vela 15min cierra sobre banda superior BB ($${lUp15.toFixed(2)})`},
-      {ok:stochCrossDown15, tf:'15m',text:`Stochastics %K (${lK15.toFixed(0)}) cruza por debajo de %D (${lD15.toFixed(0)})`},
+    const expuesto1h_bull=lP1h>lUp1h; // precio sobre banda superior 1H
+    const expuestoD_bull=cD[nD-1]>(bollinger(cD).upper.filter(v=>v!=null).slice(-1)[0]||cD[nD-1]*1.01);
+    const candleAboveBB15=lP15>lUp15;
+    const noTocaMA20_bull=c1h.slice(-3).every(p=>p>lMA20_1h*1.005); // últimas 3 velas sobre MA20
+    const stochCrossDown15=pK15>lD15&&lK15<=lD15;
+    all.push({...meta,code:'E8',name:'Efecto Imán — Alcista (PUT)',type:'put',reqs:[
+      {ok:bullTrend_E8,      tf:'1H', text:`Tendencia 3D: MA20>MA40, ${bullDays}/3 días verdes`},
+      {ok:bigRiseFromMA20,   tf:'1H', text:`Salto MM20H: alejado ${distUp.toFixed(1)}% de MA20`},
+      {ok:expuesto1h_bull,   tf:'1H', text:`Expuesto 1H: precio sobre banda superior BB`},
+      {ok:expuestoD_bull,    tf:'1D', text:`Expuesto 1D: precio sobre banda superior BB diaria`},
+      {ok:candleAboveBB15,   tf:'15m',text:`Vela expuesta: 15min sobre banda superior ($${lUp15.toFixed(2)})`},
+      {ok:noTocaMA20_bull,   tf:'1H', text:`No toca MM20: 3 velas sin rozar MA20 (imán vigente)`},
+      {ok:stochCrossDown15,  tf:'15m',text:`Cruce Worden: %K (${lK15.toFixed(0)}) ↓ cruza %D (${lD15.toFixed(0)})`},
     ]});
   }
 
-  // ── Render ───────────────────────────────────────────────────────────────
   // End of data fetching loop
   }catch(_sigErr){
     addLog('error','Señales',`Error inesperado en buildSignals`,_sigErr.message);
-    area.innerHTML='<div style="text-align:center;padding:30px;color:var(--text2);font-size:13px;"><div style="font-size:28px;margin-bottom:10px">⚠️</div><div style="font-weight:600;color:var(--red);">Error en señales</div><div style="font-size:12px;margin-top:8px;color:var(--text3);">${_sigErr.message}</div></div>';
+    area.innerHTML=`<div style="text-align:center;padding:30px;color:var(--text2);font-size:13px;"><div style="font-size:28px;margin-bottom:10px">⚠️</div><div style="font-weight:600;color:var(--red);">Error en señales</div><div style="font-size:12px;margin-top:8px;color:var(--text3);">${_sigErr.message}</div></div>`;
     clearTimeout(_sigTimeout);return;
   }finally{clearTimeout(_sigTimeout);}
 
-  // If all syms were skipped (no data), all is empty — show message
   if(all.length===0&&!_testMode){
-    area.innerHTML='<div style="text-align:center;padding:30px;color:var(--text2);font-size:13px;"><div style="font-size:28px;margin-bottom:10px">🔗</div><div style="font-weight:600;color:var(--yellow);">Sin datos disponibles</div><div style="font-size:12px;margin-top:8px;color:var(--text3);">Verifica la conexión con Schwab — el token puede haber expirado</div></div>';
+    area.innerHTML='<div style="text-align:center;padding:30px;color:var(--text2);font-size:13px;"><div style="font-size:28px;margin-bottom:10px">🔗</div><div style="font-weight:600;color:var(--yellow);">Sin datos disponibles</div><div style="font-size:12px;margin-top:8px;color:var(--text3);">Verifica la conexión con Schwab</div></div>';
     return;
   }
+
   const active=all.map(s=>({...s,passed:s.reqs.filter(r=>r.ok).length}))
     .filter(s=>Math.round(s.passed/s.reqs.length*100)>=75)
     .sort((a,b)=>b.passed-a.passed);
 
   if(!active.length){
-    area.innerHTML='<div style="text-align:center;padding:30px;color:var(--text2);font-size:13px;"><div style="font-size:28px;margin-bottom:10px">📊</div><div style="font-weight:600;">Sin señales activas</div><div style="font-size:11px;margin-top:6px;color:var(--text3)">Ninguna de las 4 estrategias alcanza el 75% actualmente</div></div>';
+    area.innerHTML='<div style="text-align:center;padding:30px;color:var(--text2);font-size:13px;"><div style="font-size:28px;margin-bottom:10px">📊</div><div style="font-weight:600;">Sin señales activas</div><div style="font-size:11px;margin-top:6px;color:var(--text3);">Ninguna estrategia alcanza el 75% actualmente</div></div>';
     return;
   }
 
@@ -1345,37 +1402,88 @@ async function buildSignals(){
   active.forEach(s=>{
     const total=s.reqs.length;
     const disp=Math.round(s.passed/total*100);
-    const col=disp===100?'var(--green)':disp>=75?'var(--green)':'var(--yellow)';
+    const pctLabel=Math.round(s.passed/total*100);
+    const col=disp===100?'var(--green)':disp>=86?'var(--green)':'var(--yellow)';
     const hdr=s.type==='call'?'sig-call':'sig-put';
     const fullSignal=s.passed===total;
-    html+=`<div class="sig-card" style="margin-bottom:10px;${fullSignal?'box-shadow:0 0 0 2px var(--green);':''}>
-      <div class="sig-hdr ${hdr}">
-        <div>
-          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-            <span style="font-family:var(--mono);font-size:17px;font-weight:700;color:#fff">${s.sym}</span>
-            ${fullSignal?'<span class="badge" style="background:rgba(0,209,122,.4);">✅ SEÑAL COMPLETA</span>':''}
-            ${s.passed===3&&!fullSignal?'<span class="badge" style="background:rgba(255,194,52,.3);">★ 75% — EN FORMACIÓN</span>':''}
-            <span class="badge">${s.type.toUpperCase()} · ${s.code}</span>
+    const accentCol=s.type==='call'?'#00d17a':'#ff4d6d';
+
+    // ── Mini chart SVG (last 30 1H candles with BB) ──────────────────
+    const prices=s._c1h||[];
+    const bbUp=s._bb1h_up||[];
+    const bbLo=s._bb1h_lo||[];
+    const ma20=s._ma20_1h||[];
+    let chartSvg='';
+    if(prices.length>=10){
+      const n=prices.length;
+      const minP=Math.min(...prices,...bbLo.filter(v=>v))*0.999;
+      const maxP=Math.max(...prices,...bbUp.filter(v=>v))*1.001;
+      const W=280,H=72;
+      const px=(i)=>Math.round(i/(n-1)*W);
+      const py=(v)=>Math.round(H-(v-minP)/(maxP-minP)*H);
+      const pathPts=(arr)=>arr.map((v,i)=>v!=null?`${px(i)},${py(v)}`:null).filter(Boolean);
+      const lineStr=(arr,col,w=1,dash='')=>{
+        const pts=pathPts(arr);
+        if(pts.length<2)return '';
+        return `<polyline points="${pts.join(' ')}" fill="none" stroke="${col}" stroke-width="${w}" stroke-dasharray="${dash}" opacity="0.8"/>`;
+      };
+      // BB fill area
+      const upPts=bbUp.map((v,i)=>v!=null?`${px(i)},${py(v)}`:null).filter(Boolean);
+      const loPts=[...bbLo.map((v,i)=>v!=null?`${px(i)},${py(v)}`:null).filter(Boolean)].reverse();
+      const fillPath=upPts.length>1&&loPts.length>1?
+        `<polygon points="${[...upPts,...loPts].join(' ')}" fill="rgba(61,139,255,0.08)" stroke="none"/>`:''
+      // Price candle line
+      const priceCol=prices[n-1]>=prices[0]?'#00d17a':'#ff4d6d';
+      chartSvg=`<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="display:block;border-radius:4px;background:rgba(0,0,0,.2);">
+        ${fillPath}
+        ${lineStr(bbUp,'rgba(61,139,255,.5)',0.8)}
+        ${lineStr(bbLo,'rgba(61,139,255,.5)',0.8)}
+        ${lineStr(ma20,'rgba(255,194,52,.7)',1,'3 2')}
+        ${lineStr(prices,priceCol,1.5)}
+        <circle cx="${px(n-1)}" cy="${py(prices[n-1])}" r="2.5" fill="${priceCol}"/>
+      </svg>`;
+    }
+
+    // ── Badge percent steps ──────────────────────────────────────────
+    const pctBadge=fullSignal
+      ?`<span style="background:rgba(0,209,122,.35);color:#00d17a;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;">✅ COMPLETA</span>`
+      :`<span style="background:rgba(255,194,52,.25);color:#ffc234;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;">★ ${pctLabel}% — EN FORMACIÓN</span>`;
+
+    html+=`<div class="sig-card" style="margin-bottom:12px;${fullSignal?`box-shadow:0 0 0 2px ${accentCol};`:''}">
+      <div class="sig-hdr ${hdr}" style="padding:12px 14px;">
+        <div style="flex:1;min-width:0;">
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:4px;">
+            <span style="font-family:var(--mono);font-size:18px;font-weight:700;color:#fff;">${s.sym}</span>
+            <span style="background:rgba(0,0,0,.25);color:#fff;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;">${s.type.toUpperCase()} · ${s.code}</span>
+            ${pctBadge}
           </div>
-          <div style="font-size:12px;color:rgba(255,255,255,.85);margin-top:2px;font-weight:600;">${s.name}</div>
-          <div style="font-size:11px;color:rgba(255,255,255,.65);margin-top:1px;">
+          <div style="font-size:12px;color:rgba(255,255,255,.8);font-weight:600;">${s.name}</div>
+          <div style="font-size:11px;color:rgba(255,255,255,.55);margin-top:2px;">
             $${s.price.toFixed(2)} <span style="color:${s.pct>=0?'rgba(0,209,122,.9)':'rgba(255,77,109,.9)'}">(${s.pct>=0?'+':''}${s.pct.toFixed(2)}%)</span> · ${s.dataLabel}
           </div>
         </div>
-        <div style="text-align:right;">
-          <div style="font-family:var(--mono);font-size:26px;font-weight:700;color:${col}">${disp}%</div>
-          <div style="font-size:10px;color:rgba(255,255,255,.5);margin-top:2px;">${s.passed}/${total} cond.</div>
+        <div style="text-align:right;flex-shrink:0;margin-left:10px;">
+          <div style="font-family:var(--mono);font-size:28px;font-weight:700;color:${col};line-height:1;">${disp}%</div>
+          <div style="font-size:10px;color:rgba(255,255,255,.45);margin-top:2px;">${s.passed}/${total} cond.</div>
         </div>
       </div>
-      <div class="sig-body">
-        ${s.reqs.map(r=>`<div class="sig-req">
-          <span style="font-size:13px;flex-shrink:0">${r.ok?'✅':'❌'}</span>
-          <span style="font-size:11px;font-weight:700;min-width:32px;color:var(--blue);flex-shrink:0">${r.tf}</span>
-          <span style="color:${r.ok?'var(--text)':'var(--text3)'};font-size:12px;line-height:1.4">${r.text}</span>
-        </div>`).join('')}
-        <div style="height:4px;background:var(--bg4);border-radius:2px;margin-top:8px;overflow:hidden;">
-          <div style="height:100%;width:${disp}%;background:${col};border-radius:2px;transition:width .5s;"></div>
+      <div class="sig-body" style="padding:10px 14px;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-bottom:10px;">
+          ${s.reqs.map(r=>`<div style="display:flex;align-items:flex-start;gap:5px;padding:5px 7px;background:${r.ok?'rgba(0,209,122,.07)':'rgba(255,255,255,.03)'};border-radius:6px;border-left:2px solid ${r.ok?accentCol:'rgba(255,255,255,.1)'};min-height:36px;">
+            <span style="font-size:12px;flex-shrink:0;margin-top:1px;">${r.ok?'✅':'❌'}</span>
+            <div style="flex:1;min-width:0;">
+              <div style="font-size:10px;font-weight:700;color:var(--blue);margin-bottom:1px;">${r.tf}</div>
+              <div style="color:${r.ok?'var(--text)':'var(--text3)'};font-size:11px;line-height:1.3;">${r.text}</div>
+            </div>
+          </div>`).join('')}
         </div>
+        <div style="height:4px;background:var(--bg4);border-radius:2px;margin-bottom:10px;overflow:hidden;">
+          <div style="height:100%;width:${disp}%;background:${col};border-radius:2px;transition:width .6s;"></div>
+        </div>
+        ${chartSvg?`<div style="margin-top:4px;">
+          <div style="font-size:10px;color:var(--text3);margin-bottom:4px;">📈 Precio 1H · BB (azul) · MA20 (amarillo)</div>
+          ${chartSvg}
+        </div>`:''}
       </div>
     </div>`;
   });
@@ -1406,7 +1514,7 @@ async function buildMomentum(){
       if(schwabTok){
         pDay=await Promise.race([fetchSchwabCandles(sym,'D',1,90),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),12000))]);
         await new Promise(r=>setTimeout(r,200));
-        p1h=await Promise.race([fetchSchwabCandles(sym,'minute',30,100),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),10000))]);
+        p1h=await Promise.race([fetchSchwabCandles(sym,'minute',60,100),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),12000))]);
         await new Promise(r=>setTimeout(r,200));
       }
     }catch(e){}

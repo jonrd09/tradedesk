@@ -151,10 +151,10 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
     📰 Premarket
   </button>
 
-  <!-- TEST button -->
-  <button id="testBtn" onclick="runTestMode()"
+  <!-- DEBUG button -->
+  <button id="testBtn" onclick="runDebugMode()"
     style="background:rgba(167,139,250,.15);border:1px solid rgba(167,139,250,.5);border-radius:20px;color:var(--purple);padding:4px 14px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--sans);white-space:nowrap;">
-    🧪 Test
+    🔍 Debug
   </button>
 </header>
 
@@ -519,6 +519,7 @@ const SCHWAB_API_BASE='https://api.schwabapi.com/marketdata/v1';
 function getStoredPin(){return localStorage.getItem('app_pin')||'';}
 let _pinBuffer='',_pinCallback=null;
 let _testMode=false;
+let _debugMode=false; // shows all signals regardless of % threshold
 let currentTicker='GOOG';
 let _insiderData=[];
 let _insiderSort={col:'shares',dir:-1};
@@ -1408,7 +1409,7 @@ async function buildSignals(){
   }
 
   const active=all.map(s=>({...s,passed:s.reqs.filter(r=>r.ok).length}))
-    .filter(s=>Math.round(s.passed/s.reqs.length*100)>=75)
+    .filter(s=>_debugMode||Math.round(s.passed/s.reqs.length*100)>=75)
     .sort((a,b)=>b.passed-a.passed);
 
   if(!active.length){
@@ -2117,6 +2118,30 @@ function renderInsiderTable(data){
 // ═══════════════════════════════════════════════════════════════
 // TEST MODE — Datos históricos reales para verificar lógica
 // ═══════════════════════════════════════════════════════════════
+async function runDebugMode(){
+  const btn=document.getElementById('testBtn');
+  // Toggle debug mode
+  _debugMode=!_debugMode;
+  if(_debugMode){
+    btn.textContent='🔍 Debug ON';
+    btn.style.background='rgba(255,194,52,.25)';
+    btn.style.borderColor='rgba(255,194,52,.8)';
+    btn.style.color='#ffc234';
+    // Run buildSignals with real data but show ALL signals (even 1/7)
+    await buildSignals();
+    // Add debug banner
+    const area=document.getElementById('signalArea');
+    area.innerHTML='<div style="text-align:center;padding:6px 12px;color:#ffc234;font-size:11px;font-weight:700;border:1px solid rgba(255,194,52,.3);border-radius:8px;margin-bottom:10px;background:rgba(255,194,52,.08);">🔍 MODO DEBUG — Mostrando TODAS las señales con datos reales (sin filtro de 75%)</div>'+area.innerHTML;
+  }else{
+    btn.textContent='🔍 Debug';
+    btn.style.background='rgba(167,139,250,.15)';
+    btn.style.borderColor='rgba(167,139,250,.5)';
+    btn.style.color='var(--purple)';
+    // Rebuild with normal 75% filter
+    await buildSignals();
+  }
+}
+
 async function runTestMode(){
   const btn=document.getElementById('testBtn');
   if(btn){btn.textContent='⟳ Probando…';btn.style.opacity='.6';btn.disabled=true;}

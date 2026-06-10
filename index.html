@@ -1196,7 +1196,8 @@ async function buildSignals(){
     const lD1h=stoch1h.d.slice(-1)[0]||50;
     // Precio real del último close de Schwab
     const realPrice=lP1h;
-    const realPricePrev=cD&&closes(ohlcD).length>1?closes(ohlcD).slice(-2)[0]:lP1h;
+    const _cDprev=closes(ohlcD);
+    const realPricePrev=_cDprev.length>1?_cDprev[_cDprev.length-2]:lP1h;
     const realPct=realPricePrev>0?+((lP1h-realPricePrev)/realPricePrev*100).toFixed(2):0;
 
     // ── Indicadores 15min ────────────────────────────────────────────────────

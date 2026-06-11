@@ -185,7 +185,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
   <div class="card">
     <div style="text-align:center;margin-bottom:10px;">
       <div style="font-size:18px;font-weight:700;color:#fff;">Señales Activas</div>
-      <div style="font-size:11px;color:var(--text2);margin-top:3px;">E1·E2 Cambio de Tendencia · E7·E8 Efecto Imán · GOOG · TSLA · SPY</div>
+      <div style="font-size:11px;color:var(--text2);margin-top:3px;">BB Breakout 15min · Patrón A (Superior) · B (Inferior) · C (Sobreexpuesto) · GOOG · TSLA · SPY</div>
     </div>
     <div id="signalArea">
       <div style="text-align:center;padding:20px;color:var(--text2);font-size:13px;">⟳ Calculando señales…</div>
@@ -1275,7 +1275,7 @@ async function buildSignals(){
     const n15=c15.length;
     const ma20_15=sma(c15,Math.min(20,n15-1));
     const bb15=bollinger(c15);
-    const lP15=c15[n15-1];
+    const lP15=c15[n15-1],pP15=c15[n15-2]||c15[n15-1];
     const lMA20_15=ma20_15.filter(v=>v!=null).slice(-1)[0]||lP15;
     const lUp15 =bb15.upper.filter(v=>v!=null).slice(-1)[0]||lP15;
     const lLow15=bb15.lower.filter(v=>v!=null).slice(-1)[0]||lP15;
@@ -1318,95 +1318,96 @@ async function buildSignals(){
         if(qr.ok){const qd=await qr.json();if(qd&&qd.c>0){livePrice=qd.c;livePct=qd.pc>0?+((qd.c-qd.pc)/qd.pc*100).toFixed(2):realPct;}}
       }catch(e){}
     }
-    const meta={sym,price:livePrice,pct:livePct,dataLabel:livePrice!==realPrice?'📡 Schwab+Live':'📡 Schwab',name:DEFAULTS[sym].name,
-      // Store raw data for mini chart
-      _c1h:c1h.slice(-30),_bb1h_up:bb1h.upper.filter(v=>v!=null).slice(-30),
-      _bb1h_lo:bb1h.lower.filter(v=>v!=null).slice(-30),_ma20_1h:ma20_1h.filter(v=>v!=null).slice(-30)
+    const meta={sym,price:livePrice,pct:livePct,dataLabel,name:DEFAULTS[sym].name,
+      _c15:c15.slice(-30),_bb15_up:bb15.upper.filter(v=>v!=null).slice(-30),
+      _bb15_lo:bb15.lower.filter(v=>v!=null).slice(-30)
     };
 
     // ════════════════════════════════════════════════════════════════════════
-    // E1 — CAMBIO DE TENDENCIA AL ALZA (7 condiciones)
+    // BB BREAKOUT 15MIN — Patrones A, B, C
+    // Estrategia única basada en precio saliendo de Bollinger en 15min
     // ════════════════════════════════════════════════════════════════════════
-    const tlBear=trendlineFromPivots(h1h,'highs',4);
-    const tlBearVal=tlBear?trendlineAt(tlBear,n1h-1):null;
-    const last3above=tlBearVal!==null&&c1h.slice(-3).some(p=>p>tlBearVal*(1.0005)&&p<tlBearVal*(1.015));
-    const confirmBull1h=lP1h>lMA20_1h&&lP1h>o1h[n1h-1];
-    const bbExpanding1h_bull=bbUpperSlope(c1h)>0;
-    const confirm15bull=lP15>lMA20_15&&upSlope15&&greenCandles15>=2;
-    const stochBull15=lK15>lD15&&lK15>30; // Worden apoyando alza
-    const volBull=volConfirm;
-    all.push({...meta,code:'E1',name:'Cambio de Tendencia al Alza',type:'call',reqs:[
-      {ok:!!tlBear&&tlBear.pivotCount>=3, tf:'1H', text:`Tendencia bajista: ${tlBear?tlBear.pivotCount:0} máximos desc. detectados`},
-      {ok:last3above,                     tf:'1H', text:`Precio rompiendo línea bajista (buffer 3 velas)`},
-      {ok:confirmBull1h,                  tf:'1H', text:`Vela alcista cierra sobre MA20 ($${lMA20_1h.toFixed(2)})`},
-      {ok:bbExpanding1h_bull,             tf:'1H', text:`BB expandiéndose al alza en 1H`},
-      {ok:confirm15bull,                  tf:'15m',text:`15min: MA20 + BB↑ + ${greenCandles15} velas verdes`},
-      {ok:stochBull15,                    tf:'15m',text:`Worden apoyando alza (%K ${lK15.toFixed(0)} > %D ${lD15.toFixed(0)})`},
-      {ok:volBull,                        tf:'1D', text:`Volumen${avgVol10>0?` ${(lVol/avgVol10*100).toFixed(0)}% del promedio`:'confirma'}`},
-    ]});
 
-    // ════════════════════════════════════════════════════════════════════════
-    // E2 — CAMBIO DE TENDENCIA A LA BAJA (7 condiciones)
-    // ════════════════════════════════════════════════════════════════════════
-    const tlBull=trendlineFromPivots(l1h,'lows',4);
-    const tlBullVal=tlBull?trendlineAt(tlBull,n1h-1):null;
-    const last3below=tlBullVal!==null&&c1h.slice(-3).some(p=>p<tlBullVal*(0.9995)&&p>tlBullVal*(0.985));
-    const confirmBear1h=lP1h<lMA20_1h&&lP1h<o1h[n1h-1];
-    const bbExpanding1h_bear=bbLowerSlope(c1h)<0;
-    const confirm15bear=lP15<lMA20_15&&loSlope15&&redCandles15>=2;
-    const stochBear15=lK15<lD15&&lK15<70; // Worden apoyando baja
-    const volBear=volConfirm;
-    all.push({...meta,code:'E2',name:'Cambio de Tendencia a la Baja',type:'put',reqs:[
-      {ok:!!tlBull&&tlBull.pivotCount>=3, tf:'1H', text:`Tendencia alcista: ${tlBull?tlBull.pivotCount:0} mínimos asc. detectados`},
-      {ok:last3below,                     tf:'1H', text:`Precio rompiendo línea alcista (buffer 3 velas)`},
-      {ok:confirmBear1h,                  tf:'1H', text:`Vela bajista cierra bajo MA20 ($${lMA20_1h.toFixed(2)})`},
-      {ok:bbExpanding1h_bear,             tf:'1H', text:`BB expandiéndose a la baja en 1H`},
-      {ok:confirm15bear,                  tf:'15m',text:`15min: MA20 + BB↓ + ${redCandles15} velas rojas`},
-      {ok:stochBear15,                    tf:'15m',text:`Worden apoyando baja (%K ${lK15.toFixed(0)} < %D ${lD15.toFixed(0)})`},
-      {ok:volBear,                        tf:'1D', text:`Volumen${avgVol10>0?` ${(lVol/avgVol10*100).toFixed(0)}% del promedio`:'confirma'}`},
-    ]});
+    // ── Vela actual y anterior en 15min ─────────────────────────────────────
+    const lH15=h15[n15-1],lL15=l15[n15-1];
+    const lO15=opens(ohlc15)[n15-1]||lP15;
+    const pH15=h15[n15-2]||lH15,pL15=l15[n15-2]||lL15;
+    const pO15=opens(ohlc15)[n15-2]||lP15;
 
-    // ════════════════════════════════════════════════════════════════════════
-    // E7 — EFECTO IMÁN TENDENCIA BAJISTA (CALL) — 7 condiciones
-    // ════════════════════════════════════════════════════════════════════════
-    const bearTrend_E7=lMA20_1h<lMA40_1h&&lP1h<lMA20_1h&&lP1h<lMA40_1h&&dailyBearish;
-    const distDown=lMA20_1h>0?(lMA20_1h-lP1h)/lMA20_1h*100:0;
-    const bigDropFromMA20=distDown>=2;
-    const expuesto1h_bear=lP1h<lLow1h; // precio bajo banda inferior 1H
-    const expuestoD_bear=cD[nD-1]<(bollinger(cD).lower.filter(v=>v!=null).slice(-1)[0]||cD[nD-1]*0.99);
-    const candleBelowBB15=lP15<lLow15;
-    const noTocaMA20_bear=c1h.slice(-3).every(p=>p<lMA20_1h*0.995); // últimas 3 velas bajo MA20
-    const stochCrossUp15=pK15<lD15&&lK15>=lD15;
-    all.push({...meta,code:'E7',name:'Efecto Imán — Bajista (CALL)',type:'call',reqs:[
-      {ok:bearTrend_E7,      tf:'1H', text:`Tendencia 3D: MA20<MA40, ${bearDays}/3 días rojos`},
-      {ok:bigDropFromMA20,   tf:'1H', text:`Salto MM20H: alejado ${distDown.toFixed(1)}% de MA20`},
-      {ok:expuesto1h_bear,   tf:'1H', text:`Expuesto 1H: precio bajo banda inferior BB`},
-      {ok:expuestoD_bear,    tf:'1D', text:`Expuesto 1D: precio bajo banda inferior BB diaria`},
-      {ok:candleBelowBB15,   tf:'15m',text:`Vela expuesta: 15min bajo banda inferior ($${lLow15.toFixed(2)})`},
-      {ok:noTocaMA20_bear,   tf:'1H', text:`No toca MM20: 3 velas sin rozar MA20 (imán vigente)`},
-      {ok:stochCrossUp15,    tf:'15m',text:`Cruce Worden: %K (${lK15.toFixed(0)}) ↑ cruza %D (${lD15.toFixed(0)})`},
-    ]});
+    // ── BBW 15min ────────────────────────────────────────────────────────────
+    const lBBW15=lUp15&&lLow15&&lMA20_15?(lUp15-lLow15)/lMA20_15*100:0;
 
-    // ════════════════════════════════════════════════════════════════════════
-    // E8 — EFECTO IMÁN TENDENCIA ALCISTA (PUT) — 7 condiciones
-    // ════════════════════════════════════════════════════════════════════════
-    const bullTrend_E8=lMA20_1h>lMA40_1h&&lP1h>lMA20_1h&&lP1h>lMA40_1h&&dailyBullish;
-    const distUp=lMA20_1h>0?(lP1h-lMA20_1h)/lMA20_1h*100:0;
-    const bigRiseFromMA20=distUp>=2;
-    const expuesto1h_bull=lP1h>lUp1h; // precio sobre banda superior 1H
-    const expuestoD_bull=cD[nD-1]>(bollinger(cD).upper.filter(v=>v!=null).slice(-1)[0]||cD[nD-1]*1.01);
-    const candleAboveBB15=lP15>lUp15;
-    const noTocaMA20_bull=c1h.slice(-3).every(p=>p>lMA20_1h*1.005); // últimas 3 velas sobre MA20
-    const stochCrossDown15=pK15>lD15&&lK15<=lD15;
-    all.push({...meta,code:'E8',name:'Efecto Imán — Alcista (PUT)',type:'put',reqs:[
-      {ok:bullTrend_E8,      tf:'1H', text:`Tendencia 3D: MA20>MA40, ${bullDays}/3 días verdes`},
-      {ok:bigRiseFromMA20,   tf:'1H', text:`Salto MM20H: alejado ${distUp.toFixed(1)}% de MA20`},
-      {ok:expuesto1h_bull,   tf:'1H', text:`Expuesto 1H: precio sobre banda superior BB`},
-      {ok:expuestoD_bull,    tf:'1D', text:`Expuesto 1D: precio sobre banda superior BB diaria`},
-      {ok:candleAboveBB15,   tf:'15m',text:`Vela expuesta: 15min sobre banda superior ($${lUp15.toFixed(2)})`},
-      {ok:noTocaMA20_bull,   tf:'1H', text:`No toca MM20: 3 velas sin rozar MA20 (imán vigente)`},
-      {ok:stochCrossDown15,  tf:'15m',text:`Cruce Worden: %K (${lK15.toFixed(0)}) ↓ cruza %D (${lD15.toFixed(0)})`},
-    ]});
+    // ── Volumen 15min ────────────────────────────────────────────────────────
+    const vol15=ohlc15.v||[];
+    const lVol15=vol15[vol15.length-1]||0;
+    const avgVol15_10=vol15.length>=10?vol15.slice(-10).reduce((a,b)=>a+b,0)/10:0;
+    const volActive15=avgVol15_10>0?lVol15>avgVol15_10*1.1:true;
+
+    // ── FILTROS COMUNES — sin estos es movimiento falso ──────────────────────
+    // F1: BB expandiéndose en 15min — volatilidad real activa (OBLIGATORIO)
+    const bbExpandOk=lBBW15>2.5;
+    // F2: Confirmación dirección en 1H
+    const align1hBull=lP1h>lMA20_1h&&upSlope1h;
+    const align1hBear=lP1h<lMA20_1h&&loSlope1h;
+    // F3: Stochastics 15min
+    const stochCallOk=lK15>lD15&&lK15<80;
+    const stochPutOk=lK15<lD15&&lK15>20;
+    // F4: Volumen activo
+    const volLabel=avgVol15_10>0?` (${(lVol15/avgVol15_10*100).toFixed(0)}% del promedio)`:'';
+
+    // ── PATRÓN A — Salida banda SUPERIOR → CALL ──────────────────────────────
+    // Vela perfora banda superior hacia arriba con segunda vela de confirmación
+    const pA_pierce=lH15>lUp15;
+    const pA_bull=lP15>lO15;
+    const pA_higher=lP15>pP15;
+    if(pA_pierce){
+      all.push({...meta,code:'BB-A',name:'BB Salida Superior — CALL',type:'call',reqs:[
+        {ok:pA_pierce,    tf:'15m',text:`Vela perfora banda superior: high $${lH15.toFixed(2)} > BB $${lUp15.toFixed(2)}`},
+        {ok:bbExpandOk,   tf:'15m',text:`BB expandiéndose — volatilidad activa (BBW ${lBBW15.toFixed(1)}%)`},
+        {ok:align1hBull,  tf:'1H', text:`1H alineado al alza (precio $${lP1h.toFixed(2)} > MA20 $${lMA20_1h.toFixed(2)})`},
+        {ok:stochCallOk,  tf:'15m',text:`Stochastics: %K (${lK15.toFixed(0)}) sobre %D (${lD15.toFixed(0)})`},
+        {ok:volActive15,  tf:'15m',text:`Volumen activo${volLabel}`},
+      ]});
+    }
+
+    // ── PATRÓN B — Salida banda INFERIOR → PUT ───────────────────────────────
+    // Vela perfora banda inferior hacia abajo
+    const pB_pierce=lL15<lLow15;
+    const pB_bear=lP15<lO15;
+    if(pB_pierce){
+      all.push({...meta,code:'BB-B',name:'BB Salida Inferior — PUT',type:'put',reqs:[
+        {ok:pB_pierce,    tf:'15m',text:`Vela perfora banda inferior: low $${lL15.toFixed(2)} < BB $${lLow15.toFixed(2)}`},
+        {ok:bbExpandOk,   tf:'15m',text:`BB expandiéndose — volatilidad activa (BBW ${lBBW15.toFixed(1)}%)`},
+        {ok:align1hBear,  tf:'1H', text:`1H alineado a la baja (precio $${lP1h.toFixed(2)} < MA20 $${lMA20_1h.toFixed(2)})`},
+        {ok:stochPutOk,   tf:'15m',text:`Stochastics: %K (${lK15.toFixed(0)}) bajo %D (${lD15.toFixed(0)})`},
+        {ok:volActive15,  tf:'15m',text:`Volumen activo${volLabel}`},
+      ]});
+    }
+
+    // ── PATRÓN C — Sobreexpuesto → regreso a la media ────────────────────────
+    // Vela completamente fuera de la banda (cuerpo Y mechas) → señal contraria
+    const pC_above=lL15>lUp15;   // toda la vela sobre BB superior → PUT (regresa abajo)
+    const pC_below=lH15<lLow15;  // toda la vela bajo BB inferior → CALL (regresa arriba)
+    const pC_returnDown=pC_above&&lP15<lO15; // primera vela bajista = empieza regreso
+    const pC_returnUp=pC_below&&lP15>lO15;   // primera vela alcista = empieza regreso
+    if(pC_returnUp){
+      all.push({...meta,code:'BB-C',name:'BB Sobreexpuesto — CALL (regreso)',type:'call',reqs:[
+        {ok:pC_below,     tf:'15m',text:`Vela COMPLETA bajo banda inferior: high $${lH15.toFixed(2)} < BB $${lLow15.toFixed(2)}`},
+        {ok:bbExpandOk,   tf:'15m',text:`BB expandiéndose — volatilidad activa (BBW ${lBBW15.toFixed(1)}%)`},
+        {ok:pC_returnUp,  tf:'15m',text:`Primera vela de regreso alcista ($${lP15.toFixed(2)} > apertura $${lO15.toFixed(2)})`},
+        {ok:stochCallOk,  tf:'15m',text:`Stochastics apoyando regreso: %K (${lK15.toFixed(0)}) > %D (${lD15.toFixed(0)})`},
+        {ok:volActive15,  tf:'15m',text:`Volumen activo${volLabel}`},
+      ]});
+    }
+    if(pC_returnDown){
+      all.push({...meta,code:'BB-C',name:'BB Sobreexpuesto — PUT (regreso)',type:'put',reqs:[
+        {ok:pC_above,     tf:'15m',text:`Vela COMPLETA sobre banda superior: low $${lL15.toFixed(2)} > BB $${lUp15.toFixed(2)}`},
+        {ok:bbExpandOk,   tf:'15m',text:`BB expandiéndose — volatilidad activa (BBW ${lBBW15.toFixed(1)}%)`},
+        {ok:pC_returnDown,tf:'15m',text:`Primera vela de regreso bajista ($${lP15.toFixed(2)} < apertura $${lO15.toFixed(2)})`},
+        {ok:stochPutOk,   tf:'15m',text:`Stochastics apoyando regreso: %K (${lK15.toFixed(0)}) < %D (${lD15.toFixed(0)})`},
+        {ok:volActive15,  tf:'15m',text:`Volumen activo${volLabel}`},
+      ]});
+    }
   }
 
   // End of data fetching loop
@@ -1438,7 +1439,7 @@ async function buildSignals(){
   else{dir=`⚡ MIXTO — ${calls} CALL · ${puts} PUT`;dirCol='var(--yellow)';}
 
   let html=`<div style="text-align:center;padding:10px 0;border-bottom:1px solid var(--border);margin-bottom:12px;">
-    <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:4px;">SEÑALES ACTIVAS — E1 · E2 · E7 · E8</div>
+    <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:4px;">SEÑALES ACTIVAS — BB BREAKOUT 15MIN</div>
     <div style="font-family:var(--mono);font-size:32px;font-weight:700;color:#fff;">${active.length}</div>
     <div style="font-size:12px;color:${dirCol};margin-top:4px;">${dir}</div>
   </div>`;
@@ -1458,11 +1459,11 @@ async function buildSignals(){
       notifySignal(s.sym,s.code,s.name,s.type,disp,s.price,s.pct);
     }
 
-    // ── Mini chart SVG (last 30 1H candles with BB) ──────────────────
-    const prices=s._c1h||[];
-    const bbUp=s._bb1h_up||[];
-    const bbLo=s._bb1h_lo||[];
-    const ma20=s._ma20_1h||[];
+    // ── Mini chart SVG (last 30 15min candles with BB) ──────────────
+    const prices=s._c15||[];
+    const bbUp=s._bb15_up||[];
+    const bbLo=s._bb15_lo||[];
+    const ma20=[];// no MA20 in 15min chart
     let chartSvg='';
     if(prices.length>=10){
       const n=prices.length;

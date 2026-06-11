@@ -173,7 +173,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
     <div style="text-align:center;margin-bottom:8px;">
       <div style="font-size:18px;font-weight:700;color:#fff;">🚀 Momentum Scanner</div>
     </div>
-    <div style="font-size:11px;color:var(--text3);text-align:center;">GOOG · TSLA · NVDA · AAPL · MSFT · AVGO · MU · AMD</div>
+    <div style="font-size:11px;color:var(--text3);text-align:center;">MA20/40 Diario · MA100/200 Hora · BB Confirmación</div>
   </div>
   <div style="padding:10px;" id="momentumArea">
     <div style="text-align:center;padding:20px;color:var(--text2);font-size:12px;">⟳ Calculando…</div>
@@ -1567,62 +1567,96 @@ async function buildMomentum(){
       _momSkipped.push(sym);
       continue;
     }
-    const _cd=closes(pDay),_c1=closes(p1h);
-    const ma20d=sma(_cd,20),ma40d=sma(_cd,40),ma100d=sma(_cd,Math.min(50,_cd.length-1));
+    // ── Indicadores Diario ───────────────────────────────────────────────────
+    const _cd=closes(pDay),_oD=opens(pDay);
+    const n_cd=_cd.length;
+    const ma20d=sma(_cd,20),ma40d=sma(_cd,40);
     const bbd=bollinger(_cd);
-    const ma100h=sma(_c1,Math.min(40,_c1.length-1)),ma200h=sma(_c1,Math.min(48,_c1.length-1));
-    const lPd=_cd.slice(-1)[0];
-    const lMA20d=ma20d.filter(v=>v!=null).slice(-1)[0],pMA20d=ma20d.filter(v=>v!=null).slice(-2)[0];
-    const lMA40d=ma40d.filter(v=>v!=null).slice(-1)[0],pMA40d=ma40d.filter(v=>v!=null).slice(-2)[0];
-    const lMA100d=ma100d.filter(v=>v!=null).slice(-1)[0];
-    const lBBUp=bbd.upper.filter(v=>v!=null).slice(-1)[0],lBBLow=bbd.lower.filter(v=>v!=null).slice(-1)[0],lBBMid=bbd.mid.filter(v=>v!=null).slice(-1)[0];
+    const lPd=_cd[n_cd-1],pPd=_cd[n_cd-2]||lPd;
+    const pOd=_oD[n_cd-1]||lPd;
+    const lMA20d=ma20d.filter(v=>v!=null).slice(-1)[0]||lPd;
+    const pMA20d=ma20d.filter(v=>v!=null).slice(-2)[0]||lMA20d;
+    const lMA40d=ma40d.filter(v=>v!=null).slice(-1)[0]||lPd;
+    const pMA40d=ma40d.filter(v=>v!=null).slice(-2)[0]||lMA40d;
+    const lBBUp=bbd.upper.filter(v=>v!=null).slice(-1)[0]||lPd;
+    const lBBLow=bbd.lower.filter(v=>v!=null).slice(-1)[0]||lPd;
+    const lBBMid=bbd.mid.filter(v=>v!=null).slice(-1)[0]||lPd;
     const bbWd=lBBMid?(lBBUp-lBBLow)/lBBMid*100:0;
-    const lPh=_c1.slice(-1)[0];
-    const lMA100h=ma100h.filter(v=>v!=null).slice(-1)[0],lMA200h=ma200h.filter(v=>v!=null).slice(-1)[0];
-    // ── BB Daily Breakout conditions ────────────────────────────────────────
-    // Cond 1: Precio cierra FUERA de la banda superior (alcista) o inferior (bajista)
-    const closesAboveBBUp = lPd > lBBUp;
-    const closesBelowBBLow = lPd < lBBLow;
-    // Cond 2: Banda de BB expandiéndose (volatilidad activa)
-    const bbExpanding = bbWd > 4;
-    // Cond 3: Vela diaria de confirmación — cierre mayor que apertura (bull) o menor (bear)
-    const pOd = opens(pDay).slice(-1)[0] || lPd;
-    const bullCandle = lPd > pOd;
-    const bearCandle = lPd < pOd;
-    // Cond 4: MA20 diaria orientada en dirección del movimiento
-    const ma20Rising = lMA20d > (ma20d.filter(v=>v!=null).slice(-3)[0]||lMA20d);
-    const ma20Falling = lMA20d < (ma20d.filter(v=>v!=null).slice(-3)[0]||lMA20d);
-    // Cond 5: Precio lleva al menos 2 cierres consecutivos fuera de la banda
-    const prevPd = _cd[_cd.length-2]||lPd;
-    const prevBBUp = bb_daily_prev_upper(_cd);
-    const prevBBLow = bb_daily_prev_lower(_cd);
-    const twoClosesAbove = closesAboveBBUp && prevPd > prevBBUp;
-    const twoClosesBelow = closesBelowBBLow && prevPd < prevBBLow;
+
+    // ── Indicadores 1H ───────────────────────────────────────────────────────
+    const _c1=closes(p1h),_h1=highs(p1h),_l1=lows(p1h);
+    const n_c1=_c1.length;
+    const ma100h=sma(_c1,Math.min(100,n_c1-1));
+    const ma200h=sma(_c1,Math.min(200,n_c1-1));
+    const lPh=_c1[n_c1-1];
+    const lMA100h=ma100h.filter(v=>v!=null).slice(-1)[0]||lPh;
+    const lMA200h=ma200h.filter(v=>v!=null).slice(-1)[0]||lPh;
+
+    // ════════════════════════════════════════════════════════════════════════
+    // MOMENTUM AL ALZA (BULL) — 6 condiciones según metodología
+    // Contexto: venía bajando, ahora inicia tendencia alcista con volatilidad
+    // ════════════════════════════════════════════════════════════════════════
+    // C1: Venía en tendencia bajista clara — precio entre MA200h y MA100h (bajo ambas o entre ellas)
+    const comingFromDowntrend = lPh<=lMA100h||( lPh<lMA200h&&lPh<lMA100h);
+    // C2: MA20d cruza por arriba de MA40d (cruce alcista en diario)
+    const ma20CrossAboveMa40 = lMA20d>lMA40d && pMA20d<=pMA40d;
+    // C3: Precio rompe MA100h y MA200h en hora (precio sobre ambas)
+    const priceAboveMa100_200h = lPh>lMA100h && lPh>lMA200h;
+    // C4: Precio rompe MA20d en diario (cierre sobre MA20)
+    const priceAboveMa20d = lPd>lMA20d && pPd<=lMA20d;
+    // C5: Precio rompe MA40d en diario (cierre sobre MA40 — después de MA20)
+    const priceAboveMa40d = lPd>lMA40d;
+    // C6: Confirmación Bollinger — BB expandiéndose + precio sobre banda media
+    const bbConfirmBull = bbWd>3 && lPd>lBBMid;
+
+    // ════════════════════════════════════════════════════════════════════════
+    // MOMENTUM A LA BAJA (BEAR) — 6 condiciones según metodología
+    // Contexto: venía subiendo, ahora inicia tendencia bajista con volatilidad
+    // ════════════════════════════════════════════════════════════════════════
+    // C1: Venía en tendencia alcista clara — precio entre MA100h y MA200h (sobre ambas o entre ellas)
+    const comingFromUptrend = lPh>=lMA100h||(lPh>lMA200h&&lPh>lMA100h);
+    // C2: MA20d cruza por debajo de MA40d (cruce bajista en diario)
+    const ma20CrossBelowMa40 = lMA20d<lMA40d && pMA20d>=pMA40d;
+    // C3: Precio rompe MA100h y MA200h a la baja en hora
+    const priceBelowMa100_200h = lPh<lMA100h && lPh<lMA200h;
+    // C4: Precio rompe MA20d a la baja en diario
+    const priceBelowMa20d = lPd<lMA20d && pPd>=lMA20d;
+    // C5: Precio rompe MA40d a la baja en diario
+    const priceBelowMa40d = lPd<lMA40d;
+    // C6: Confirmación Bollinger — BB expandiéndose + precio bajo banda media
+    const bbConfirmBear = bbWd>3 && lPd<lBBMid;
 
     const bullR=[
-      {ok:closesAboveBBUp,  text:`Precio fuera de banda superior ($${lPd.toFixed(2)} > $${lBBUp.toFixed(2)})`},
-      {ok:bbExpanding,      text:`BB expandiéndose (BBW ${bbWd.toFixed(1)}% > 4%)`},
-      {ok:bullCandle,       text:`Vela diaria alcista (cierre $${lPd.toFixed(2)} > apertura $${pOd.toFixed(2)})`},
-      {ok:ma20Rising,       text:`MA20 diaria orientada al alza`},
-      {ok:twoClosesAbove,   text:`2+ cierres consecutivos sobre la banda`},
+      {ok:comingFromDowntrend,    tf:'1H', text:`Venía bajando: precio bajo/entre MA100h ($${lMA100h.toFixed(2)}) y MA200h ($${lMA200h.toFixed(2)})`},
+      {ok:ma20CrossAboveMa40,     tf:'D',  text:`MA20d ($${lMA20d.toFixed(2)}) cruza por arriba de MA40d ($${lMA40d.toFixed(2)})`},
+      {ok:priceAboveMa100_200h,   tf:'1H', text:`Precio rompe MA100h y MA200h al alza ($${lPh.toFixed(2)})`},
+      {ok:priceAboveMa20d,        tf:'D',  text:`Precio rompe MA20d al alza ($${lPd.toFixed(2)} > $${lMA20d.toFixed(2)})`},
+      {ok:priceAboveMa40d,        tf:'D',  text:`Precio sobre MA40d ($${lPd.toFixed(2)} > $${lMA40d.toFixed(2)})`},
+      {ok:bbConfirmBull,          tf:'D',  text:`BB confirma: expandiéndose (${bbWd.toFixed(1)}%) + precio sobre media`},
     ];
     const bearR=[
-      {ok:closesBelowBBLow, text:`Precio fuera de banda inferior ($${lPd.toFixed(2)} < $${lBBLow.toFixed(2)})`},
-      {ok:bbExpanding,      text:`BB expandiéndose (BBW ${bbWd.toFixed(1)}% > 4%)`},
-      {ok:bearCandle,       text:`Vela diaria bajista (cierre $${lPd.toFixed(2)} < apertura $${pOd.toFixed(2)})`},
-      {ok:ma20Falling,      text:`MA20 diaria orientada a la baja`},
-      {ok:twoClosesBelow,   text:`2+ cierres consecutivos bajo la banda`},
+      {ok:comingFromUptrend,      tf:'1H', text:`Venía subiendo: precio sobre/entre MA100h ($${lMA100h.toFixed(2)}) y MA200h ($${lMA200h.toFixed(2)})`},
+      {ok:ma20CrossBelowMa40,     tf:'D',  text:`MA20d ($${lMA20d.toFixed(2)}) cruza por debajo de MA40d ($${lMA40d.toFixed(2)})`},
+      {ok:priceBelowMa100_200h,   tf:'1H', text:`Precio rompe MA100h y MA200h a la baja ($${lPh.toFixed(2)})`},
+      {ok:priceBelowMa20d,        tf:'D',  text:`Precio rompe MA20d a la baja ($${lPd.toFixed(2)} < $${lMA20d.toFixed(2)})`},
+      {ok:priceBelowMa40d,        tf:'D',  text:`Precio bajo MA40d ($${lPd.toFixed(2)} < $${lMA40d.toFixed(2)})`},
+      {ok:bbConfirmBear,          tf:'D',  text:`BB confirma: expandiéndose (${bbWd.toFixed(1)}%) + precio bajo media`},
     ];
+
     const bp=bullR.filter(r=>r.ok).length,brp=bearR.filter(r=>r.ok).length;
-    const pct80=Math.round(Math.max(bp,brp)/5*100);
-    // twoCloses es OBLIGATORIO — sin ella el breakout puede ser un spike de 1 día
     const isBull=bp>=brp;
-    const twoClosesOk=isBull?twoClosesAbove:twoClosesBelow;
-    if(pct80>=80&&twoClosesOk){
+    const pct=Math.round(Math.max(bp,brp)/6*100);
+
+    // PUERTAS OBLIGATORIAS — sin estas no hay señal
+    // Bull: DEBE cruzar MA20d + MA40d en diario (condiciones C4+C5 obligatorias)
+    // Bear: DEBE cruzar MA20d + MA40d a la baja (condiciones C4+C5 obligatorias)
+    const gateOk=isBull?(priceAboveMa20d&&priceAboveMa40d):(priceBelowMa20d&&priceBelowMa40d);
+
+    if(pct>=80&&gateOk){
       const type=isBull?'bull':'bear';
       const lev=type==='bull'?info.lev2:info.inv;
       const levName=type==='bull'?info.lev2name:info.invname;
-      results.push({sym,name:info.name,price:base,type,reqs:isBull?bullR:bearR,passed:Math.max(bp,brp),lev,levName});
+      results.push({sym,name:info.name,price:lPd,type,reqs:isBull?bullR:bearR,passed:Math.max(bp,brp),total:6,lev,levName});
     }
   }
   results.sort((a,b)=>b.passed-a.passed);
@@ -1634,8 +1668,27 @@ async function buildMomentum(){
     if(!schwabOk)addLog('error','Momentum',`Sin token Schwab — ${_momSkipped.length} símbolos omitidos`,_momSkipped.join(', '));
     else addLog('warn','Momentum',`${_momSkipped.length} símbolos sin datos: ${_momSkipped.join(', ')}`);
   }
+  // Telegram notifications for momentum signals
+  for(const r of results){
+    const _mKey=`tg_sent_mom_${r.sym}_${r.type}`;
+    if(!sessionStorage.getItem(_mKey)){
+      sessionStorage.setItem(_mKey,'1');
+      const dir=r.type==='bull'?'📈 ALCISTA':'📉 BAJISTA';
+      const emoji=r.type==='bull'?'🚀':'🔻';
+      const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+      const time=et.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true});
+      const msg=`${emoji} *MOMENTUM ${dir} — ${r.sym}*\n\n`+
+        `📊 ${r.name} · BB Daily Breakout\n`+
+        `💰 Precio: *$${r.price.toFixed(2)}*\n`+
+        `🎯 Confianza: *${Math.round(r.passed/(r.total||6)*100)}%*\n`+
+        `🏷 Ticker a comprar: *${r.lev}*\n`+
+        `🕐 ${time} ET\n\n`+
+        `_TradeDesk Pro_`;
+      notifySignal && getTgToken() && sendTelegram(msg, getTgToken(), getTgChat());
+    }
+  }
   area.innerHTML=results.map(r=>{
-    const pct=Math.round(r.passed/5*100);
+    const pct=Math.round(r.passed/(r.total||6)*100);
     const col='#00d17a'; // siempre verde porque filtramos >=80%
     const hdr=r.type==='bull'?'mom-bull':'mom-bear';
     const dir=r.type==='bull'?'📈 ALCISTA':'📉 BAJISTA';

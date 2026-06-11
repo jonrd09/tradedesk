@@ -330,6 +330,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
       <button class="btn-skip" onclick="document.getElementById('schwabModal').style.display='none'">Cerrar</button>
     </div>
     <div id="schwabKeyError" style="font-size:11px;color:var(--red);margin-top:8px;display:none;">⚠ Ingresa ambos campos.</div>
+    <button id="schwabDisconnectBtn" onclick="disconnectSchwab()" style="display:none;width:100%;margin-top:10px;background:rgba(255,77,109,.1);border:1px solid rgba(255,77,109,.3);border-radius:var(--r);color:var(--red);padding:8px;font-size:12px;cursor:pointer;font-family:var(--sans);">🔴 Desconectar sesión actual</button>
   </div>
 </div>
 
@@ -593,19 +594,29 @@ function showSchwabModal(){
   const token=localStorage.getItem('schwab_access_token')||'';
   const expiry=parseInt(localStorage.getItem('schwab_token_expiry')||'0');
   const valid=token&&Date.now()<expiry;
-  if(valid){
-    if(confirm('Schwab está conectado.\n\n¿Quieres desconectar?')){
-      localStorage.removeItem('schwab_access_token');
-      localStorage.removeItem('schwab_refresh_token');
-      localStorage.removeItem('schwab_token_expiry');
-      updateSchwabStatus();
-      addLog('warn','Schwab','Sesión desconectada manualmente');
-    }
-    return;
-  }
+  // Always open modal — never block with confirm dialog
   const id=localStorage.getItem('schwab_client_id')||'';
   if(id){document.getElementById('schwabClientId').value=id;}
+  // Show disconnect button inside modal if connected
+  const discBtn=document.getElementById('schwabDisconnectBtn');
+  if(discBtn){
+    discBtn.style.display=valid?'block':'none';
+    discBtn.textContent=valid?'🔴 Desconectar sesión actual':'';
+  }
+  const proxyInput=document.getElementById('proxyUrlInput');
+  if(proxyInput)proxyInput.value=localStorage.getItem('proxy_url')||'';
   document.getElementById('schwabModal').style.display='flex';
+}
+function disconnectSchwab(){
+  if(!confirm('¿Seguro que quieres desconectar Schwab?'))return;
+  localStorage.removeItem('schwab_access_token');
+  localStorage.removeItem('schwab_refresh_token');
+  localStorage.removeItem('schwab_token_expiry');
+  updateSchwabStatus();
+  addLog('warn','Schwab','Sesión desconectada manualmente');
+  document.getElementById('schwabModal').style.display='none';
+  const discBtn=document.getElementById('schwabDisconnectBtn');
+  if(discBtn)discBtn.style.display='none';
 }
 function saveSchwabKeys(){
   const cid=(document.getElementById('schwabClientId').value||'').trim();

@@ -1121,35 +1121,42 @@ function stochastic(highs,lows,closes,kPeriod=12,dPeriod=3){
 }
 // Trendline: linear regression over pivot highs (for bearish) or pivot lows (for bullish)
 // Returns {slope, intercept, pivotCount} using last N bars
-function trendlineFromPivots(prices,mode='highs',minPivots=4){
-  // Find pivot highs (local maxima) or lows (local minima)
+// Improved: wider lookback, tolerance for near-equal pivots, minPivots=3
+function trendlineFromPivots(prices,mode='highs',minPivots=3){
+  const n=prices.length;
   const pivots=[];
-  for(let i=2;i<prices.length-2;i++){
+  // Use 3-bar lookback for more sensitive pivot detection
+  for(let i=3;i<n-3;i++){
     if(mode==='highs'){
-      if(prices[i]>prices[i-1]&&prices[i]>prices[i-2]&&prices[i]>prices[i+1]&&prices[i]>prices[i+2])
-        pivots.push({idx:i,val:prices[i]});
+      const isHigh=prices[i]>=prices[i-1]&&prices[i]>=prices[i-2]&&prices[i]>=prices[i-3]
+                 &&prices[i]>=prices[i+1]&&prices[i]>=prices[i+2]&&prices[i]>=prices[i+3];
+      if(isHigh)pivots.push({idx:i,val:prices[i]});
     }else{
-      if(prices[i]<prices[i-1]&&prices[i]<prices[i-2]&&prices[i]<prices[i+1]&&prices[i]<prices[i+2])
-        pivots.push({idx:i,val:prices[i]});
+      const isLow=prices[i]<=prices[i-1]&&prices[i]<=prices[i-2]&&prices[i]<=prices[i-3]
+                &&prices[i]<=prices[i+1]&&prices[i]<=prices[i+2]&&prices[i]<=prices[i+3];
+      if(isLow)pivots.push({idx:i,val:prices[i]});
     }
   }
   if(pivots.length<minPivots)return null;
-  // Filter descending (for bearish trendline) or ascending (for bullish)
+  // Filter: allow 0.3% tolerance for near-equal pivots (markets don't make perfect lows/highs)
+  const tol=0.003;
   const filtered=[];
   for(let i=0;i<pivots.length;i++){
+    if(filtered.length===0){filtered.push(pivots[i]);continue;}
+    const last=filtered[filtered.length-1];
     if(mode==='highs'){
-      // descending highs
-      if(filtered.length===0||pivots[i].val<filtered[filtered.length-1].val)filtered.push(pivots[i]);
+      // descending: each high must be lower than previous (with tolerance)
+      if(pivots[i].val<last.val*(1+tol))filtered.push(pivots[i]);
     }else{
-      // ascending lows
-      if(filtered.length===0||pivots[i].val>filtered[filtered.length-1].val)filtered.push(pivots[i]);
+      // ascending: each low must be higher than previous (with tolerance)
+      if(pivots[i].val>last.val*(1-tol))filtered.push(pivots[i]);
     }
   }
   if(filtered.length<minPivots)return null;
   // Linear regression on filtered pivots
-  const n=filtered.length;
+  const fn=filtered.length;
   const xs=filtered.map(p=>p.idx),ys=filtered.map(p=>p.val);
-  const mx=xs.reduce((a,b)=>a+b,0)/n,my=ys.reduce((a,b)=>a+b,0)/n;
+  const mx=xs.reduce((a,b)=>a+b,0)/fn,my=ys.reduce((a,b)=>a+b,0)/fn;
   const num=xs.reduce((s,x,i)=>s+(x-mx)*(ys[i]-my),0);
   const den=xs.reduce((s,x)=>s+(x-mx)**2,0);
   if(den===0)return null;
@@ -1322,14 +1329,14 @@ async function buildSignals(){
     // ════════════════════════════════════════════════════════════════════════
     const tlBear=trendlineFromPivots(h1h,'highs',4);
     const tlBearVal=tlBear?trendlineAt(tlBear,n1h-1):null;
-    const last3above=tlBearVal!==null&&c1h.slice(-3).some(p=>p>tlBearVal*(1.001)&&p<tlBearVal*(1.008));
+    const last3above=tlBearVal!==null&&c1h.slice(-3).some(p=>p>tlBearVal*(1.0005)&&p<tlBearVal*(1.015));
     const confirmBull1h=lP1h>lMA20_1h&&lP1h>o1h[n1h-1];
     const bbExpanding1h_bull=bbUpperSlope(c1h)>0;
     const confirm15bull=lP15>lMA20_15&&upSlope15&&greenCandles15>=2;
     const stochBull15=lK15>lD15&&lK15>30; // Worden apoyando alza
     const volBull=volConfirm;
     all.push({...meta,code:'E1',name:'Cambio de Tendencia al Alza',type:'call',reqs:[
-      {ok:!!tlBear&&tlBear.pivotCount>=4, tf:'1H', text:`Tendencia bajista: ${tlBear?tlBear.pivotCount:0} máximos desc.`},
+      {ok:!!tlBear&&tlBear.pivotCount>=3, tf:'1H', text:`Tendencia bajista: ${tlBear?tlBear.pivotCount:0} máximos desc. detectados`},
       {ok:last3above,                     tf:'1H', text:`Precio rompiendo línea bajista (buffer 3 velas)`},
       {ok:confirmBull1h,                  tf:'1H', text:`Vela alcista cierra sobre MA20 ($${lMA20_1h.toFixed(2)})`},
       {ok:bbExpanding1h_bull,             tf:'1H', text:`BB expandiéndose al alza en 1H`},
@@ -1343,14 +1350,14 @@ async function buildSignals(){
     // ════════════════════════════════════════════════════════════════════════
     const tlBull=trendlineFromPivots(l1h,'lows',4);
     const tlBullVal=tlBull?trendlineAt(tlBull,n1h-1):null;
-    const last3below=tlBullVal!==null&&c1h.slice(-3).some(p=>p<tlBullVal*(0.999)&&p>tlBullVal*(0.992));
+    const last3below=tlBullVal!==null&&c1h.slice(-3).some(p=>p<tlBullVal*(0.9995)&&p>tlBullVal*(0.985));
     const confirmBear1h=lP1h<lMA20_1h&&lP1h<o1h[n1h-1];
     const bbExpanding1h_bear=bbLowerSlope(c1h)<0;
     const confirm15bear=lP15<lMA20_15&&loSlope15&&redCandles15>=2;
     const stochBear15=lK15<lD15&&lK15<70; // Worden apoyando baja
     const volBear=volConfirm;
     all.push({...meta,code:'E2',name:'Cambio de Tendencia a la Baja',type:'put',reqs:[
-      {ok:!!tlBull&&tlBull.pivotCount>=4, tf:'1H', text:`Tendencia alcista: ${tlBull?tlBull.pivotCount:0} mínimos asc.`},
+      {ok:!!tlBull&&tlBull.pivotCount>=3, tf:'1H', text:`Tendencia alcista: ${tlBull?tlBull.pivotCount:0} mínimos asc. detectados`},
       {ok:last3below,                     tf:'1H', text:`Precio rompiendo línea alcista (buffer 3 velas)`},
       {ok:confirmBear1h,                  tf:'1H', text:`Vela bajista cierra bajo MA20 ($${lMA20_1h.toFixed(2)})`},
       {ok:bbExpanding1h_bear,             tf:'1H', text:`BB expandiéndose a la baja en 1H`},
@@ -2654,17 +2661,27 @@ async function init(){
   // Show rules popup on first load
   setTimeout(()=>showRulesPopup(), 1500);
 
-  // Auto-refresh eliminado — usa F5 o Ctrl+R para actualizar manualmente
-  // El token de Schwab se renueva automáticamente cuando es necesario
   // Token proactive refresh each 20min to keep session alive
   if(window._tokenInterval)clearInterval(window._tokenInterval);
   window._tokenInterval=setInterval(async()=>{
     const tok=localStorage.getItem('schwab_access_token');
     const exp=parseInt(localStorage.getItem('schwab_token_expiry')||'0');
-    if(tok&&exp&&Date.now()>exp-600000){
-      await getSchwabToken();
-    }
+    if(tok&&exp&&Date.now()>exp-600000)await getSchwabToken();
   },20*60*1000);
+
+  // Auto-refresh señales cada 10 min durante mercado — para no perder señales
+  if(window._sigInterval)clearInterval(window._sigInterval);
+  window._sigInterval=setInterval(async()=>{
+    const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+    const mins=et.getHours()*60+et.getMinutes(),day=et.getDay();
+    const isOpen=day>=1&&day<=5&&mins>=570&&mins<960;
+    const isPre=day>=1&&day<=5&&mins>=515&&mins<570; // 8:35-9:30 premarket
+    if(isOpen||isPre){
+      await loadLivePrices();
+      await buildSignals();
+      await buildMomentum();
+    }
+  },10*60*1000);
 }
 init();
 </script>

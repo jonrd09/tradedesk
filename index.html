@@ -1374,6 +1374,12 @@ async function buildSignals(){
 
     // ── Volumen 15min ────────────────────────────────────────────────────────
     const vol15=ohlc15.v||[];
+    // BB expandiéndose activamente: BBW subiendo en las últimas 3 velas
+    const bb15_prev1=bollinger(c15.slice(0,-1));
+    const bb15_prev2=bollinger(c15.slice(0,-2));
+    const lBBW15_1=bb15_prev1.upper.filter(v=>v!=null).slice(-1)[0]&&bb15_prev1.lower.filter(v=>v!=null).slice(-1)[0]&&bb15_prev1.mid.filter(v=>v!=null).slice(-1)[0]?(bb15_prev1.upper.filter(v=>v!=null).slice(-1)[0]-bb15_prev1.lower.filter(v=>v!=null).slice(-1)[0])/bb15_prev1.mid.filter(v=>v!=null).slice(-1)[0]*100:0;
+    const lBBW15_2=bb15_prev2.upper.filter(v=>v!=null).slice(-1)[0]&&bb15_prev2.lower.filter(v=>v!=null).slice(-1)[0]&&bb15_prev2.mid.filter(v=>v!=null).slice(-1)[0]?(bb15_prev2.upper.filter(v=>v!=null).slice(-1)[0]-bb15_prev2.lower.filter(v=>v!=null).slice(-1)[0])/bb15_prev2.mid.filter(v=>v!=null).slice(-1)[0]*100:0;
+    const isExpanding15=lBBW15>lBBW15_1&&lBBW15_1>lBBW15_2;
     const lVol15=vol15[vol15.length-1]||0;
     const avgVol15_10=vol15.length>=10?vol15.slice(-10).reduce((a,b)=>a+b,0)/10:0;
     const volActive15=avgVol15_10>0?lVol15>avgVol15_10*1.1:true;
@@ -1420,7 +1426,7 @@ async function buildSignals(){
         {ok:pA_greenCandle, tf:'15m',text:`Vela alcista: cierre $${lP15.toFixed(2)} > apertura $${lO15.toFixed(2)}`},
         {ok:volActive15,    tf:'15m',text:`Volumen de compra activo${volLabel}`},
         {ok:pA_stoch,       tf:'15m',text:`Worden: %K (${lK15.toFixed(0)}) sobre %D (${lD15.toFixed(0)}) — momentum alcista`},
-        {ok:lBBW15>1.0,     tf:'15m',text:`BB con volatilidad (BBW ${lBBW15.toFixed(1)}%)`},
+        {ok:lBBW15>3.0&&isExpanding15, tf:'15m',text:`BB expandiéndose activamente (BBW ${lBBW15.toFixed(1)}% > 3%)`},
       ]});
     }
 
@@ -1434,7 +1440,7 @@ async function buildSignals(){
         {ok:pB_redCandle,   tf:'15m',text:`Vela bajista: cierre $${lP15.toFixed(2)} < apertura $${lO15.toFixed(2)}`},
         {ok:volActive15,    tf:'15m',text:`Volumen de venta activo${volLabel}`},
         {ok:pB_stoch,       tf:'15m',text:`Worden: %K (${lK15.toFixed(0)}) bajo %D (${lD15.toFixed(0)}) — momentum bajista`},
-        {ok:lBBW15>1.0,     tf:'15m',text:`BB con volatilidad (BBW ${lBBW15.toFixed(1)}%)`},
+        {ok:lBBW15>3.0&&isExpanding15, tf:'15m',text:`BB expandiéndose activamente (BBW ${lBBW15.toFixed(1)}% > 3%)`},
       ]});
     }
 
@@ -1448,7 +1454,7 @@ async function buildSignals(){
         {ok:pC_redReturn,   tf:'15m',text:`Primera vela bajista de regreso ($${lP15.toFixed(2)} < apertura $${lO15.toFixed(2)})`},
         {ok:pC_stochOB,     tf:'15m',text:`Worden sobrecomprado: %K (${lK15.toFixed(0)}) > 75`},
         {ok:volActive15,    tf:'15m',text:`Volumen confirmando${volLabel}`},
-        {ok:lBBW15>1.0,     tf:'15m',text:`BB con volatilidad (BBW ${lBBW15.toFixed(1)}%)`},
+        {ok:lBBW15>3.0&&isExpanding15, tf:'15m',text:`BB expandiéndose activamente (BBW ${lBBW15.toFixed(1)}% > 3%)`},
       ]});
     }
 
@@ -1462,7 +1468,7 @@ async function buildSignals(){
         {ok:pD_greenReturn, tf:'15m',text:`Primera vela alcista de rebote ($${lP15.toFixed(2)} > apertura $${lO15.toFixed(2)})`},
         {ok:pD_stochOS,     tf:'15m',text:`Worden sobrevendido: %K (${lK15.toFixed(0)}) < 25`},
         {ok:volActive15,    tf:'15m',text:`Volumen confirmando${volLabel}`},
-        {ok:lBBW15>1.0,     tf:'15m',text:`BB con volatilidad (BBW ${lBBW15.toFixed(1)}%)`},
+        {ok:lBBW15>3.0&&isExpanding15, tf:'15m',text:`BB expandiéndose activamente (BBW ${lBBW15.toFixed(1)}% > 3%)`},
       ]});
     }
   }
@@ -2763,8 +2769,11 @@ async function init(){
     const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
     const mins=et.getHours()*60+et.getMinutes(),day=et.getDay();
     const isOpen=day>=1&&day<=5&&mins>=570&&mins<960;
-    const isPre=day>=1&&day<=5&&mins>=515&&mins<570; // 8:35-9:30 premarket
+    const isPre=day>=1&&day<=5&&mins>=515&&mins<570;
     if(isOpen||isPre){
+      // Clear Telegram sent flags so signals re-evaluate fresh each cycle
+      // Only clear SETUP flags — real signals keep anti-duplicate for the session
+      Object.keys(sessionStorage).filter(k=>k.startsWith('tg_sent_setup_')).forEach(k=>sessionStorage.removeItem(k));
       await loadLivePrices();
       await buildSignals();
       await buildMomentum();

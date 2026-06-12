@@ -433,13 +433,14 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
       </div>
       <button onclick="closeStrikeModal()" style="background:none;border:none;color:var(--text3);font-size:20px;cursor:pointer;">✕</button>
     </div>
-    <div style="font-size:11px;color:var(--text3);margin-bottom:10px;">Distancia Spot → Strike por día</div>
+    <div style="font-size:11px;color:var(--text3);margin-bottom:10px;">Distancia Spot → Strike por día · <span style="color:var(--text2)">Costo $ · Lugares · Spread Bid/Ask</span></div>
     <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
       <select id="strikeDay" class="inp" style="flex:1.5;min-width:100px;">
         <option>Lunes</option><option>Martes</option><option>Miércoles</option><option>Jueves</option><option>Viernes</option>
       </select>
       <input type="number" id="strikeCosto" class="inp" placeholder="Costo $" min="0" step="0.01" style="flex:1;text-align:center;min-width:80px;">
       <input type="number" id="strikeDist" class="inp" placeholder="Lugares" min="-50" max="100" step="0.5" style="flex:1;text-align:center;min-width:70px;">
+      <input type="number" id="strikeSpread" class="inp" placeholder="Spread" min="0" step="0.01" title="Diferencia Bid/Ask" style="flex:1;text-align:center;min-width:70px;">
       <button onclick="addStrikeEntry()" style="background:var(--blue);border:none;border-radius:var(--r);color:#fff;padding:0 14px;font-size:14px;font-weight:700;cursor:pointer;">+ Agregar</button>
     </div>
     <div style="max-height:200px;overflow-y:auto;margin-bottom:10px;" id="strikeLogList"></div>
@@ -1942,16 +1943,18 @@ function addStrikeEntry(){
   const day=document.getElementById('strikeDay').value;
   const dist=parseFloat(document.getElementById('strikeDist').value);
   const costo=parseFloat(document.getElementById('strikeCosto').value)||0;
+  const spread=parseFloat(document.getElementById('strikeSpread').value)||null;
   if(!dist&&dist!==0)return;
   const key='strikelog_'+_strikeTicker;
   let log=[];try{log=JSON.parse(localStorage.getItem(key)||'[]');}catch(e){}
   const _now=new Date();
   const _date=_now.toLocaleDateString('es-PR',{day:'2-digit',month:'2-digit',year:'numeric'});
   const _time=_now.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true,timeZone:'America/New_York'});
-  log.unshift({day,dist,costo,date:_date,time:_time});
+  log.unshift({day,dist,costo,spread,date:_date,time:_time});
   try{localStorage.setItem(key,JSON.stringify(log));}catch(e){}
   document.getElementById('strikeDist').value='';
   document.getElementById('strikeCosto').value='';
+  document.getElementById('strikeSpread').value='';
   renderStrikeLog();updateCardAverages();
 }
 function deleteStrikeEntry(ticker,idx){
@@ -1970,6 +1973,7 @@ function editStrikeEntry(ticker,idx){
   el.innerHTML=`<select id="ed-${idx}" style="background:var(--bg4);border:1px solid var(--blue);border-radius:6px;color:var(--text);padding:3px 6px;font-size:12px;flex:1;">${opts}</select>
     <input type="number" id="ec-${idx}" value="${e.costo||0}" step="0.01" placeholder="$" style="background:var(--bg4);border:1px solid var(--blue);border-radius:6px;color:var(--yellow);padding:3px 6px;font-size:12px;width:65px;text-align:center;">
     <input type="number" id="ev-${idx}" value="${e.dist}" step="0.5" style="background:var(--bg4);border:1px solid var(--blue);border-radius:6px;color:var(--text);padding:3px 6px;font-size:12px;width:60px;text-align:center;">
+    <input type="number" id="es-${idx}" value="${e.spread||''}" step="0.01" placeholder="Spread" style="background:var(--bg4);border:1px solid var(--blue);border-radius:6px;color:var(--purple);padding:3px 6px;font-size:12px;width:60px;text-align:center;">
     <button onclick="saveStrikeEdit('${ticker}',${idx})" style="background:var(--green);border:none;border-radius:6px;color:#001a0e;padding:3px 10px;font-size:12px;font-weight:700;cursor:pointer;">✓</button>
     <button onclick="renderStrikeLog()" style="background:none;border:1px solid var(--border);border-radius:6px;color:var(--text3);padding:3px 8px;font-size:12px;cursor:pointer;">✕</button>`;
   document.getElementById('ev-'+idx).focus();
@@ -1981,7 +1985,8 @@ function saveStrikeEdit(ticker,idx){
   if(!day||isNaN(dist))return;
   const key='strikelog_'+ticker;let log=[];
   try{log=JSON.parse(localStorage.getItem(key)||'[]');}catch(e){}
-  if(!log[idx])return;log[idx].day=day;log[idx].dist=dist;log[idx].costo=costo;
+  const spread=parseFloat(document.getElementById('es-'+idx)?.value)||null;
+  if(!log[idx])return;log[idx].day=day;log[idx].dist=dist;log[idx].costo=costo;log[idx].spread=spread;
   // preserve original time when editing
   try{localStorage.setItem(key,JSON.stringify(log));}catch(e){}
   renderStrikeLog();updateCardAverages();
@@ -2000,6 +2005,7 @@ function renderStrikeLog(){
     <span style="font-size:11px;color:var(--blue);min-width:58px;font-family:var(--mono);">${e.time||''}</span>
     <span style="font-family:var(--mono);font-size:12px;color:var(--yellow);min-width:52px;">$${(e.costo||0).toFixed(2)}</span>
     <span style="font-family:var(--mono);font-weight:700;color:${_strikeColor};min-width:28px;text-align:right;">${e.dist}</span>
+    ${e.spread!=null?`<span style="font-family:var(--mono);font-size:11px;color:var(--purple);min-width:44px;" title="Spread Bid/Ask">Δ$${e.spread.toFixed(2)}</span>`:'<span style="min-width:44px;"></span>'}
     <button onclick="editStrikeEntry('${_strikeTicker}',${i})" style="background:none;border:none;color:var(--blue);cursor:pointer;font-size:12px;padding:0 4px;">✏️</button>
     <button onclick="deleteStrikeEntry('${_strikeTicker}',${i})" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:12px;padding:0 4px;">✕</button>
   </div>`).join('');

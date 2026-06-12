@@ -243,17 +243,17 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px;">
       <div onclick="openStrikeLog('TSLA','#cc0000')" style="background:var(--bg3);border-radius:var(--r);padding:10px 8px;border-left:2px solid #cc0000;text-align:center;cursor:pointer;" onmouseover="this.style.background='var(--bg4)'" onmouseout="this.style.background='var(--bg3)'">
         <div style="font-size:12px;font-weight:700;color:#cc0000;font-family:var(--mono);margin-bottom:4px;">TSLA</div>
-        <div style="font-size:15px;font-weight:700;color:var(--text);font-family:var(--mono);">$80–$160</div>
+        <div id="range-TSLA" style="font-size:15px;font-weight:700;color:var(--text);font-family:var(--mono);">$100–$250</div>
         <div id="avg-TSLA" style="font-size:15px;font-weight:700;font-family:var(--mono);color:#fff;margin-top:4px;">—</div>
       </div>
       <div onclick="openStrikeLog('GOOG','#4285f4')" style="background:var(--bg3);border-radius:var(--r);padding:10px 8px;border-left:2px solid #4285f4;text-align:center;cursor:pointer;" onmouseover="this.style.background='var(--bg4)'" onmouseout="this.style.background='var(--bg3)'">
         <div style="font-size:12px;font-weight:700;color:#4285f4;font-family:var(--mono);margin-bottom:4px;">GOOG</div>
-        <div style="font-size:15px;font-weight:700;color:var(--text);font-family:var(--mono);">$60–$140</div>
+        <div id="range-GOOG" style="font-size:15px;font-weight:700;color:var(--text);font-family:var(--mono);">$60–$170</div>
         <div id="avg-GOOG" style="font-size:15px;font-weight:700;font-family:var(--mono);color:#fff;margin-top:4px;">—</div>
       </div>
       <div onclick="openStrikeLog('SPY','#00a651')" style="background:var(--bg3);border-radius:var(--r);padding:10px 8px;border-left:2px solid #00a651;text-align:center;cursor:pointer;" onmouseover="this.style.background='var(--bg4)'" onmouseout="this.style.background='var(--bg3)'">
         <div style="font-size:12px;font-weight:700;color:#00a651;font-family:var(--mono);margin-bottom:4px;">SPY</div>
-        <div style="font-size:15px;font-weight:700;color:var(--text);font-family:var(--mono);">$30–$45</div>
+        <div id="range-SPY" style="font-size:15px;font-weight:700;color:var(--text);font-family:var(--mono);">$30–$45</div>
         <div id="avg-SPY" style="font-size:15px;font-weight:700;font-family:var(--mono);color:#fff;margin-top:4px;">—</div>
       </div>
     </div>
@@ -433,7 +433,20 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
       </div>
       <button onclick="closeStrikeModal()" style="background:none;border:none;color:var(--text3);font-size:20px;cursor:pointer;">✕</button>
     </div>
-    <div style="font-size:11px;color:var(--text3);margin-bottom:10px;">Distancia Spot → Strike por día · <span style="color:var(--text2)">Costo $ · Lugares · Spread Bid/Ask</span></div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+      <div style="font-size:11px;color:var(--text3);">Distancia Spot → Strike · <span style="color:var(--text2)">Costo $ · Lugares · Spread</span></div>
+      <div style="display:flex;align-items:center;gap:4px;margin-left:auto;">
+        <span style="font-size:10px;color:var(--text3);">Rango:</span>
+        <span style="font-size:11px;color:var(--text3);">$</span>
+        <input type="number" id="strikeRangeMin" placeholder="Min" step="1"
+          style="width:52px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--green);padding:3px 6px;font-size:12px;font-family:var(--mono);outline:none;text-align:center;"
+          oninput="saveStrikeRange()">
+        <span style="font-size:11px;color:var(--text3);">–$</span>
+        <input type="number" id="strikeRangeMax" placeholder="Max" step="1"
+          style="width:52px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--green);padding:3px 6px;font-size:12px;font-family:var(--mono);outline:none;text-align:center;"
+          oninput="saveStrikeRange()">
+      </div>
+    </div>
     <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
       <select id="strikeDay" class="inp" style="flex:1.5;min-width:100px;">
         <option>Lunes</option><option>Martes</option><option>Miércoles</option><option>Jueves</option><option>Viernes</option>
@@ -608,6 +621,31 @@ function showSchwabModal(){
   if(proxyInput)proxyInput.value=localStorage.getItem('proxy_url')||'';
   document.getElementById('schwabModal').style.display='flex';
 }
+function saveStrikeRange(){
+  const min=document.getElementById('strikeRangeMin')?.value;
+  const max=document.getElementById('strikeRangeMax')?.value;
+  if(!min||!max)return;
+  const key=`strike_range_${_strikeTicker}`;
+  localStorage.setItem(key,JSON.stringify({min:parseFloat(min),max:parseFloat(max)}));
+  // Update card display
+  const card=document.getElementById(`range-${_strikeTicker}`);
+  if(card)card.textContent=`$${min}–$${max}`;
+}
+
+function loadStrikeRanges(){
+  ['TSLA','GOOG','SPY'].forEach(ticker=>{
+    const key=`strike_range_${ticker}`;
+    const saved=localStorage.getItem(key);
+    if(saved){
+      try{
+        const {min,max}=JSON.parse(saved);
+        const card=document.getElementById(`range-${ticker}`);
+        if(card)card.textContent=`$${min}–$${max}`;
+      }catch(e){}
+    }
+  });
+}
+
 function disconnectSchwab(){
   if(!confirm('¿Seguro que quieres desconectar Schwab?'))return;
   localStorage.removeItem('schwab_access_token');
@@ -1401,8 +1439,10 @@ async function buildSignals(){
     const distToLower=(lP15-lLow15)/lP15*100;
     const nearUpper=distToUpper>=0&&distToUpper<0.3;
     const nearLower=distToLower>=0&&distToLower<0.3;
-    const setupBull=lBBW15<2.0&&nearUpper&&lP15>lMA20_15;
-    const setupBear=lBBW15<2.0&&nearLower&&lP15<lMA20_15;
+    // Setup only when price is actively touching the band AND bands are starting to expand
+    const bbwRising=lBBW15>lBBW15_1; // BBW must be rising (expanding)
+    const setupBull=lBBW15<2.0&&nearUpper&&lP15>lMA20_15&&bbwRising&&lH15>=lUp15*0.998;
+    const setupBear=lBBW15<2.0&&nearLower&&lP15<lMA20_15&&bbwRising&&lL15<=lLow15*1.002;
     if(setupBull||setupBear){
       const setupType=setupBull?'call':'put';
       const setupDir=setupBull?'Superior':'Inferior';
@@ -1418,7 +1458,7 @@ async function buildSignals(){
 
     // PATRÓN A — Vela VERDE perforando banda SUPERIOR → CALL
     const pA_greenCandle=lP15>lO15;
-    const pA_pierceUpper=lH15>lUp15;
+    const pA_pierceUpper=lH15>lUp15&&isExpanding15; // bands must be expanding
     const pA_stoch=lK15>lD15&&lK15>40&&lK15<85;
     if(pA_pierceUpper){
       all.push({...meta,code:'BB-A',name:'BB Salida Superior — CALL',type:'call',reqs:[
@@ -1432,7 +1472,7 @@ async function buildSignals(){
 
     // PATRÓN B — Vela ROJA perforando banda INFERIOR → PUT
     const pB_redCandle=lP15<lO15;
-    const pB_pierceLower=lL15<lLow15;
+    const pB_pierceLower=lL15<lLow15&&isExpanding15; // bands must be expanding
     const pB_stoch=lK15<lD15&&lK15<60&&lK15>15;
     if(pB_pierceLower){
       all.push({...meta,code:'BB-B',name:'BB Salida Inferior — PUT',type:'put',reqs:[
@@ -1445,7 +1485,7 @@ async function buildSignals(){
     }
 
     // PATRÓN C — Sobreexpuesto AL ALZA → PUT (regreso)
-    const pC_aboveBB=lL15>lUp15;
+    const pC_aboveBB=lL15>lUp15&&isExpanding15;
     const pC_redReturn=lP15<lO15;
     const pC_stochOB=lK15>75;
     if(pC_aboveBB){
@@ -1459,7 +1499,7 @@ async function buildSignals(){
     }
 
     // PATRÓN D — Sobreexpuesto A LA BAJA → CALL (rebote)
-    const pD_belowBB=lH15<lLow15;
+    const pD_belowBB=lH15<lLow15&&isExpanding15;
     const pD_greenReturn=lP15>lO15;
     const pD_stochOS=lK15<25;
     if(pD_belowBB){
@@ -1992,6 +2032,14 @@ function openStrikeLog(ticker,color){_strikeTicker=ticker;_strikeColor=color;
   for(let i=0;i<sel.options.length;i++){if(sel.options[i].value===today){sel.selectedIndex=i;break;}}
   document.getElementById('strikeDist').value='';
   document.getElementById('strikeModal').style.display='flex';
+  // Load saved range for this ticker
+  const defaults={TSLA:{min:100,max:250},GOOG:{min:60,max:170},SPY:{min:30,max:45}};
+  const saved=localStorage.getItem(`strike_range_${ticker}`);
+  const range=saved?JSON.parse(saved):defaults[ticker]||{min:'',max:''};
+  const minEl=document.getElementById('strikeRangeMin');
+  const maxEl=document.getElementById('strikeRangeMax');
+  if(minEl)minEl.value=range.min||'';
+  if(maxEl)maxEl.value=range.max||'';
   loadStrikeFundamentals(ticker);
   renderStrikeLog();
   setTimeout(()=>document.getElementById('strikeDist').focus(),100);
@@ -2694,6 +2742,8 @@ async function init(){
   const _todayClean=new Date().toLocaleDateString('es-PR');
   Object.keys(localStorage).filter(k=>k.startsWith('tg_sent_')&&!k.includes(_todayClean))
     .forEach(k=>localStorage.removeItem(k));
+  // Load strike ranges on init
+  loadStrikeRanges();
   // Update Telegram button state on load
   if(isTgEnabled()&&getTgToken()&&getTgChat()){
     const btn=document.getElementById('telegramBtn');

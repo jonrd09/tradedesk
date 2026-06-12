@@ -1390,6 +1390,27 @@ async function buildSignals(){
     // F4: Volumen activo
     const volLabel=avgVol15_10>0?` (${(lVol15/avgVol15_10*100).toFixed(0)}% del promedio)`:'';
 
+    // ── SETUP — Pre-ruptura, precio cerca de la banda ────────────────────────
+    // BBW bajo + precio cerca de la banda = ruptura inminente — alerta temprana
+    const distToUpper=(lUp15-lP15)/lP15*100;
+    const distToLower=(lP15-lLow15)/lP15*100;
+    const nearUpper=distToUpper>=0&&distToUpper<0.3;
+    const nearLower=distToLower>=0&&distToLower<0.3;
+    const setupBull=lBBW15<2.0&&nearUpper&&lP15>lMA20_15;
+    const setupBear=lBBW15<2.0&&nearLower&&lP15<lMA20_15;
+    if(setupBull||setupBear){
+      const setupType=setupBull?'call':'put';
+      const setupDir=setupBull?'Superior':'Inferior';
+      const setupDist=(setupBull?distToUpper:distToLower).toFixed(2);
+      all.push({...meta,code:'SETUP',name:`Setup BB — Precio cerca de banda ${setupDir}`,type:setupType,isSetup:true,reqs:[
+        {ok:lBBW15<2.0,              tf:'15m',text:`BB comprimido (BBW ${lBBW15.toFixed(1)}% < 2%) — energía acumulada`},
+        {ok:setupBull||setupBear,    tf:'15m',text:`Precio a ${setupDist}% de banda ${setupDir} ($${(setupBull?lUp15:lLow15).toFixed(2)})`},
+        {ok:setupBull?lP15>lMA20_15:lP15<lMA20_15,tf:'15m',text:`MA20 alineada: precio ${setupBull?'sobre':'bajo'} $${lMA20_15.toFixed(2)}`},
+        {ok:stochCallOk||stochPutOk, tf:'15m',text:`Stochastics apoyando dirección (%K ${lK15.toFixed(0)})`},
+        {ok:true,                    tf:'15m',text:'⚡ Prepárate — ruptura inminente'},
+      ]});
+    }
+
     // ── PATRÓN A — Salida banda SUPERIOR → CALL ──────────────────────────────
     // Vela perfora banda superior hacia arriba con segunda vela de confirmación
     const pA_pierce=lH15>lUp15;
@@ -1462,7 +1483,7 @@ async function buildSignals(){
   }
 
   const active=all.map(s=>({...s,passed:s.reqs.filter(r=>r.ok).length}))
-    .filter(s=>_debugMode||Math.round(s.passed/s.reqs.length*100)>=75)
+    .filter(s=>_debugMode||(s.isSetup&&Math.round(s.passed/s.reqs.length*100)>=60)||(!s.isSetup&&Math.round(s.passed/s.reqs.length*100)>=75))
     .sort((a,b)=>b.passed-a.passed);
 
   if(!active.length){
@@ -1490,7 +1511,30 @@ async function buildSignals(){
     const col=disp===100?'var(--green)':disp>=86?'var(--green)':'var(--yellow)';
     const hdr=s.type==='call'?'sig-call':'sig-put';
     const fullSignal=s.passed===total;
-    const accentCol=s.type==='call'?'#00d17a':'#ff4d6d';
+    const accentCol=s.isSetup?'#ffc234':s.type==='call'?'#00d17a':'#ff4d6d';
+    // Send Telegram SETUP notification
+    if(s.isSetup){
+      const _setupKey=`tg_sent_setup_${s.sym}_${s.code}`;
+      if(!sessionStorage.getItem(_setupKey)){
+        sessionStorage.setItem(_setupKey,'1');
+        const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+        const time=et.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true});
+        const msg=`⚡ *SETUP DETECTADO — ${s.sym}*
+
+`+
+          `📊 ${s.name}
+`+
+          `💰 Precio: *$${s.price.toFixed(2)}*
+`+
+          `🎯 BB comprimido — ruptura inminente
+`+
+          `🕐 ${time} ET
+
+`+
+          `_Prepárate para la señal real_`;
+        getTgToken()&&sendTelegram(msg,getTgToken(),getTgChat());
+      }
+    }
     // Send Telegram notification for new signals (track sent to avoid duplicates)
     const _sigKey=`tg_sent_${s.sym}_${s.code}_${disp}`;
     if(disp>=75&&!sessionStorage.getItem(_sigKey)){
@@ -1535,7 +1579,9 @@ async function buildSignals(){
     }
 
     // ── Badge percent steps ──────────────────────────────────────────
-    const pctBadge=fullSignal
+    const pctBadge=s.isSetup
+      ?`<span style="background:rgba(255,194,52,.35);color:#ffc234;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;">⚡ SETUP — Ruptura inminente</span>`
+      :fullSignal
       ?`<span style="background:rgba(0,209,122,.35);color:#00d17a;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;">✅ COMPLETA</span>`
       :`<span style="background:rgba(255,194,52,.25);color:#ffc234;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;">★ ${pctLabel}% — EN FORMACIÓN</span>`;
 

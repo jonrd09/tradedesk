@@ -1517,9 +1517,10 @@ async function buildSignals(){
     const accentCol=s.isSetup?'#ffc234':s.type==='call'?'#00d17a':'#ff4d6d';
     // Send Telegram SETUP notification
     if(s.isSetup){
-      const _setupKey=`tg_sent_setup_${s.sym}_${s.code}`;
-      if(!sessionStorage.getItem(_setupKey)){
-        sessionStorage.setItem(_setupKey,'1');
+      const _today=new Date().toLocaleDateString('es-PR');
+      const _setupKey=`tg_sent_setup_${s.sym}_${_today}`;
+      if(!localStorage.getItem(_setupKey)){
+        localStorage.setItem(_setupKey,'1');
         const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
         const time=et.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true});
         const msg=`⚡ *SETUP DETECTADO — ${s.sym}*
@@ -1539,9 +1540,11 @@ async function buildSignals(){
       }
     }
     // Send Telegram notification for new signals (track sent to avoid duplicates)
-    const _sigKey=`tg_sent_${s.sym}_${s.code}_${disp}`;
-    if(disp>=75&&!sessionStorage.getItem(_sigKey)){
-      sessionStorage.setItem(_sigKey,'1');
+    const _etNow=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+    const _hourKey=`${_etNow.toLocaleDateString('es-PR')}_${_etNow.getHours()}`;
+    const _sigKey=`tg_sent_${s.sym}_${s.code}_${_hourKey}`;
+    if(disp>=75&&!localStorage.getItem(_sigKey)){
+      localStorage.setItem(_sigKey,'1');
       notifySignal(s.sym,s.code,s.name,s.type,disp,s.price,s.pct);
     }
 
@@ -1766,9 +1769,11 @@ async function buildMomentum(){
   }
   // Telegram notifications for momentum signals
   for(const r of results){
-    const _mKey=`tg_sent_mom_${r.sym}_${r.type}`;
-    if(!sessionStorage.getItem(_mKey)){
-      sessionStorage.setItem(_mKey,'1');
+    const _etMom=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+    const _momDate=_etMom.toLocaleDateString('es-PR');
+    const _mKey=`tg_sent_mom_${r.sym}_${r.type}_${_momDate}`;
+    if(!localStorage.getItem(_mKey)){
+      localStorage.setItem(_mKey,'1');
       const dir=r.type==='bull'?'📈 ALCISTA':'📉 BAJISTA';
       const emoji=r.type==='bull'?'🚀':'🔻';
       const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
@@ -2685,6 +2690,10 @@ document.addEventListener('click',e=>{
 async function init(){
   // Restore Finnhub key
   // (dashboard_pin key deprecated — removed)
+  // Clean old Telegram notification keys (keep only today's)
+  const _todayClean=new Date().toLocaleDateString('es-PR');
+  Object.keys(localStorage).filter(k=>k.startsWith('tg_sent_')&&!k.includes(_todayClean))
+    .forEach(k=>localStorage.removeItem(k));
   // Update Telegram button state on load
   if(isTgEnabled()&&getTgToken()&&getTgChat()){
     const btn=document.getElementById('telegramBtn');

@@ -185,7 +185,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
   <div class="card">
     <div style="text-align:center;margin-bottom:10px;">
       <div style="font-size:18px;font-weight:700;color:#fff;">Señales Activas</div>
-      <div style="font-size:11px;color:var(--text2);margin-top:3px;">BB Breakout 15min · Patrón A (Superior) · B (Inferior) · C (Sobreexpuesto) · GOOG · TSLA · SPY</div>
+      <div style="font-size:11px;color:var(--text2);margin-top:3px;">BB Breakout 15min · A (Verde↑) · B (Roja↓) · C (Sobreexp.Alza) · D (Sobreexp.Baja) · GOOG · TSLA · SPY</div>
     </div>
     <div id="signalArea">
       <div style="text-align:center;padding:20px;color:var(--text2);font-size:13px;">⟳ Calculando señales…</div>
@@ -1391,7 +1391,6 @@ async function buildSignals(){
     const volLabel=avgVol15_10>0?` (${(lVol15/avgVol15_10*100).toFixed(0)}% del promedio)`:'';
 
     // ── SETUP — Pre-ruptura, precio cerca de la banda ────────────────────────
-    // BBW bajo + precio cerca de la banda = ruptura inminente — alerta temprana
     const distToUpper=(lUp15-lP15)/lP15*100;
     const distToLower=(lP15-lLow15)/lP15*100;
     const nearUpper=distToUpper>=0&&distToUpper<0.3;
@@ -1411,61 +1410,59 @@ async function buildSignals(){
       ]});
     }
 
-    // ── PATRÓN A — Salida banda SUPERIOR → CALL ──────────────────────────────
-    // Vela perfora banda superior hacia arriba con segunda vela de confirmación
-    const pA_pierce=lH15>lUp15;
-    const pA_bull=lP15>lO15;
-    const pA_higher=lP15>pP15;
-    if(pA_pierce){
-      // Para Patrón A: 1H alineado = precio sobre MA20 O BB superior subiendo
-      const align1hBull_A=lP1h>lMA20_1h||upSlope1h;
+    // PATRÓN A — Vela VERDE perforando banda SUPERIOR → CALL
+    const pA_greenCandle=lP15>lO15;
+    const pA_pierceUpper=lH15>lUp15;
+    const pA_stoch=lK15>lD15&&lK15>40&&lK15<85;
+    if(pA_pierceUpper){
       all.push({...meta,code:'BB-A',name:'BB Salida Superior — CALL',type:'call',reqs:[
-        {ok:pA_pierce,      tf:'15m',text:`Vela perfora banda superior: high $${lH15.toFixed(2)} > BB $${lUp15.toFixed(2)}`},
-        {ok:bbExpandOk,     tf:'15m',text:`BB expandiéndose — volatilidad activa (BBW ${lBBW15.toFixed(1)}%)`},
-        {ok:align1hBull_A,  tf:'1H', text:`1H apoyando: precio $${lP1h.toFixed(2)} ${lP1h>lMA20_1h?'sobre':'cerca de'} MA20 $${lMA20_1h.toFixed(2)}`},
-        {ok:stochCallOk,    tf:'15m',text:`Stochastics: %K (${lK15.toFixed(0)}) sobre %D (${lD15.toFixed(0)})`},
-        {ok:volActive15,    tf:'15m',text:`Volumen activo${volLabel}`},
+        {ok:pA_pierceUpper, tf:'15m',text:`Vela verde perfora banda superior: high $${lH15.toFixed(2)} > BB $${lUp15.toFixed(2)}`},
+        {ok:pA_greenCandle, tf:'15m',text:`Vela alcista: cierre $${lP15.toFixed(2)} > apertura $${lO15.toFixed(2)}`},
+        {ok:volActive15,    tf:'15m',text:`Volumen de compra activo${volLabel}`},
+        {ok:pA_stoch,       tf:'15m',text:`Worden: %K (${lK15.toFixed(0)}) sobre %D (${lD15.toFixed(0)}) — momentum alcista`},
+        {ok:lBBW15>1.0,     tf:'15m',text:`BB con volatilidad (BBW ${lBBW15.toFixed(1)}%)`},
       ]});
     }
 
-    // ── PATRÓN B — Salida banda INFERIOR → PUT ───────────────────────────────
-    // Vela perfora banda inferior hacia abajo
-    const pB_pierce=lL15<lLow15;
-    const pB_bear=lP15<lO15;
-    if(pB_pierce){
-      // Para Patrón B: 1H alineado = precio bajo MA20 O BB inferior bajando
-      const align1hBear_B=lP1h<lMA20_1h||loSlope1h;
+    // PATRÓN B — Vela ROJA perforando banda INFERIOR → PUT
+    const pB_redCandle=lP15<lO15;
+    const pB_pierceLower=lL15<lLow15;
+    const pB_stoch=lK15<lD15&&lK15<60&&lK15>15;
+    if(pB_pierceLower){
       all.push({...meta,code:'BB-B',name:'BB Salida Inferior — PUT',type:'put',reqs:[
-        {ok:pB_pierce,      tf:'15m',text:`Vela perfora banda inferior: low $${lL15.toFixed(2)} < BB $${lLow15.toFixed(2)}`},
-        {ok:bbExpandOk,     tf:'15m',text:`BB expandiéndose — volatilidad activa (BBW ${lBBW15.toFixed(1)}%)`},
-        {ok:align1hBear_B,  tf:'1H', text:`1H apoyando: precio $${lP1h.toFixed(2)} ${lP1h<lMA20_1h?'bajo':'cerca de'} MA20 $${lMA20_1h.toFixed(2)}`},
-        {ok:stochPutOk,     tf:'15m',text:`Stochastics: %K (${lK15.toFixed(0)}) bajo %D (${lD15.toFixed(0)})`},
-        {ok:volActive15,    tf:'15m',text:`Volumen activo${volLabel}`},
+        {ok:pB_pierceLower, tf:'15m',text:`Vela roja perfora banda inferior: low $${lL15.toFixed(2)} < BB $${lLow15.toFixed(2)}`},
+        {ok:pB_redCandle,   tf:'15m',text:`Vela bajista: cierre $${lP15.toFixed(2)} < apertura $${lO15.toFixed(2)}`},
+        {ok:volActive15,    tf:'15m',text:`Volumen de venta activo${volLabel}`},
+        {ok:pB_stoch,       tf:'15m',text:`Worden: %K (${lK15.toFixed(0)}) bajo %D (${lD15.toFixed(0)}) — momentum bajista`},
+        {ok:lBBW15>1.0,     tf:'15m',text:`BB con volatilidad (BBW ${lBBW15.toFixed(1)}%)`},
       ]});
     }
 
-    // ── PATRÓN C — Sobreexpuesto → regreso a la media ────────────────────────
-    // Vela completamente fuera de la banda (cuerpo Y mechas) → señal contraria
-    const pC_above=lL15>lUp15;   // toda la vela sobre BB superior → PUT (regresa abajo)
-    const pC_below=lH15<lLow15;  // toda la vela bajo BB inferior → CALL (regresa arriba)
-    const pC_returnDown=pC_above&&lP15<lO15; // primera vela bajista = empieza regreso
-    const pC_returnUp=pC_below&&lP15>lO15;   // primera vela alcista = empieza regreso
-    if(pC_returnUp){
-      all.push({...meta,code:'BB-C',name:'BB Sobreexpuesto — CALL (regreso)',type:'call',reqs:[
-        {ok:pC_below,     tf:'15m',text:`Vela COMPLETA bajo banda inferior: high $${lH15.toFixed(2)} < BB $${lLow15.toFixed(2)}`},
-        {ok:bbExpandOk,   tf:'15m',text:`BB expandiéndose — volatilidad activa (BBW ${lBBW15.toFixed(1)}%)`},
-        {ok:pC_returnUp,  tf:'15m',text:`Primera vela de regreso alcista ($${lP15.toFixed(2)} > apertura $${lO15.toFixed(2)})`},
-        {ok:stochCallOk,  tf:'15m',text:`Stochastics apoyando regreso: %K (${lK15.toFixed(0)}) > %D (${lD15.toFixed(0)})`},
-        {ok:volActive15,  tf:'15m',text:`Volumen activo${volLabel}`},
+    // PATRÓN C — Sobreexpuesto AL ALZA → PUT (regreso)
+    const pC_aboveBB=lL15>lUp15;
+    const pC_redReturn=lP15<lO15;
+    const pC_stochOB=lK15>75;
+    if(pC_aboveBB){
+      all.push({...meta,code:'BB-C',name:'BB Sobreexpuesto Alza — PUT (regreso)',type:'put',reqs:[
+        {ok:pC_aboveBB,     tf:'15m',text:`Vela COMPLETA sobre banda superior: low $${lL15.toFixed(2)} > BB $${lUp15.toFixed(2)}`},
+        {ok:pC_redReturn,   tf:'15m',text:`Primera vela bajista de regreso ($${lP15.toFixed(2)} < apertura $${lO15.toFixed(2)})`},
+        {ok:pC_stochOB,     tf:'15m',text:`Worden sobrecomprado: %K (${lK15.toFixed(0)}) > 75`},
+        {ok:volActive15,    tf:'15m',text:`Volumen confirmando${volLabel}`},
+        {ok:lBBW15>1.0,     tf:'15m',text:`BB con volatilidad (BBW ${lBBW15.toFixed(1)}%)`},
       ]});
     }
-    if(pC_returnDown){
-      all.push({...meta,code:'BB-C',name:'BB Sobreexpuesto — PUT (regreso)',type:'put',reqs:[
-        {ok:pC_above,     tf:'15m',text:`Vela COMPLETA sobre banda superior: low $${lL15.toFixed(2)} > BB $${lUp15.toFixed(2)}`},
-        {ok:bbExpandOk,   tf:'15m',text:`BB expandiéndose — volatilidad activa (BBW ${lBBW15.toFixed(1)}%)`},
-        {ok:pC_returnDown,tf:'15m',text:`Primera vela de regreso bajista ($${lP15.toFixed(2)} < apertura $${lO15.toFixed(2)})`},
-        {ok:stochPutOk,   tf:'15m',text:`Stochastics apoyando regreso: %K (${lK15.toFixed(0)}) < %D (${lD15.toFixed(0)})`},
-        {ok:volActive15,  tf:'15m',text:`Volumen activo${volLabel}`},
+
+    // PATRÓN D — Sobreexpuesto A LA BAJA → CALL (rebote)
+    const pD_belowBB=lH15<lLow15;
+    const pD_greenReturn=lP15>lO15;
+    const pD_stochOS=lK15<25;
+    if(pD_belowBB){
+      all.push({...meta,code:'BB-D',name:'BB Sobreexpuesto Baja — CALL (rebote)',type:'call',reqs:[
+        {ok:pD_belowBB,     tf:'15m',text:`Vela COMPLETA bajo banda inferior: high $${lH15.toFixed(2)} < BB $${lLow15.toFixed(2)}`},
+        {ok:pD_greenReturn, tf:'15m',text:`Primera vela alcista de rebote ($${lP15.toFixed(2)} > apertura $${lO15.toFixed(2)})`},
+        {ok:pD_stochOS,     tf:'15m',text:`Worden sobrevendido: %K (${lK15.toFixed(0)}) < 25`},
+        {ok:volActive15,    tf:'15m',text:`Volumen confirmando${volLabel}`},
+        {ok:lBBW15>1.0,     tf:'15m',text:`BB con volatilidad (BBW ${lBBW15.toFixed(1)}%)`},
       ]});
     }
   }

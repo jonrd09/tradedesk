@@ -841,7 +841,8 @@ async function fetchSchwabCandles(sym,freqType,freq,bars=50){
   for(const cfg of configs){
     try{
       const fetchBars=cfg._merge1h?bars*2:bars;
-      const url=`${SCHWAB_API_BASE}/pricehistory?symbol=${sym}&periodType=${cfg.periodType}&period=${cfg.period}&frequencyType=${cfg.frequencyType}&frequency=${cfg.frequency}&needExtendedHoursData=true`;
+      const isDaily=cfg.frequencyType==='daily';
+      const url=`${SCHWAB_API_BASE}/pricehistory?symbol=${sym}&periodType=${cfg.periodType}&period=${cfg.period}&frequencyType=${cfg.frequencyType}&frequency=${cfg.frequency}&needExtendedHoursData=${isDaily}`;
       const r=await fetch(url,{headers:{'Authorization':'Bearer '+token},signal:AbortSignal.timeout(18000)});
       if(!r.ok){
         // Only log if this is the LAST config (no more fallbacks)
@@ -1276,6 +1277,15 @@ async function buildSignals(){
   const area=document.getElementById('signalArea');
   area.innerHTML='<div style="text-align:center;padding:20px;color:var(--text2);font-size:13px;">⟳ Obteniendo datos reales…</div>';
   const all=[];
+  // Check market hours — skip after hours (low volume, unreliable signals)
+  const _etSig=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+  const _sigMins=_etSig.getHours()*60+_etSig.getMinutes();
+  const _sigDay=_etSig.getDay();
+  const _isMarketHours=_sigDay>=1&&_sigDay<=5&&_sigMins>=515&&_sigMins<960; // 8:35AM-4PM
+  if(!_isMarketHours&&!_testMode){
+    area.innerHTML='<div style="text-align:center;padding:30px;color:var(--text2);font-size:13px;"><div style="font-size:28px;margin-bottom:10px">🌙</div><div style="font-weight:600;">Mercado cerrado</div><div style="font-size:12px;margin-top:8px;color:var(--text3);">Las señales solo están disponibles durante horario de mercado (8:35 AM – 4:00 PM ET)</div></div>';
+    return;
+  }
   // Global safety timeout — never leave spinner stuck
   const _sigTimeout=setTimeout(()=>{
     if(area.innerHTML.includes('⟳'))
@@ -1452,7 +1462,7 @@ async function buildSignals(){
         {ok:setupBull||setupBear,    tf:'15m',text:`Precio a ${setupDist}% de banda ${setupDir} ($${(setupBull?lUp15:lLow15).toFixed(2)})`},
         {ok:setupBull?lP15>lMA20_15:lP15<lMA20_15,tf:'15m',text:`MA20 alineada: precio ${setupBull?'sobre':'bajo'} $${lMA20_15.toFixed(2)}`},
         {ok:stochCallOk||stochPutOk, tf:'15m',text:`Stochastics apoyando dirección (%K ${lK15.toFixed(0)})`},
-        {ok:true,                    tf:'15m',text:'⚡ Prepárate — ruptura inminente'},
+        {ok:bbwRising,               tf:'15m',text:`BBW subiendo activamente (${lBBW15.toFixed(1)}% > ${lBBW15_1.toFixed(1)}%)`},
       ]});
     }
 

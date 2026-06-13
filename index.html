@@ -2666,25 +2666,15 @@ async function checkMarketBlockMove(){
   const type=allUp?'CALLS':'PUTS';
   const time=et.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true});
 
-  const lines=moves.map(m=>`  ${m.sym}: ${m.pct>=0?'+':''}${m.pct}%`).join('
-');
+  const lines=moves.map(m=>m.sym+': '+(m.pct>=0?'+':'')+m.pct+'%').join(' | ');
   const avgPct=(moves.reduce((s,m)=>s+m.pct,0)/moves.length).toFixed(2);
-
-  const msg=`${emoji} *MOVIMIENTO EN BLOQUE ${dir}*
-
-`+
-    `📊 Los 4 índices principales se mueven juntos:
-${lines}
-
-`+
-    `📈 Promedio: ${avgPct>=0?'+':''}${avgPct}% en las últimas 4H
-`+
-    `💡 Favorable para *${type}*
-`+
-    `🕐 ${time} ET
-
-`+
-    `_TradeDesk Pro_`;
+  const avgSign=parseFloat(avgPct)>=0?'+':'';
+  const msg=emoji+' *MOVIMIENTO EN BLOQUE '+dir+'*\n\n'+
+    '\xF0\x9F\x93\x8A Los 4 índices se mueven juntos:\n'+lines+'\n\n'+
+    '\xF0\x9F\x93\x88 Promedio: '+avgSign+avgPct+'% en las últimas 4H\n'+
+    '\xF0\x9F\x92\xA1 Favorable para *'+type+'*\n'+
+    '\xF0\x9F\x95\x90 '+time+' ET\n\n'+
+    '_TradeDesk Pro_';
 
   await sendTelegram(msg, getTgToken(), getTgChat());
 }

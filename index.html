@@ -2618,6 +2618,78 @@ document.addEventListener('click',e=>{
 });
 
 // ═══════════════════════════════════════════════════════════════
+// MARKET BLOCK MOVE DETECTOR
+// Detecta cuando SPY, QQQ, DIA, IWM se mueven en bloque ≥1.5% en 4H
+// ═══════════════════════════════════════════════════════════════
+async function checkMarketBlockMove(){
+  if(!isTgEnabled()||!getTgToken()||!getTgChat())return;
+  const schwabToken=await getSchwabToken();
+  if(!schwabToken)return;
+
+  const indices=['SPY','QQQ','DIA','IWM'];
+  const moves=[];
+
+  for(const sym of indices){
+    try{
+      const data=await Promise.race([
+        fetchSchwabCandles(sym,'minute',60,5), // last 5 1H candles
+        new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),10000))
+      ]).catch(()=>null);
+      if(!data||closes(data).length<4)continue;
+      const c=closes(data);
+      const n=c.length;
+      // Movement over last 4 candles
+      const start=c[n-4]||c[0];
+      const end=c[n-1];
+      const pct=start>0?(end-start)/start*100:0;
+      moves.push({sym,pct:+pct.toFixed(2),start,end});
+      await new Promise(r=>setTimeout(r,300));
+    }catch(e){}
+  }
+
+  if(moves.length<4)return; // need all 4
+
+  const threshold=1.5;
+  const allUp  =moves.every(m=>m.pct>= threshold);
+  const allDown=moves.every(m=>m.pct<=-threshold);
+
+  if(!allUp&&!allDown)return;
+
+  // Anti-duplicate: once per hour per direction
+  const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+  const hourKey=`block_${allUp?'up':'down'}_${et.toLocaleDateString('es-PR')}_${et.getHours()}`;
+  if(localStorage.getItem(hourKey))return;
+  localStorage.setItem(hourKey,'1');
+
+  const dir=allUp?'📈 ALCISTA':'📉 BAJISTA';
+  const emoji=allUp?'🚀':'🔻';
+  const type=allUp?'CALLS':'PUTS';
+  const time=et.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true});
+
+  const lines=moves.map(m=>`  ${m.sym}: ${m.pct>=0?'+':''}${m.pct}%`).join('
+');
+  const avgPct=(moves.reduce((s,m)=>s+m.pct,0)/moves.length).toFixed(2);
+
+  const msg=`${emoji} *MOVIMIENTO EN BLOQUE ${dir}*
+
+`+
+    `📊 Los 4 índices principales se mueven juntos:
+${lines}
+
+`+
+    `📈 Promedio: ${avgPct>=0?'+':''}${avgPct}% en las últimas 4H
+`+
+    `💡 Favorable para *${type}*
+`+
+    `🕐 ${time} ET
+
+`+
+    `_TradeDesk Pro_`;
+
+  await sendTelegram(msg, getTgToken(), getTgChat());
+}
+
+// ═══════════════════════════════════════════════════════════════
 // TELEGRAM NOTIFICATIONS
 // ═══════════════════════════════════════════════════════════════
 function _tgEncode(s){return btoa(_xor(s,'tg_tdp_2025'));}
@@ -2805,6 +2877,7 @@ async function init(){
 
     // Delay rotation load to avoid rate limit burst on startup
     setTimeout(()=>loadRotation(),5000);
+  setTimeout(()=>checkMarketBlockMove(),8000);
   }else{
     // No key — don't make any API calls
     document.getElementById('signalArea').innerHTML='<div style="text-align:center;padding:30px;color:var(--text2);font-size:13px;"><div style="font-size:28px;margin-bottom:10px">🔑</div><div style="font-weight:600;">Configura tu API key</div><div style="font-size:11px;margin-top:6px;color:var(--text3)">Haz clic en el botón Finnhub en el topbar</div></div>';
@@ -2836,6 +2909,7 @@ async function init(){
       await loadLivePrices();
       await buildSignals();
       await buildMomentum();
+      await checkMarketBlockMove();
     }
   },10*60*1000);
 }

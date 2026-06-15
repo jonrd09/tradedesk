@@ -3168,17 +3168,18 @@ async function fh(ep) {
   return r.json();
 }
 const histCache = {};
-async function getHist(sym,days=220) {
-  const key=sym+'_d';
-  if (histCache[key]&&Date.now()-histCache[key].ts<600000) return histCache[key].data;
-  const now=Math.floor(Date.now()/1000), from=now-86400*(days+15);
-  const url=`https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=1d&period1=${from}&period2=${now}`;
-  const proxy=`https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
-  const r=await fetch(proxy); if(!r.ok) throw new Error('proxy err');
-  const j=await r.json(), d=JSON.parse(j.contents);
-  const res=d?.chart?.result?.[0]; if(!res) throw new Error('no data');
-  const data=res.timestamp.map((t,i)=>({t,c:res.indicators.quote[0].close[i]})).filter(x=>x.c!=null);
-  histCache[key]={ts:Date.now(),data};
+async function getHist(sym, days=220) {
+  const key = sym+'_d';
+  if (histCache[key] && Date.now()-histCache[key].ts < 600000) return histCache[key].data;
+  // Use Finnhub stock candles instead of Yahoo Finance proxy
+  const now = Math.floor(Date.now()/1000);
+  const from = now - 86400 * (days + 15);
+  const r = await fetch(`https://finnhub.io/api/v1/stock/candle?symbol=${sym}&resolution=D&from=${from}&to=${now}&token=${APIKEY}`);
+  if (!r.ok) throw new Error('Finnhub HTTP ' + r.status);
+  const d = await r.json();
+  if (!d || d.s === 'no_data' || !d.c || !d.t) throw new Error('no data for ' + sym);
+  const data = d.t.map((t, i) => ({t, c: d.c[i]})).filter(x => x.c != null);
+  histCache[key] = {ts: Date.now(), data};
   return data;
 }
 

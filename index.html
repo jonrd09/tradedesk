@@ -3116,9 +3116,18 @@ updateClock();
 /* ═══════════════════════════════
    localStorage KEY
 ═══════════════════════════════ */
-function saveKey(k){ localStorage.setItem('levetf_apikey',k); }
-function loadKey(){ return localStorage.getItem('levetf_apikey')||''; }
-function clearKey(){ localStorage.removeItem('levetf_apikey'); }
+// Use same key storage as TradeDesk Pro
+function saveKey(k){
+  try{localStorage.setItem('finnhub_key',k);}catch(e){}
+  try{localStorage.setItem('levetf_apikey',k);}catch(e){}
+}
+function loadKey(){
+  return localStorage.getItem('finnhub_key')||localStorage.getItem('levetf_apikey')||'';
+}
+function clearKey(){
+  localStorage.removeItem('levetf_apikey');
+  // Don't remove finnhub_key — TradeDesk Pro still needs it
+}
 
 function showKeyPill() {
   const slot = document.getElementById('ms-key-slot');
@@ -3163,7 +3172,9 @@ async function msConnect() {
    API HELPERS
 ═══════════════════════════════ */
 async function fh(ep) {
-  const r = await fetch(`https://finnhub.io/api/v1${ep}&token=${APIKEY}`);
+  const key = APIKEY || loadKey();
+  if (!key) throw new Error('No Finnhub API key');
+  const r = await fetch(`https://finnhub.io/api/v1${ep}&token=${key}`);
   if (!r.ok) throw new Error('Finnhub HTTP '+r.status);
   return r.json();
 }
@@ -3174,7 +3185,7 @@ async function getHist(sym, days=220) {
   // Use Finnhub stock candles instead of Yahoo Finance proxy
   const now = Math.floor(Date.now()/1000);
   const from = now - 86400 * (days + 15);
-  const r = await fetch(`https://finnhub.io/api/v1/stock/candle?symbol=${sym}&resolution=D&from=${from}&to=${now}&token=${APIKEY}`);
+  const r = await fetch(`https://finnhub.io/api/v1/stock/candle?symbol=${sym}&resolution=D&from=${from}&to=${now}&token=${APIKEY||loadKey()}`);
   if (!r.ok) throw new Error('Finnhub HTTP ' + r.status);
   const d = await r.json();
   if (!d || d.s === 'no_data' || !d.c || !d.t) throw new Error('no data for ' + sym);

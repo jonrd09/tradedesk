@@ -118,16 +118,16 @@ body{background:var(--bg);color:var(--text);font-family:var(--font);font-size:14
 /* TOP BAR */
 .ms-wrap .topbar{display:flex;align-items:center;justify-content:space-between;padding:0 1.5rem;height:54px;background:var(--bg2);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:100;}
 .ms-wrap .brand{display:flex;align-items:center;gap:10px;}
-.logo{width:28px;height:28px;background:var(--green);border-radius:6px;display:flex;align-items:center;justify-content:center;}
+.ms-wrap .ms-logo{width:28px;height:28px;background:var(--green);border-radius:6px;display:flex;align-items:center;justify-content:center;}
 .logo svg{width:15px;height:15px;}
-.brand-name{font-size:14px;font-weight:700;letter-spacing:-.3px;}
-.brand-tag{font-size:10px;color:var(--muted);font-family:var(--mono);background:var(--bg3);border:1px solid var(--border);padding:2px 8px;border-radius:20px;}
+.ms-wrap .brand-name{font-size:14px;font-weight:700;letter-spacing:-.3px;}
+.ms-wrap .brand-tag{font-size:10px;color:var(--muted);font-family:var(--mono);background:var(--bg3);border:1px solid var(--border);padding:2px 8px;border-radius:20px;}
 .topbar-r{display:flex;align-items:center;gap:8px;}
-.market-time{font-size:12px;font-family:var(--mono);color:var(--muted);}
-.market-status{font-size:11px;font-family:var(--mono);padding:3px 10px;border-radius:20px;font-weight:600;}
-.ms-open{background:var(--gd);color:var(--green);border:1px solid var(--gb);}
-.ms-closed{background:var(--rd);color:var(--red);border:1px solid var(--rb);}
-.ms-pre{background:var(--ad);color:var(--amber);border:1px solid var(--ab);}
+.ms-wrap .market-time{font-size:12px;font-family:var(--mono);color:var(--muted);}
+.ms-wrap .market-status{font-size:11px;font-family:var(--mono);padding:3px 10px;border-radius:20px;font-weight:600;}
+.ms-wrap .ms-open{background:var(--gd);color:var(--green);border:1px solid var(--gb);}
+.ms-wrap .ms-closed{background:var(--rd);color:var(--red);border:1px solid var(--rb);}
+.ms-wrap .ms-pre{background:var(--ad);color:var(--amber);border:1px solid var(--ab);}
 .ms-wrap .scan-btn{background:var(--green);border:none;border-radius:7px;color:#070910;font-family:var(--font);font-size:12px;font-weight:700;padding:7px 16px;cursor:pointer;transition:opacity .15s;display:flex;align-items:center;gap:5px;white-space:nowrap;}
 .ms-wrap .scan-btn:hover{opacity:.85;}
 .ms-wrap .scan-btn:disabled{opacity:.35;cursor:not-allowed;}
@@ -270,7 +270,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--font);font-size:14
 .ms-wrap .b-sell{background:var(--rd);color:var(--red);border:1px solid var(--rb);}
 .ms-wrap .b-neu{background:var(--bg4);color:var(--muted);border:1px solid var(--border2);}
 .ms-wrap .b-warn{background:var(--ad);color:var(--amber);}
-.spin{display:inline-block;width:12px;height:12px;border:2px solid var(--border2);border-top-color:var(--green);border-radius:50%;animation:spin .7s linear infinite;vertical-align:-2px;margin-right:4px;}
+.ms-wrap .spin{display:inline-block;width:12px;height:12px;border:2px solid var(--border2);border-top-color:var(--green);border-radius:50%;animation:spin .7s linear infinite;vertical-align:-2px;margin-right:4px;}
 .ms-wrap .err{background:var(--rd);border:1px solid var(--rb);border-radius:7px;padding:9px 12px;font-size:12px;color:var(--red);margin:6px 0;}
 .ms-wrap .key-pill{font-size:10px;font-family:var(--mono);color:var(--green);background:var(--gd);border:1px solid var(--gb);padding:2px 8px;border-radius:20px;cursor:pointer;}
 ::-webkit-scrollbar{width:5px;height:5px;}
@@ -3149,9 +3149,11 @@ async function msConnect() {
     if (!d.c) throw new Error('Respuesta inválida — verifica tu API key');
     APIKEY = k;
     saveKey(k);
+    localStorage.setItem('finnhub_key', k); // sync with TradeDesk's key
     document.getElementById('ms-gate').style.display='none';
     document.getElementById('ms-wrap-inner').style.display='block';
-    document.getElementById('scanbtn').disabled=false;
+    const btn=document.getElementById('scanbtn');
+    if(btn){btn.disabled=false;btn.style.opacity='1';}
     showKeyPill();
     init();
   } catch(e){ alert('Error: '+e.message); }
@@ -3706,14 +3708,27 @@ async function manualScan(){
    AUTO-INIT FROM SAVED KEY
 ═══════════════════════════════ */
 (function(){
-  const saved=loadKey();
-  if(saved){
-    APIKEY=saved;
-    document.getElementById('ms-gate').style.display='none';
-    document.getElementById('ms-wrap-inner').style.display='block';
-    document.getElementById('scanbtn').disabled=false;
-    showKeyPill();
-    setTimeout(init,100);
+  // Run after DOM is ready
+  function msAutoInit(){
+    // Try saved levetf key first, then fallback to TradeDesk's finnhub key
+    const saved=loadKey()||localStorage.getItem('finnhub_key')||'';
+    if(saved){
+      APIKEY=saved;
+      if(!loadKey()) saveKey(saved); // save it for future use
+      const gate=document.getElementById('ms-gate');
+      const wrap=document.getElementById('ms-wrap-inner');
+      const btn=document.getElementById('scanbtn');
+      if(gate) gate.style.display='none';
+      if(wrap) wrap.style.display='block';
+      if(btn){ btn.disabled=false; btn.style.opacity='1'; }
+      showKeyPill();
+      setTimeout(init,200);
+    }
+  }
+  if(document.readyState==='loading'){
+    document.addEventListener('DOMContentLoaded', msAutoInit);
+  } else {
+    setTimeout(msAutoInit, 100);
   }
 })();
 

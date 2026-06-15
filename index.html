@@ -3710,27 +3710,29 @@ async function manualScan(){
    AUTO-INIT FROM SAVED KEY
 ═══════════════════════════════ */
 (function(){
-  // Run after DOM is ready
   function msAutoInit(){
-    // Try saved levetf key first, then fallback to TradeDesk's finnhub key
-    const saved=loadKey()||localStorage.getItem('finnhub_key')||'';
-    if(saved){
-      APIKEY=saved;
-      if(!loadKey()) saveKey(saved); // save it for future use
-      const gate=document.getElementById('ms-gate');
-      const wrap=document.getElementById('ms-wrap-inner');
-      const btn=document.getElementById('scanbtn');
-      if(gate) gate.style.display='none';
-      if(wrap) wrap.style.display='block';
-      if(btn){ btn.disabled=false; btn.style.opacity='1'; }
+    // Use TradeDesk's getKey() which handles decryption properly
+    const saved = (typeof getKey === 'function' ? getKey() : '') ||
+                  localStorage.getItem('finnhub_key') ||
+                  localStorage.getItem('levetf_apikey') || '';
+    if(saved && saved.length > 8){
+      APIKEY = saved;
+      saveKey(saved);
+      const gate = document.getElementById('ms-gate');
+      const wrap = document.getElementById('ms-wrap-inner');
+      const btn  = document.getElementById('scanbtn');
+      if(gate) gate.style.display = 'none';
+      if(wrap) wrap.style.display = 'block';
+      if(btn){ btn.disabled = false; btn.style.opacity = '1'; }
       showKeyPill();
-      setTimeout(init,200);
+      setTimeout(init, 300);
     }
   }
-  if(document.readyState==='loading'){
-    document.addEventListener('DOMContentLoaded', msAutoInit);
+  // Wait longer to ensure TradeDesk's getKey() is available
+  if(document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', ()=>setTimeout(msAutoInit, 500));
   } else {
-    setTimeout(msAutoInit, 100);
+    setTimeout(msAutoInit, 500);
   }
 })();
 

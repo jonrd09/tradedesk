@@ -3491,23 +3491,8 @@ function scoreETF(etf, vix) {
    RENDER FUNCTIONS
 ═══════════════════════════════ */
 function renderContextBar(spyQ,qqqQ,vixQ,vix){
-  const sp=spyQ?spyQ.dp.toFixed(2):'0', qq=qqqQ?qqqQ.dp.toFixed(2):'0';
-  const mktDir=(parseFloat(sp)+parseFloat(qq))/2;
-  const mc=mktDir>0.3?'var(--gd)':mktDir<-0.3?'var(--rd)':'var(--ad)';
-  const mt=mktDir>0.3?'var(--green)':mktDir<-0.3?'var(--red)':'var(--amber)';
-  const vc=vix<15?'var(--green)':vix<25?'var(--amber)':'var(--red)';
-  const vr=vix<15?'✓ Ideal x3':vix<20?'→ Usar x2':vix<25?'⚠ Reducir':'✗ Evitar x3';
-  function cc(lbl,val,chg,rec,rc,rt){
-    const pos=parseFloat(chg)>=0;
-    return `<div class="ctx-card"><div class="ctx-label">${lbl}</div><div class="ctx-val" style="color:${pos?'var(--green)':'var(--red)'};">${val}</div><div class="ctx-chg ${pos?'pos':'neg'}">${pos?'+':''}${chg}%</div><div class="ctx-rec" style="background:${rc};color:${rt};">${rec}</div></div>`;
-  }
-  document.getElementById('ms-ctx-bar').innerHTML=
-    cc('SPY',spyQ?'$'+spyQ.c.toFixed(2):'—',sp,'S&P 500',mc,mt)+
-    cc('QQQ',qqqQ?'$'+qqqQ.c.toFixed(2):'—',qq,'Nasdaq 100',mc,mt)+
-    `<div class="ctx-card"><div class="ctx-label">VIX (VXX)</div><div class="ctx-val" style="color:${vc};">${vix.toFixed(2)}</div><div class="ctx-chg" style="color:${parseFloat(vixQ?.dp||0)>=0?'var(--red)':'var(--green)'};">${parseFloat(vixQ?.dp||0)>=0?'+':''}${(vixQ?.dp||0).toFixed(2)}%</div><div class="ctx-rec" style="background:${vc==='var(--green)'?'var(--gd)':vc==='var(--amber)'?'var(--ad)':'var(--rd)'};color:${vc};">${vr}</div></div>`+
-    `<div class="ctx-card"><div class="ctx-label">Dirección mercado</div><div class="ctx-val" style="font-size:13px;color:${mt};margin-top:4px;">${mktDir>0.3?'Alcista ↑':mktDir<-0.3?'Bajista ↓':'Lateral →'}</div><div class="ctx-chg" style="color:var(--muted);">SPY ${parseFloat(sp)>=0?'+':''}${sp}% · QQQ ${parseFloat(qq)>=0?'+':''}${qq}%</div><div class="ctx-rec" style="background:${mc};color:${mt};">${mktDir>0.3?'Alcistas fav.':mktDir<-0.3?'Bajistas fav.':'Esperar dirección'}</div></div>`+
-    `<div class="ctx-card"><div class="ctx-label">Objetivo intraday</div><div class="ctx-val" style="color:var(--green);font-size:13px;">+1.25% – +2%</div><div class="ctx-chg" style="color:var(--muted);">Stop: −6% (x3) · −8% (x2)</div><div class="ctx-rec" style="background:var(--gd);color:var(--green);">Salir antes 4pm ET</div></div>`;
-  document.getElementById('ms-ctx-bar').style.display='grid';
+  // Context bar hidden per user preference
+  document.getElementById('ms-ctx-bar').style.display='none';
 }
 
 function showPreMarketVerdict(){
@@ -3623,7 +3608,12 @@ function buildRankHTML(scored, isFinal){
     const moTxt=e.mo!==null?`<div style="font-size:9px;font-family:var(--mono);color:${e.mo*(e.dir||1)>0?'var(--green)':'var(--red)'};">${e.mo>=0?'+':''}${e.mo.toFixed(2)}% desde apertura</div>`:'<div style="font-size:9px;color:var(--muted2);">apertura pendiente</div>';
     html+=`<div class="rank-row" id="rr-${e.t}" onclick="toggleExpand('${e.t}')">
       <div class="rnum ${nc}">${nums[i]}</div>
-      <div><div class="rc-ticker" style="color:${e.dir===1?'var(--green)':'var(--red)'};">${e.t}</div><div class="rc-name">${e.mult}x ${e.dir===1?'alcista':'bajista'}</div></div>
+      <div>
+        <div class="rc-ticker" style="color:${e.dir===1?'var(--green)':'var(--red)'};">${e.t}</div>
+        <div class="rc-name" style="color:${e.dir===1?'rgba(0,229,160,.7)':'rgba(255,71,87,.7)'};">
+          ${e.dir===1?(e.mult===3?'Bull 3x':e.mult===2?'Bull 2x':'Bull 1x'):(e.mult===3?'Short 3x':e.mult===2?'Short 2x':'Inv 1x')}
+        </div>
+      </div>
       <div class="score-wrap"><div class="score-bar-bg"><div class="score-bar-fill" style="width:${sc}%;background:${scC};"></div></div><div class="score-num" style="color:${scC};">${Math.round(sc)}</div></div>
       <div><div style="font-size:13px;font-family:var(--mono);color:${pos?'var(--green)':'var(--red)'};">$${e.price.toFixed(2)}</div>${moTxt}</div>
       <div class="rc-hide"><div class="entry-col"><div class="el">+1.25%</div><div class="ev pos">$${e.t125.toFixed(2)}</div><div class="el">+2%</div><div class="ev pos">$${e.t200.toFixed(2)}</div></div></div>

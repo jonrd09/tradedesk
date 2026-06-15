@@ -841,8 +841,7 @@ async function fetchSchwabCandles(sym,freqType,freq,bars=50){
   for(const cfg of configs){
     try{
       const fetchBars=cfg._merge1h?bars*2:bars;
-      const isDaily=cfg.frequencyType==='daily';
-      const url=`${SCHWAB_API_BASE}/pricehistory?symbol=${sym}&periodType=${cfg.periodType}&period=${cfg.period}&frequencyType=${cfg.frequencyType}&frequency=${cfg.frequency}&needExtendedHoursData=${isDaily}`;
+      const url=`${SCHWAB_API_BASE}/pricehistory?symbol=${sym}&periodType=${cfg.periodType}&period=${cfg.period}&frequencyType=${cfg.frequencyType}&frequency=${cfg.frequency}&needExtendedHoursData=true`;
       const r=await fetch(url,{headers:{'Authorization':'Bearer '+token},signal:AbortSignal.timeout(18000)});
       if(!r.ok){
         // Only log if this is the LAST config (no more fallbacks)
@@ -1392,16 +1391,23 @@ async function buildSignals(){
     const dailyBearish=bearDays>=2; // al menos 2 de 3 días bajistas
     const dailyBullish=bullDays>=2; // al menos 2 de 3 días alcistas
 
-    // Try to get real-time price from Finnhub for display
+    // Get fresh Finnhub price for accurate display
     let livePrice=realPrice,livePct=realPct;
     const fKey=getKey();
     if(fKey&&fKey.length>8){
       try{
-        const qr=await fetch(`https://finnhub.io/api/v1/quote?symbol=${sym}&token=${fKey}`,{signal:AbortSignal.timeout(3000)});
-        if(qr.ok){const qd=await qr.json();if(qd&&qd.c>0){livePrice=qd.c;livePct=qd.pc>0?+((qd.c-qd.pc)/qd.pc*100).toFixed(2):realPct;}}
+        const qr=await fetch(`https://finnhub.io/api/v1/quote?symbol=${sym}&token=${fKey}`,
+          {signal:AbortSignal.timeout(3000)});
+        if(qr.ok){
+          const qd=await qr.json();
+          if(qd&&qd.c>0){
+            livePrice=qd.c;
+            livePct=qd.pc>0?+((qd.c-qd.pc)/qd.pc*100).toFixed(2):realPct;
+          }
+        }
       }catch(e){}
     }
-    const meta={sym,price:livePrice,pct:livePct,dataLabel,name:DEFAULTS[sym].name,
+    const meta={sym,price:livePrice,pct:livePct,dataLabel:livePrice!==realPrice?'📡 Live':'📡 Schwab',name:DEFAULTS[sym].name,
       _c15:c15.slice(-30),_bb15_up:bb15.upper.filter(v=>v!=null).slice(-30),
       _bb15_lo:bb15.lower.filter(v=>v!=null).slice(-30)
     };

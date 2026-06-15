@@ -1433,7 +1433,7 @@ async function buildSignals(){
     const bb15_prev2=bollinger(c15.slice(0,-2));
     const lBBW15_1=bb15_prev1.upper.filter(v=>v!=null).slice(-1)[0]&&bb15_prev1.lower.filter(v=>v!=null).slice(-1)[0]&&bb15_prev1.mid.filter(v=>v!=null).slice(-1)[0]?(bb15_prev1.upper.filter(v=>v!=null).slice(-1)[0]-bb15_prev1.lower.filter(v=>v!=null).slice(-1)[0])/bb15_prev1.mid.filter(v=>v!=null).slice(-1)[0]*100:0;
     const lBBW15_2=bb15_prev2.upper.filter(v=>v!=null).slice(-1)[0]&&bb15_prev2.lower.filter(v=>v!=null).slice(-1)[0]&&bb15_prev2.mid.filter(v=>v!=null).slice(-1)[0]?(bb15_prev2.upper.filter(v=>v!=null).slice(-1)[0]-bb15_prev2.lower.filter(v=>v!=null).slice(-1)[0])/bb15_prev2.mid.filter(v=>v!=null).slice(-1)[0]*100:0;
-    const isExpanding15=lBBW15>lBBW15_1&&lBBW15_1>lBBW15_2;
+    const isExpanding15=(lBBW15-lBBW15_1)>0.05&&(lBBW15_1-lBBW15_2)>0; // meaningful expansion
     const lVol15=vol15[vol15.length-1]||0;
     const avgVol15_10=vol15.length>=10?vol15.slice(-10).reduce((a,b)=>a+b,0)/10:0;
     const volActive15=avgVol15_10>0?lVol15>avgVol15_10*1.1:true;
@@ -1456,7 +1456,7 @@ async function buildSignals(){
     const nearUpper=distToUpper>=0&&distToUpper<0.3;
     const nearLower=distToLower>=0&&distToLower<0.3;
     // Setup only when price is actively touching the band AND bands are starting to expand
-    const bbwRising=lBBW15>lBBW15_1; // BBW must be rising (expanding)
+    const bbwRising=lBBW15>lBBW15_1+0.05; // BBW must be meaningfully rising (>0.05% increase)
     const setupBull=lBBW15<2.0&&nearUpper&&lP15>lMA20_15&&bbwRising&&lH15>=lUp15*0.998;
     const setupBear=lBBW15<2.0&&nearLower&&lP15<lMA20_15&&bbwRising&&lL15<=lLow15*1.002;
     if(setupBull||setupBear){
@@ -1468,7 +1468,7 @@ async function buildSignals(){
         {ok:setupBull||setupBear,    tf:'15m',text:`Precio a ${setupDist}% de banda ${setupDir} ($${(setupBull?lUp15:lLow15).toFixed(2)})`},
         {ok:setupBull?lP15>lMA20_15:lP15<lMA20_15,tf:'15m',text:`MA20 alineada: precio ${setupBull?'sobre':'bajo'} $${lMA20_15.toFixed(2)}`},
         {ok:stochCallOk||stochPutOk, tf:'15m',text:`Stochastics apoyando dirección (%K ${lK15.toFixed(0)})`},
-        {ok:bbwRising,               tf:'15m',text:`BBW subiendo activamente (${lBBW15.toFixed(1)}% > ${lBBW15_1.toFixed(1)}%)`},
+        {ok:bbwRising,               tf:'15m',text:`BBW expandiéndose: ${lBBW15.toFixed(2)}% vs ${lBBW15_1.toFixed(2)}% anterior`},
       ]});
     }
 

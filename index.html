@@ -831,6 +831,7 @@ function saveKeyModal(){
   window._fk=k;
   try{localStorage.setItem('finnhub_key',k)}catch(e){}
   try{sessionStorage.setItem('finnhub_key',k)}catch(e){}
+  try{localStorage.setItem('ms_fh_key',k)}catch(e){} // plain copy for Morning Scanner
   document.cookie='fk='+encodeURIComponent(k)+';max-age='+365*24*3600+';path=/;SameSite=Lax';
   document.getElementById('keyModal').style.display='none';
   updateFinnhubBtn(true);
@@ -946,6 +947,7 @@ async function handleSchwabCallback(){
     localStorage.setItem('schwab_access_token',d.access_token);
     localStorage.setItem('schwab_refresh_token',d.refresh_token||'');
     localStorage.setItem('schwab_token_expiry',Date.now()+(d.expires_in||1800)*1000);
+    localStorage.setItem('schwab_refresh_expiry',Date.now()+7*24*60*60*1000); // refresh token lasts 7 days
     localStorage.removeItem('schwab_oauth_state');
     window.history.replaceState({},document.title,SCHWAB_REDIRECT);
     updateSchwabStatus();
@@ -1016,7 +1018,11 @@ async function getSchwabToken(){
       const d=await r.json();
       if(!d.access_token){addLog('error','Schwab','Respuesta sin access_token');return null;}
       localStorage.setItem('schwab_access_token',d.access_token);
-      if(d.refresh_token)localStorage.setItem('schwab_refresh_token',d.refresh_token);
+      if(d.refresh_token){
+        localStorage.setItem('schwab_refresh_token',d.refresh_token);
+        // Schwab rotates refresh token — update its expiry
+        localStorage.setItem('schwab_refresh_expiry',Date.now()+7*24*60*60*1000);
+      }
       localStorage.setItem('schwab_token_expiry',Date.now()+(d.expires_in||1800)*1000);
       _updateSchwabBtn(true);
       return d.access_token;
@@ -3158,7 +3164,8 @@ async function msConnect() {
     if (!d.c) throw new Error('Respuesta inválida — verifica tu API key');
     APIKEY = k;
     saveKey(k);
-    localStorage.setItem('finnhub_key', k); // sync with TradeDesk's key
+    try{localStorage.setItem('finnhub_key', k);}catch(e){}
+    try{localStorage.setItem('ms_fh_key', k);}catch(e){}
     document.getElementById('ms-gate').style.display='none';
     document.getElementById('ms-wrap-inner').style.display='block';
     const btn=document.getElementById('scanbtn');
@@ -3712,9 +3719,11 @@ async function manualScan(){
 (function(){
   function msAutoInit(){
     // Use TradeDesk's getKey() which handles decryption properly
-    const saved = (typeof getKey === 'function' ? getKey() : '') ||
-                  localStorage.getItem('finnhub_key') ||
-                  localStorage.getItem('levetf_apikey') || '';
+    // ms_fh_key is a plain-text copy saved when Finnhub is configured in TradeDesk
+    const saved = localStorage.getItem('ms_fh_key') ||
+                  localStorage.getItem('levetf_apikey') ||
+                  (typeof getKey === 'function' ? getKey() : '') ||
+                  localStorage.getItem('finnhub_key') || '';
     if(saved && saved.length > 8){
       APIKEY = saved;
       saveKey(saved);
@@ -3730,9 +3739,9 @@ async function manualScan(){
   }
   // Wait longer to ensure TradeDesk's getKey() is available
   if(document.readyState === 'loading'){
-    document.addEventListener('DOMContentLoaded', ()=>setTimeout(msAutoInit, 500));
+    document.addEventListener('DOMContentLoaded', ()=>setTimeout(msAutoInit, 100));
   } else {
-    setTimeout(msAutoInit, 500);
+    setTimeout(msAutoInit, 100);
   }
 })();
 
@@ -3823,7 +3832,39 @@ async function init(){
   window._tokenInterval=setInterval(async()=>{
     const tok=localStorage.getItem('schwab_access_token');
     const exp=parseInt(localStorage.getItem('schwab_token_expiry')||'0');
-    if(tok&&exp&&Date.now()>exp-600000)await getSchwabToken();
+    if(tok&&exp&&Date.now()>exp-600000) await getSchwabToken();
+
+    // Check refresh token expiry — warn via Telegram 12h before it expires
+    const refreshExp=parseInt(localStorage.getItem('schwab_refresh_expiry')||'0');
+    if(refreshExp>0){
+      const hoursLeft=(refreshExp-Date.now())/(1000*60*60);
+      if(hoursLeft>0&&hoursLeft<=12){
+        const warnKey=`schwab_refresh_warned_${new Date().toLocaleDateString('es-PR')}`;
+        if(!localStorage.getItem(warnKey)){
+          localStorage.setItem(warnKey,'1');
+          const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+          const time=et.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true});
+          const msg='⚠️ *SCHWAB — Sesión por expirar*\n\n'+
+            '🔑 Tu sesión de Schwab expira en '+Math.round(hoursLeft)+' horas\n'+
+            '📱 Abre TradeDesk Pro y reconecta Schwab\n'+
+            '🕐 '+time+' ET\n\n'+
+            '_Reconecta antes de que expire para no perder señales_';
+          getTgToken()&&sendTelegram(msg,getTgToken(),getTgChat());
+          addLog('warn','Schwab','Sesión de Schwab expira en '+Math.round(hoursLeft)+'h — reconecta pronto');
+        }
+      } else if(hoursLeft<=0){
+        // Already expired — warn once per day
+        const expKey=`schwab_refresh_expired_${new Date().toLocaleDateString('es-PR')}`;
+        if(!localStorage.getItem(expKey)){
+          localStorage.setItem(expKey,'1');
+          const msg='🔴 *SCHWAB — Sesión expirada*\n\n'+
+            '❌ Tu sesión de Schwab ha expirado\n'+
+            '📱 Abre TradeDesk Pro → botón Schwabs → reconecta\n\n'+
+            '_Sin reconexión no hay señales_';
+          getTgToken()&&sendTelegram(msg,getTgToken(),getTgChat());
+        }
+      }
+    }
   },20*60*1000);
 
   // Auto-refresh señales cada 10 min durante mercado — para no perder señales

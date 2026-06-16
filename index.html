@@ -759,6 +759,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--font);font-size:14
     if(k&&k.length>8){
       window._fk=k;
       try{localStorage.setItem('finnhub_key',k)}catch(e){}
+  try{localStorage.setItem('ms_fh_key',k)}catch(e){} // plain copy for Morning Scanner
       document.cookie='fk='+encodeURIComponent(k)+';max-age='+365*24*3600+';path=/;SameSite=Lax';
     }
   }catch(e){}
@@ -1370,7 +1371,6 @@ async function loadLivePrices(){
   const ks=document.getElementById('keyStatus');
   if(ks){ks.textContent='● Key activa';ks.style.background='var(--green-bg)';ks.style.color='var(--green)';}
   buildSignals();
-  buildMomentum();
   loadRotation();
 }
 
@@ -1936,7 +1936,7 @@ async function buildSignals(){
 // ═══════════════════════════════════════════════════════════════
 async function buildMomentum(){
   const area=document.getElementById('momentumArea');
-  area.innerHTML='<div style="text-align:center;padding:16px;color:var(--text2);font-size:12px;">⟳ Calculando…</div>';
+  if(!area)return; // Morning Scanner replaced momentum panel
   const results=[];
   const _momSkipped=[];
   const _momTimeout=setTimeout(()=>{
@@ -3719,10 +3719,9 @@ async function manualScan(){
 (function(){
   function msAutoInit(){
     // Use TradeDesk's getKey() which handles decryption properly
-    // ms_fh_key is a plain-text copy saved when Finnhub is configured in TradeDesk
+    // Read key directly from localStorage — ms_fh_key or finnhub_key (both plain text)
     const saved = localStorage.getItem('ms_fh_key') ||
                   localStorage.getItem('levetf_apikey') ||
-                  (typeof getKey === 'function' ? getKey() : '') ||
                   localStorage.getItem('finnhub_key') || '';
     if(saved && saved.length > 8){
       APIKEY = saved;
@@ -3808,11 +3807,9 @@ async function init(){
     // Load signals and momentum if market is open or premarket
     if(_isOpen||_isPre){
       await buildSignals();
-      await buildMomentum();
     }else{
-      // Market closed — show message but don't call Schwab for candles
+      // Market closed — show message
       document.getElementById('signalArea').innerHTML='<div style="text-align:center;padding:30px;color:var(--text2);font-size:13px;"><div style="font-size:28px;margin-bottom:10px">🌙</div><div style="font-weight:600;">Mercado cerrado</div><div style="font-size:11px;margin-top:6px;color:var(--text3)">Las señales se activarán automáticamente a las 9:30 AM ET</div></div>';
-      document.getElementById('momentumArea').innerHTML='<div style="text-align:center;padding:20px;color:var(--text3);font-size:12px;">Disponible durante horario de mercado</div>';
     }
 
     // Delay rotation load to avoid rate limit burst on startup
@@ -3880,7 +3877,6 @@ async function init(){
       Object.keys(sessionStorage).filter(k=>k.startsWith('tg_sent_setup_')).forEach(k=>sessionStorage.removeItem(k));
       await loadLivePrices();
       await buildSignals();
-      await buildMomentum();
       await checkMarketBlockMove();
     }
   },10*60*1000);

@@ -314,7 +314,7 @@ function getKey(){
   }
   return window._fk||'';
 }
-function showKeyModal(){document.getElementById('keyModal').style.display='flex';}
+function showKeyModal(){} // Finnhub removed
 function saveKeyModal(){
   const k=(document.getElementById('modalKeyInput').value||'').trim();
   const err=document.getElementById('modalKeyError');
@@ -325,7 +325,7 @@ function saveKeyModal(){
   try{sessionStorage.setItem('finnhub_key',k)}catch(e){}
   try{localStorage.setItem('ms_fh_key',k)}catch(e){} // plain copy for Morning Scanner
   document.cookie='fk='+encodeURIComponent(k)+';max-age='+365*24*3600+';path=/;SameSite=Lax';
-  document.getElementById('keyModal').style.display='none';
+  // keyModal removed
   
   loadLivePrices();
 }
@@ -3237,9 +3237,9 @@ async function init(){
   }
   const _k=getKey();
   if(!_k||_k.length<8){
-    document.getElementById('keyModal').style.display='flex';
+    // keyModal removed
     }else{
-    document.getElementById('keyModal').style.display='none';
+    // keyModal removed
     }
 
   // Handle Schwab OAuth callback

@@ -302,7 +302,7 @@ select:focus{border-color:var(--green);}
       <div class="card"><div class="ctitle">RSI · MACD · Señal calculada</div><div id="det-osc">—</div></div>
     </div>
     <div class="card" style="margin-top:12px;">
-      <div class="ctitle">Precio — últimos 60 días <span id="det-chart-ticker" style="color:var(--green);font-weight:600;"></span></div>
+      <div class="ctitle">Precio — últimos 5 días <span id="det-chart-ticker" style="color:var(--green);font-weight:600;"></span></div>
       <div class="cw" style="height:200px;"><canvas id="pChart" role="img" aria-label="Gráfico precio histórico">Precio histórico</canvas></div>
     </div>
   </div>
@@ -340,7 +340,7 @@ select:focus{border-color:var(--green);}
     <div id="ind-osc"><div style="color:var(--muted);font-size:12px;padding:8px 0;">Selecciona un ETF arriba</div></div>
   </div>
   <div class="card" style="margin-top:12px;">
-    <div class="ctitle">Gráfico 60 días — <span id="ind-chart-sym" style="color:var(--green);">—</span></div>
+    <div class="ctitle">Gráfico — últimos 5 días — <span id="ind-chart-sym" style="color:var(--green);">—</span></div>
     <div class="cw" style="height:200px;"><canvas id="indChart" role="img" aria-label="Precio histórico ETF">Precio histórico</canvas></div>
   </div>
 </div>
@@ -542,18 +542,38 @@ async function fh(ep){
   return r.json();
 }
 
-/* ── YAHOO PROXY ── */
-async function getHistory(symbol,days=80){
-  if(histCache[symbol]&&(Date.now()-histCache[symbol].ts<300000)) return histCache[symbol].data;
-  const now=Math.floor(Date.now()/1000), from=now-86400*(days+10);
-  const url=`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&period1=${from}&period2=${now}`;
-  const proxy=`https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
-  const r=await fetch(proxy); if(!r.ok) throw new Error('proxy error');
-  const j=await r.json(), d=JSON.parse(j.contents);
-  const result=d?.chart?.result?.[0]; if(!result) throw new Error('no data');
-  const clean=result.timestamp.map((t,i)=>({t,c:result.indicators.quote[0].close[i]})).filter(x=>x.c!=null);
-  histCache[symbol]={ts:Date.now(),data:clean};
-  return clean;
+/* ── YAHOO PROXY — multi-proxy fallback ── */
+async function getHistory(symbol, days=80){
+  const cacheKey = symbol+'_'+days;
+  if(histCache[cacheKey]&&(Date.now()-histCache[cacheKey].ts<300000)) return histCache[cacheKey].data;
+  const now = Math.floor(Date.now()/1000);
+  const from = now - 86400*(days+10);
+  const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&period1=${from}&period2=${now}`;
+  const proxies = [
+    `https://corsproxy.io/?${encodeURIComponent(yahooUrl)}`,
+    `https://api.allorigins.win/get?url=${encodeURIComponent(yahooUrl)}`,
+    `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(yahooUrl)}`,
+  ];
+  let lastErr;
+  for(const proxy of proxies){
+    try{
+      const r = await fetch(proxy, {signal: AbortSignal.timeout(8000)});
+      if(!r.ok) continue;
+      const raw = await r.text();
+      let parsed;
+      try{ const wrapper=JSON.parse(raw); parsed = wrapper.contents ? JSON.parse(wrapper.contents) : wrapper; }
+      catch(e){ parsed = JSON.parse(raw); }
+      const result = parsed?.chart?.result?.[0];
+      if(!result) continue;
+      const clean = result.timestamp
+        .map((t,i)=>({t, c:result.indicators.quote[0].close[i]}))
+        .filter(x=>x.c!=null);
+      if(clean.length===0) continue;
+      histCache[cacheKey] = {ts:Date.now(), data:clean};
+      return clean;
+    }catch(e){ lastErr=e; }
+  }
+  throw new Error('No se pudieron obtener datos para '+symbol+'. Verifica tu conexión.');
 }
 
 /* ── INDICATORS ── */
@@ -768,8 +788,12 @@ async function loadDetOsc(sym){
 }
 
 async function loadDetChart(sym){
-  try{ const hist=await getHistory(sym,65); drawLineChart('pChart',hist,sym,pChart,c=>{pChart=c;}); }
-  catch(e){console.error(e);}
+  try{
+    const hist = await getHistory(sym,7);
+    // Show last 5 trading days only
+    const last5 = hist.slice(-5);
+    drawLineChart('pChart', last5, sym, pChart, c=>{pChart=c;});
+  }catch(e){ console.error(e); }
 }
 
 /* ── INDICATORS PANEL ── */
@@ -831,7 +855,8 @@ async function loadInd(sym){
       </div>
     </div>`;
 
-    drawLineChart('indChart',hist,sym,indChart,c=>{indChart=c;});
+    // Chart shows last 5 trading days only; indicators use full history
+    drawLineChart('indChart', hist.slice(-5), sym, indChart, c=>{indChart=c;});
   }catch(e){maEl.innerHTML=`<div class="err">Error: ${e.message}</div>`;oscEl.innerHTML=`<div class="err">Error: ${e.message}</div>`;}
 }
 

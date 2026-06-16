@@ -291,19 +291,15 @@ select:focus{border-color:var(--green);}
     </div>
   </div>
 
-  <!-- DETAIL PANEL -->
+  <!-- DETAIL PANEL — chart only -->
   <div id="detail" style="display:none;">
     <div style="font-size:11px;font-family:var(--mono);color:var(--green);margin-bottom:10px;display:flex;align-items:center;gap:8px;font-weight:600;">
       <span id="det-title">—</span>
       <button class="btn-ghost" style="padding:3px 10px;font-size:10px;" onclick="refreshDet()">↻ actualizar</button>
     </div>
-    <div class="g2">
-      <div class="card"><div class="ctitle">Moving Averages — MA20 · MA40 · MA100 · MA200</div><div id="det-ma">—</div></div>
-      <div class="card"><div class="ctitle">RSI · MACD · Señal calculada</div><div id="det-osc">—</div></div>
-    </div>
-    <div class="card" style="margin-top:12px;">
+    <div class="card">
       <div class="ctitle">Precio — últimos 5 días <span id="det-chart-ticker" style="color:var(--green);font-weight:600;"></span></div>
-      <div class="cw" style="height:200px;"><canvas id="pChart" role="img" aria-label="Gráfico precio histórico">Precio histórico</canvas></div>
+      <div class="cw" style="height:220px;"><canvas id="pChart" role="img" aria-label="Gráfico precio histórico">Precio histórico</canvas></div>
     </div>
   </div>
 
@@ -741,51 +737,11 @@ async function selETF(sym){
   document.getElementById('detail').style.display='block';
   document.getElementById('det-title').textContent=`▶ ${sym}`;
   document.getElementById('det-chart-ticker').textContent=sym;
-  loadDetMA(sym); loadDetOsc(sym); loadDetChart(sym);
+  loadDetChart(sym);
   document.getElementById('detail').scrollIntoView({behavior:'smooth',block:'nearest'});
 }
 function refreshDet(){if(curSel)selETF(curSel);}
 
-async function loadDetMA(sym){
-  const el=document.getElementById('det-ma');
-  el.innerHTML='<span class="spin"></span>calculando...';
-  try{
-    const hist=await getHistory(sym,220), closes=hist.map(x=>x.c), price=closes[closes.length-1];
-    const mas=[{p:20,l:'MA20'},{p:40,l:'MA40'},{p:100,l:'MA100'},{p:200,l:'MA200'}];
-    let html='';
-    mas.forEach(m=>{
-      const v=calcSMA(closes,m.p); if(!v)return;
-      const above=price>v, diff=((price-v)/v*100).toFixed(2);
-      html+=`<div class="marow"><span class="maname">${m.l}</span><span class="maval ${above?'vpos':'vneg'}">$${v.toFixed(2)}</span><span style="font-size:11px;font-family:var(--mono);color:var(--muted);">${above?'+':''}${diff}%</span><span class="badge ${above?'b-buy':'b-sell'}">${above?'▲':'▼'}</span></div>`;
-    });
-    html+=`<div class="marow"><span class="maname" style="color:var(--green);font-weight:600;">Precio</span><span class="maval">$${price.toFixed(2)}</span><span></span><span></span></div>`;
-    el.innerHTML=html;
-  }catch(e){el.innerHTML=`<div class="err">Error: ${e.message}</div>`;}
-}
-
-async function loadDetOsc(sym){
-  const el=document.getElementById('det-osc');
-  el.innerHTML='<span class="spin"></span>calculando...';
-  try{
-    const hist=await getHistory(sym,120), closes=hist.map(x=>x.c), price=closes[closes.length-1];
-    const ma20=calcSMA(closes,20),ma40=calcSMA(closes,40),ma100=calcSMA(closes,100),ma200=calcSMA(closes,200);
-    const rsi=calcRSI(closes,14), macd=calcMACD(closes);
-    const sig=computeSignal(price,ma20,ma40,ma100,ma200,rsi,macd);
-    const sigColor=sig==='buy'?'var(--green)':sig==='sell'?'var(--red)':'var(--amber)';
-    const rsiN=rsi?rsi.toFixed(1):'—';
-    const rsiColor=rsi>70?'var(--red)':rsi<30?'var(--green)':'var(--amber)';
-    const rsiLbl=rsi>70?'sobrecomprado':rsi<30?'sobrevendido':'neutral';
-    el.innerHTML=`
-      <div style="text-align:center;padding:10px 0 14px;">
-        <div style="font-size:11px;font-family:var(--mono);color:var(--muted);margin-bottom:6px;">Señal calculada</div>
-        <div style="font-size:22px;font-weight:700;font-family:var(--mono);color:${sigColor};text-transform:uppercase;">${sig}</div>
-        <div style="font-size:10px;color:var(--muted2);margin-top:3px;">MAs + RSI + MACD</div>
-      </div>
-      <div class="marow"><span class="maname">RSI (14)</span><span class="maval" style="color:${rsiColor};">${rsiN}</span><span class="badge ${rsi>70?'b-sell':rsi<30?'b-buy':'b-warn'}">${rsiLbl}</span></div>
-      <div class="marow"><span class="maname">MACD</span><span class="maval ${macd&&macd.macd>0?'vpos':'vneg'}">${macd?macd.macd.toFixed(3):'—'}</span><span class="badge ${macd&&macd.macd>0?'b-buy':'b-sell'}">${macd&&macd.macd>0?'alcista':'bajista'}</span></div>
-      <div class="marow"><span class="maname">MACD hist.</span><span class="maval ${macd&&macd.hist>0?'vpos':'vneg'}">${macd&&macd.hist!==null?macd.hist.toFixed(3):'—'}</span><span style="font-size:11px;color:var(--muted);">${macd&&macd.hist>0?'momentum ↑':'momentum ↓'}</span></div>`;
-  }catch(e){el.innerHTML=`<div class="err">Error: ${e.message}</div>`;}
-}
 
 async function loadDetChart(sym){
   try{
@@ -864,7 +820,9 @@ async function loadInd(sym){
 function drawLineChart(canvasId,hist,sym,existingChart,setChart){
   const labels=hist.map(x=>{const d=new Date(x.t*1000);return d.toLocaleDateString('es',{month:'short',day:'numeric'});});
   const closes=hist.map(x=>x.c);
-  const isPos=closes[closes.length-1]>=closes[0];
+  // Color based on today's % change (dp) from live quote, not just first-to-last
+  const todayDp = liveQ[sym]?.dp ?? (closes[closes.length-1]-closes[0]);
+  const isPos = todayDp >= 0;
   const lc=isPos?'#0a8c5e':'#d63031', fc=isPos?'rgba(10,140,94,0.07)':'rgba(214,48,49,0.07)';
   const ctx=document.getElementById(canvasId).getContext('2d');
   if(existingChart) existingChart.destroy();

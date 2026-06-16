@@ -3108,10 +3108,13 @@ function marketPhaseNow() {
 }
 
 function updateClock() {
+  const clockEl = document.getElementById('ms-clock');
+  if(!clockEl) return;
   const et = msEtNow();
-  document.getElementById('ms-clock').textContent = et.toLocaleTimeString('es',{hour:'2-digit',minute:'2-digit',second:'2-digit'}) + ' ET';
+  clockEl.textContent = et.toLocaleTimeString('es',{hour:'2-digit',minute:'2-digit',second:'2-digit'}) + ' ET';
   const mp = marketPhaseNow();
   const el = document.getElementById('ms-mstatus');
+  if(!el) return;
   if (mp==='open')  { el.textContent='● ABIERTO';    el.className='market-status ms-open'; }
   else if(mp==='pre'){ el.textContent='◑ PRE-MARKET'; el.className='market-status ms-pre'; }
   else               { el.textContent='○ CERRADO';    el.className='market-status ms-closed'; }
@@ -3357,7 +3360,15 @@ async function runPreAnalysis() {
     const symList = [...ETF_LIST.map(e=>e.t), ...BASE];
     const [quotesArr, histArr] = await Promise.all([
       Promise.all(symList.map(s=>fh(`/quote?symbol=${s}`).then(d=>({s,d})).catch(()=>null))),
-      Promise.all(ETF_LIST.map(e=>getHist(e.t,220).then(d=>({s:e.t,d})).catch(()=>({s:e.t,d:null}))))
+      (async()=>{
+    const results=[];
+    for(const e of ETF_LIST){
+      try{const d=await getHist(e.t,220);results.push({s:e.t,d});}
+      catch(err){results.push({s:e.t,d:null});}
+      await new Promise(r=>setTimeout(r,1200)); // 1.2s between calls — stay under 60/min
+    }
+    return results;
+  })()
     ]);
 
     quotesArr.forEach(r=>{ if(r&&r.d&&r.d.c) liveQ[r.s]=r.d; });

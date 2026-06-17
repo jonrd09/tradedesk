@@ -2721,12 +2721,13 @@ function clearKey(){
 
 function showKeyPill() {
   const slot = document.getElementById('ms-key-slot');
+  if(!slot) return; // Morning Scanner panel removed
   slot.innerHTML = '<div class="key-pill" onclick="forgetKey()" title="Clic para borrar API key guardada">🔑 API guardada</div>';
 }
 function forgetKey() {
   if (!confirm('¿Borrar API key guardada?')) return;
   clearKey(); APIKEY='';
-  document.getElementById('ms-key-slot').innerHTML='';
+  const slotClear=document.getElementById('ms-key-slot');if(slotClear)slotClear.innerHTML='';
   document.getElementById('ms-apik').value='';
   document.getElementById('scanbtn').disabled=true;
   clearTimers();

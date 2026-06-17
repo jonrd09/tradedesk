@@ -1014,7 +1014,7 @@ async function buildSignals(){
   const _sigMins=_etSig.getHours()*60+_etSig.getMinutes();
   const _sigDay=_etSig.getDay();
   const _isMarketHours=_sigDay>=1&&_sigDay<=5&&_sigMins>=515&&_sigMins<960; // 8:35AM-4PM
-  if(!_isMarketHours&&!_testMode){
+  if(!_isMarketHours&&!_testMode&&!_debugMode){
     area.innerHTML='<div style="text-align:center;padding:30px;color:var(--text2);font-size:13px;"><div style="font-size:28px;margin-bottom:10px">🌙</div><div style="font-weight:600;">Mercado cerrado</div><div style="font-size:12px;margin-top:8px;color:var(--text3);">Las señales solo están disponibles durante horario de mercado (8:35 AM – 4:00 PM ET)</div></div>';
     return;
   }
@@ -1150,20 +1150,20 @@ async function buildSignals(){
     const bb15_prev2=bollinger(c15.slice(0,-2));
     const lBBW15_1=bb15_prev1.upper.filter(v=>v!=null).slice(-1)[0]&&bb15_prev1.lower.filter(v=>v!=null).slice(-1)[0]&&bb15_prev1.mid.filter(v=>v!=null).slice(-1)[0]?(bb15_prev1.upper.filter(v=>v!=null).slice(-1)[0]-bb15_prev1.lower.filter(v=>v!=null).slice(-1)[0])/bb15_prev1.mid.filter(v=>v!=null).slice(-1)[0]*100:0;
     const lBBW15_2=bb15_prev2.upper.filter(v=>v!=null).slice(-1)[0]&&bb15_prev2.lower.filter(v=>v!=null).slice(-1)[0]&&bb15_prev2.mid.filter(v=>v!=null).slice(-1)[0]?(bb15_prev2.upper.filter(v=>v!=null).slice(-1)[0]-bb15_prev2.lower.filter(v=>v!=null).slice(-1)[0])/bb15_prev2.mid.filter(v=>v!=null).slice(-1)[0]*100:0;
-    const isExpanding15=(lBBW15-lBBW15_1)>0.05&&(lBBW15_1-lBBW15_2)>0; // meaningful expansion
+    const isExpanding15=(lBBW15-lBBW15_1)>0.03; // BB expanding — less strict
     const lVol15=vol15[vol15.length-1]||0;
     const avgVol15_10=vol15.length>=10?vol15.slice(-10).reduce((a,b)=>a+b,0)/10:0;
     const volActive15=avgVol15_10>0?lVol15>avgVol15_10*1.1:true;
 
     // ── FILTROS COMUNES — sin estos es movimiento falso ──────────────────────
     // F1: BB expandiéndose en 15min — volatilidad real activa (OBLIGATORIO)
-    const bbExpandOk=lBBW15>1.5;
+    const bbExpandOk=lBBW15>1.0;
     // F2: Confirmación dirección en 1H
     const align1hBull=lP1h>lMA20_1h&&upSlope1h;
     const align1hBear=lP1h<lMA20_1h&&loSlope1h;
     // F3: Stochastics 15min
-    const stochCallOk=lK15>lD15&&lK15<80;
-    const stochPutOk=lK15<lD15&&lK15>20;
+    const stochCallOk=lK15>lD15&&lK15>30&&lK15<85;
+    const stochPutOk=lK15<lD15&&lK15>15&&lK15<70;
     // F4: Volumen activo
     const volLabel=avgVol15_10>0?` (${(lVol15/avgVol15_10*100).toFixed(0)}% del promedio)`:'';
 
@@ -1192,28 +1192,28 @@ async function buildSignals(){
     // PATRÓN A — Vela VERDE perforando banda SUPERIOR → CALL
     const pA_greenCandle=lP15>lO15;
     const pA_pierceUpper=lH15>lUp15&&isExpanding15; // bands must be expanding
-    const pA_stoch=lK15>lD15&&lK15>40&&lK15<85;
+    const pA_stoch=lK15>lD15&&lK15>30&&lK15<85;
     if(pA_pierceUpper){
       all.push({...meta,code:'BB-A',name:'BB Salida Superior — CALL',type:'call',reqs:[
         {ok:pA_pierceUpper, tf:'15m',text:`Vela verde perfora banda superior: high $${lH15.toFixed(2)} > BB $${lUp15.toFixed(2)}`},
         {ok:pA_greenCandle, tf:'15m',text:`Vela alcista: cierre $${lP15.toFixed(2)} > apertura $${lO15.toFixed(2)}`},
         {ok:volActive15,    tf:'15m',text:`Volumen de compra activo${volLabel}`},
-        {ok:pA_stoch,       tf:'15m',text:`Worden: %K (${lK15.toFixed(0)}) sobre %D (${lD15.toFixed(0)}) — momentum alcista`},
-        {ok:lBBW15>3.0&&isExpanding15, tf:'15m',text:`BB expandiéndose activamente (BBW ${lBBW15.toFixed(1)}% > 3%)`},
+        {ok:pA_stoch,       tf:'15m',text:`Worden: %K (${lK15.toFixed(0)}) > %D (${lD15.toFixed(0)}) zona 30-85`},
+        {ok:lBBW15>1.5&&isExpanding15, tf:'15m',text:`BB expandiéndose activamente (BBW ${lBBW15.toFixed(1)}% > 1.5%)`},
       ]});
     }
 
     // PATRÓN B — Vela ROJA perforando banda INFERIOR → PUT
     const pB_redCandle=lP15<lO15;
     const pB_pierceLower=lL15<lLow15&&isExpanding15; // bands must be expanding
-    const pB_stoch=lK15<lD15&&lK15<60&&lK15>15;
+    const pB_stoch=lK15<lD15&&lK15<70&&lK15>15;
     if(pB_pierceLower){
       all.push({...meta,code:'BB-B',name:'BB Salida Inferior — PUT',type:'put',reqs:[
         {ok:pB_pierceLower, tf:'15m',text:`Vela roja perfora banda inferior: low $${lL15.toFixed(2)} < BB $${lLow15.toFixed(2)}`},
         {ok:pB_redCandle,   tf:'15m',text:`Vela bajista: cierre $${lP15.toFixed(2)} < apertura $${lO15.toFixed(2)}`},
         {ok:volActive15,    tf:'15m',text:`Volumen de venta activo${volLabel}`},
         {ok:pB_stoch,       tf:'15m',text:`Worden: %K (${lK15.toFixed(0)}) bajo %D (${lD15.toFixed(0)}) — momentum bajista`},
-        {ok:lBBW15>3.0&&isExpanding15, tf:'15m',text:`BB expandiéndose activamente (BBW ${lBBW15.toFixed(1)}% > 3%)`},
+        {ok:lBBW15>1.5&&isExpanding15, tf:'15m',text:`BB expandiéndose activamente (BBW ${lBBW15.toFixed(1)}% > 1.5%)`},
       ]});
     }
 
@@ -1227,7 +1227,7 @@ async function buildSignals(){
         {ok:pC_redReturn,   tf:'15m',text:`Primera vela bajista de regreso ($${lP15.toFixed(2)} < apertura $${lO15.toFixed(2)})`},
         {ok:pC_stochOB,     tf:'15m',text:`Worden sobrecomprado: %K (${lK15.toFixed(0)}) > 75`},
         {ok:volActive15,    tf:'15m',text:`Volumen confirmando${volLabel}`},
-        {ok:lBBW15>3.0&&isExpanding15, tf:'15m',text:`BB expandiéndose activamente (BBW ${lBBW15.toFixed(1)}% > 3%)`},
+        {ok:lBBW15>1.5&&isExpanding15, tf:'15m',text:`BB expandiéndose activamente (BBW ${lBBW15.toFixed(1)}% > 1.5%)`},
       ]});
     }
 
@@ -1241,7 +1241,7 @@ async function buildSignals(){
         {ok:pD_greenReturn, tf:'15m',text:`Primera vela alcista de rebote ($${lP15.toFixed(2)} > apertura $${lO15.toFixed(2)})`},
         {ok:pD_stochOS,     tf:'15m',text:`Worden sobrevendido: %K (${lK15.toFixed(0)}) < 25`},
         {ok:volActive15,    tf:'15m',text:`Volumen confirmando${volLabel}`},
-        {ok:lBBW15>3.0&&isExpanding15, tf:'15m',text:`BB expandiéndose activamente (BBW ${lBBW15.toFixed(1)}% > 3%)`},
+        {ok:lBBW15>1.5&&isExpanding15, tf:'15m',text:`BB expandiéndose activamente (BBW ${lBBW15.toFixed(1)}% > 1.5%)`},
       ]});
     }
   }
@@ -1757,25 +1757,38 @@ function showRulesPopup(){
 // ═══════════════════════════════════════════════════════════════
 // STRIKE LOG
 // ═══════════════════════════════════════════════════════════════
-function openStrikeLog(ticker,color){_strikeTicker=ticker;_strikeColor=color;
-  const t=document.getElementById('strikeModalTitle');if(t){t.textContent=ticker;t.style.color=color;}
+function openStrikeLog(ticker,color){
+  _strikeTicker=ticker;_strikeColor=color;
+  // Set modal title
+  const t=document.getElementById('strikeModalTitle');
+  if(t){t.textContent=ticker;t.style.color=color;}
+  // Set today's day in select
   const days=['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
   const today=days[new Date().getDay()];
   const sel=document.getElementById('strikeDay');
-  for(let i=0;i<sel.options.length;i++){if(sel.options[i].value===today){sel.selectedIndex=i;break;}}
-  document.getElementById('strikeDist').value='';
-  document.getElementById('strikeModal').style.display='flex';
-  // Load saved range for this ticker
+  if(sel){for(let i=0;i<sel.options.length;i++){
+    if(sel.options[i].text===today||sel.options[i].value===today){sel.selectedIndex=i;break;}
+  }}
+  // Clear inputs
+  const distEl=document.getElementById('strikeDist');
+  if(distEl)distEl.value='';
+  // Show modal
+  const modal=document.getElementById('strikeModal');
+  if(!modal){console.error('strikeModal not found');return;}
+  modal.style.display='flex';
+  // Load saved range
   const defaults={TSLA:{min:100,max:250},GOOG:{min:60,max:170},SPY:{min:30,max:45}};
-  const saved=localStorage.getItem(`strike_range_${ticker}`);
-  const range=saved?JSON.parse(saved):defaults[ticker]||{min:'',max:''};
+  let range={min:'',max:''};
+  try{const saved=localStorage.getItem('strike_range_'+ticker);if(saved)range=JSON.parse(saved);}catch(e){}
+  if(!range.min)range=defaults[ticker]||{min:'',max:''};
   const minEl=document.getElementById('strikeRangeMin');
   const maxEl=document.getElementById('strikeRangeMax');
   if(minEl)minEl.value=range.min||'';
   if(maxEl)maxEl.value=range.max||'';
-  loadStrikeFundamentals(ticker);
+  // Render log
+  try{loadStrikeFundamentals(ticker);}catch(e){}
   renderStrikeLog();
-  setTimeout(()=>document.getElementById('strikeDist').focus(),100);
+  setTimeout(()=>{const d=document.getElementById('strikeDist');if(d)d.focus();},150);
 }
 function closeStrikeModal(){document.getElementById('strikeModal').style.display='none';}
 function saveStrikeFundamentals(){
@@ -3438,6 +3451,63 @@ init();
           <span style="font-size:12px;color:var(--text2);">Notificaciones activas</span>
         </label>
         <button onclick="clearTelegramConfig()" style="background:none;border:none;color:var(--red);font-size:11px;cursor:pointer;">🗑 Limpiar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- Strike Log Modal -->
+<div id="strikeModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:1000;align-items:center;justify-content:center;padding:16px;">
+  <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:var(--rl);width:100%;max-width:680px;max-height:90vh;overflow-y:auto;display:flex;flex-direction:column;">
+    <!-- Header -->
+    <div style="padding:14px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <span style="font-size:16px;">📋</span>
+        <span style="font-size:15px;font-weight:700;color:#fff;">Strike Log — </span>
+        <span id="strikeModalTitle" style="font-size:15px;font-weight:700;color:var(--blue);">GOOG</span>
+      </div>
+      <button onclick="closeStrikeModal()" style="background:none;border:none;color:var(--text2);font-size:20px;cursor:pointer;padding:0 4px;line-height:1;">×</button>
+    </div>
+    <!-- Range + fundamentals -->
+    <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+      <div style="font-size:11px;color:var(--text3);">Distancia Spot → Strike · <span style="color:var(--text2)">Costo $ · Lugares · Spread</span></div>
+      <div style="display:flex;align-items:center;gap:4px;margin-left:auto;">
+        <span style="font-size:10px;color:var(--text3);">Rango: $</span>
+        <input type="number" id="strikeRangeMin" placeholder="Min" step="1"
+          style="width:52px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--green);padding:3px 6px;font-size:12px;font-family:var(--mono);outline:none;text-align:center;"
+          oninput="saveStrikeRange()">
+        <span style="font-size:10px;color:var(--text3);">– $</span>
+        <input type="number" id="strikeRangeMax" placeholder="Max" step="1"
+          style="width:52px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--green);padding:3px 6px;font-size:12px;font-family:var(--mono);outline:none;text-align:center;"
+          oninput="saveStrikeRange()">
+      </div>
+    </div>
+    <!-- Add entry row -->
+    <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+      <select id="strikeDay" class="inp" style="flex:1.5;min-width:100px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--text);padding:6px 8px;font-size:13px;outline:none;">
+        <option>Lunes</option><option>Martes</option><option>Miércoles</option><option>Jueves</option><option>Viernes</option>
+      </select>
+      <input type="number" id="strikeCosto" placeholder="Costo $" min="0" step="0.01"
+        style="flex:1;min-width:80px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--yellow);padding:6px 8px;font-size:13px;font-family:var(--mono);outline:none;text-align:center;">
+      <input type="number" id="strikeDist" placeholder="Lugares" min="-50" max="100" step="0.5"
+        style="flex:1;min-width:70px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--text);padding:6px 8px;font-size:13px;font-family:var(--mono);outline:none;text-align:center;">
+      <input type="number" id="strikeSpread" placeholder="Spread" min="0" step="0.01"
+        style="flex:1;min-width:70px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--purple);padding:6px 8px;font-size:13px;font-family:var(--mono);outline:none;text-align:center;">
+      <button onclick="addStrikeEntry()" style="background:var(--blue);border:none;border-radius:var(--r);color:#fff;padding:6px 16px;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap;">+ Agregar</button>
+    </div>
+    <!-- Log entries -->
+    <div id="strikeLogArea" style="padding:10px 16px;flex:1;min-height:100px;"></div>
+    <!-- Target price + recommendation -->
+    <div style="padding:8px 16px;border-top:1px solid var(--border);display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+      <input type="number" id="strikeTargetPrice" placeholder="Target $" step="0.01"
+        style="width:100px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--green);padding:5px 8px;font-size:12px;font-family:var(--mono);outline:none;"
+        oninput="saveStrikeFundamentals()">
+      <input type="number" id="strikeRecom" placeholder="Recom. $" step="0.01"
+        style="width:100px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--blue);padding:5px 8px;font-size:12px;font-family:var(--mono);outline:none;"
+        oninput="saveStrikeFundamentals()">
+      <div style="margin-left:auto;display:flex;gap:8px;">
+        <button onclick="exportStrikeLog()" style="background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--text2);padding:5px 14px;font-size:12px;cursor:pointer;">↓ Exportar</button>
       </div>
     </div>
   </div>

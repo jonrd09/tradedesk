@@ -298,8 +298,8 @@ select:focus{border-color:var(--green);}
       <button class="btn-ghost" style="padding:3px 10px;font-size:10px;" onclick="refreshDet()">↻ actualizar</button>
     </div>
     <div class="card">
-      <div class="ctitle">Precio — últimos 5 días <span id="det-chart-ticker" style="color:var(--green);font-weight:600;"></span></div>
-      <div class="cw" style="height:220px;"><canvas id="pChart" role="img" aria-label="Gráfico precio histórico">Precio histórico</canvas></div>
+      <div class="ctitle">Precio <span id="det-chart-ticker" style="color:var(--green);font-weight:600;"></span></div>
+      <div class="cw" style="height:260px;"><canvas id="pChart" role="img" aria-label="Gráfico precio histórico">Precio histórico</canvas></div>
     </div>
   </div>
 
@@ -744,12 +744,127 @@ function refreshDet(){if(curSel)selETF(curSel);}
 
 
 async function loadDetChart(sym){
+  const titleEl = document.getElementById('det-chart-ticker');
+  // Detect if market is open (9:30-16:00 ET, weekdays)
+  const et = new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+  const day = et.getDay(), totalMin = et.getHours()*60+et.getMinutes();
+  const isOpen = day>=1 && day<=5 && totalMin>=570 && totalMin<960;
+
+  if(isOpen){
+    titleEl.textContent = sym + ' · hoy 9:30–4pm ET (1 min)';
+    try{ await loadCandleChart(sym); return; }
+    catch(e){ console.warn('Candles failed, falling back:', e.message); }
+  }
+  // Fallback: 5-day line
+  titleEl.textContent = sym + ' · últimos 5 días';
   try{
     const hist = await getHistory(sym,7);
-    // Show last 5 trading days only
-    const last5 = hist.slice(-5);
-    drawLineChart('pChart', last5, sym, pChart, c=>{pChart=c;});
-  }catch(e){ console.error(e); }
+    drawLineChart('pChart', hist.slice(-5), sym, pChart, c=>{pChart=c;});
+  }catch(e){
+    const ctx=document.getElementById('pChart').getContext('2d');
+    ctx.clearRect(0,0,ctx.canvas.width,ctx.canvas.height);
+  }
+}
+
+async function loadCandleChart(sym){
+  const url=`https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=1m&range=1d`;
+  const proxies=[
+    `https://corsproxy.io/?${encodeURIComponent(url)}`,
+    `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`,
+    `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
+  ];
+  let candles=null;
+  for(const proxy of proxies){
+    try{
+      const r=await fetch(proxy,{signal:AbortSignal.timeout(8000)});
+      if(!r.ok) continue;
+      const raw=await r.text();
+      let parsed;
+      try{ const w=JSON.parse(raw); parsed=w.contents?JSON.parse(w.contents):w; }catch(e){ parsed=JSON.parse(raw); }
+      const result=parsed?.chart?.result?.[0];
+      if(!result||!result.timestamp) continue;
+      const ts=result.timestamp, q=result.indicators.quote[0];
+      candles=ts.map((t,i)=>({t,o:q.open[i],h:q.high[i],l:q.low[i],c:q.close[i]}))
+        .filter(x=>{
+          if(!x.o||!x.c) return false;
+          const etStr=new Date(x.t*1000).toLocaleTimeString('en-US',{timeZone:'America/New_York',hour:'2-digit',minute:'2-digit',hour12:false});
+          const [eh,em]=etStr.split(':').map(Number);
+          const mins=eh*60+em;
+          return mins>=570&&mins<960;
+        });
+      if(candles.length>0) break;
+    }catch(e){ continue; }
+  }
+  if(!candles||candles.length===0) throw new Error('Sin datos intraday');
+
+  const todayDp=liveQ[sym]?.dp??0;
+  const isPos=todayDp>=0;
+  const upC='#0a8c5e', dnC='#d63031';
+  const upF='rgba(10,140,94,0.75)', dnF='rgba(214,48,49,0.75)';
+  const labels=candles.map(x=>new Date(x.t*1000).toLocaleTimeString('es',{timeZone:'America/New_York',hour:'2-digit',minute:'2-digit'}));
+  const bodyData=candles.map(x=>[Math.min(x.o,x.c),Math.max(x.o,x.c)]);
+  const bodyColors=candles.map(x=>x.c>=x.o?upF:dnF);
+  const borderColors=candles.map(x=>x.c>=x.o?upC:dnC);
+  const currentPrice=liveQ[sym]?.c;
+
+  const ctx=document.getElementById('pChart').getContext('2d');
+  if(pChart){pChart.destroy();pChart=null;}
+
+  pChart=new Chart(ctx,{
+    type:'bar',
+    data:{labels,datasets:[{label:'Vela',data:bodyData,backgroundColor:bodyColors,borderColor:borderColors,borderWidth:1,borderSkipped:false}]},
+    options:{
+      responsive:true,maintainAspectRatio:false,animation:{duration:0},
+      interaction:{intersect:false,mode:'index'},
+      plugins:{
+        legend:{display:false},
+        tooltip:{
+          backgroundColor:'#fff',borderColor:'rgba(0,0,0,.12)',borderWidth:1,
+          titleColor:'#6b7a90',bodyColor:'#1a2130',
+          callbacks:{
+            title:items=>labels[items[0].dataIndex],
+            label:item=>{
+              const c=candles[item.dataIndex]; if(!c) return '';
+              const dir=c.c>=c.o?'▲':'▼';
+              const chg=((c.c-c.o)/c.o*100).toFixed(2);
+              return[`${dir} Cierre: $${c.c?.toFixed(2)} (${chg}%)`,`A: $${c.o?.toFixed(2)}  H: $${c.h?.toFixed(2)}  L: $${c.l?.toFixed(2)}`];
+            }
+          }
+        }
+      },
+      scales:{
+        x:{ticks:{color:'#a0aab8',font:{size:9},maxTicksLimit:10,maxRotation:0},grid:{color:'rgba(0,0,0,.04)'}},
+        y:{ticks:{color:'#a0aab8',font:{size:10,family:'JetBrains Mono'},callback:v=>'$'+v.toFixed(2)},grid:{color:'rgba(0,0,0,.05)'}}
+      }
+    },
+    plugins:[{
+      id:'wickPlugin',
+      afterDraw(chart){
+        const{ctx,scales:{x,y}}=chart; ctx.save();
+        candles.forEach((c,i)=>{
+          if(!c.h||!c.l) return;
+          const xPos=x.getPixelForIndex(i);
+          const yH=y.getPixelForValue(c.h), yL=y.getPixelForValue(c.l);
+          const yO=y.getPixelForValue(c.o), yC=y.getPixelForValue(c.c);
+          const bTop=Math.min(yO,yC), bBot=Math.max(yO,yC);
+          ctx.strokeStyle=c.c>=c.o?upC:dnC; ctx.lineWidth=1;
+          ctx.beginPath(); ctx.moveTo(xPos,yH); ctx.lineTo(xPos,bTop); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(xPos,bBot); ctx.lineTo(xPos,yL); ctx.stroke();
+        });
+        // Current price dashed line
+        if(currentPrice){
+          const yP=y.getPixelForValue(currentPrice);
+          ctx.strokeStyle=isPos?upC:dnC; ctx.lineWidth=1.5; ctx.setLineDash([4,3]);
+          ctx.beginPath(); ctx.moveTo(x.left,yP); ctx.lineTo(x.right,yP); ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.fillStyle=isPos?upC:dnC; ctx.font='bold 10px JetBrains Mono,monospace';
+          ctx.textAlign='right';
+          ctx.fillText('$'+currentPrice.toFixed(2),x.right-4,yP-4);
+        }
+        ctx.restore();
+      }
+    }]
+  });
 }
 
 /* ── INDICATORS PANEL ── */

@@ -92,6 +92,16 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
 /* Strike Log */
 .strike-modal{position:fixed;inset:0;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;z-index:1000;}
 .strike-box{background:var(--bg2);border:1px solid var(--border2);border-radius:var(--rl);padding:24px;width:580px;max-width:95vw;}
+/* ── News Panel ── */
+.news-ticker-btn{background:var(--bg3);border:1px solid var(--border2);border-radius:12px;color:var(--text2);padding:3px 10px;font-size:11px;font-weight:700;cursor:pointer;font-family:var(--mono);white-space:nowrap;transition:all .15s;}
+.news-ticker-btn:hover,.news-ticker-btn.active{background:var(--blue);border-color:var(--blue);color:#fff;}
+.news-card{background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:8px;cursor:pointer;transition:border-color .15s;}
+.news-card:hover{border-color:var(--blue);}
+.news-card-ticker{font-size:10px;font-weight:700;font-family:var(--mono);padding:2px 7px;border-radius:8px;margin-right:6px;}
+.news-card-time{font-size:10px;color:var(--text3);}
+.news-card-title{font-size:12px;color:var(--text);margin-top:5px;line-height:1.4;}
+.news-card-source{font-size:10px;color:var(--text3);margin-top:4px;}
+
 </style>
 </head>
 <body>
@@ -143,7 +153,29 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
 <!-- MAIN GRID -->
 <div class="main">
 
-<aside class="left-panel" style="display:none;"></aside>
+<aside class="left-panel" style="display:flex;flex-direction:column;overflow:hidden;">
+  <!-- Header -->
+  <div style="padding:10px 12px;border-bottom:1px solid var(--border);flex-shrink:0;">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+      <div style="font-size:14px;font-weight:700;color:#fff;">📰 Noticias</div>
+      <div style="display:flex;gap:4px;flex-wrap:wrap;" id="newsTickerBtns">
+        <button onclick="loadNews('TSLA')" class="news-ticker-btn" id="nbtn-TSLA">TSLA</button>
+        <button onclick="loadNews('GOOG')" class="news-ticker-btn" id="nbtn-GOOG">GOOG</button>
+        <button onclick="loadNews('SPY')"  class="news-ticker-btn" id="nbtn-SPY">SPY</button>
+        <button onclick="loadNews('QQQ')"  class="news-ticker-btn" id="nbtn-QQQ">QQQ</button>
+        <button onclick="loadNews('AAPL')" class="news-ticker-btn" id="nbtn-AAPL">AAPL</button>
+        <button onclick="loadNews('PLTR')" class="news-ticker-btn" id="nbtn-PLTR">PLTR</button>
+        <button onclick="loadNews('ALL')"  class="news-ticker-btn" id="nbtn-ALL" style="color:var(--yellow);">ALL</button>
+      </div>
+    </div>
+  </div>
+  <!-- News feed -->
+  <div id="newsArea" style="flex:1;overflow-y:auto;padding:8px 10px;">
+    <div style="text-align:center;padding:20px;color:var(--text3);font-size:12px;">
+      Selecciona un ticker para ver noticias
+    </div>
+  </div>
+</aside>
 <!-- CENTER: Signals -->
 <div class="center-panel">
   <div class="card">
@@ -3332,6 +3364,103 @@ async function manualScan(){
 
 // ═══ END MORNING SCANNER ═══
 
+// ═══════════════════════════════════════════════════════════════
+// NEWS PANEL — Yahoo Finance RSS via allorigins proxy
+// ═══════════════════════════════════════════════════════════════
+let _newsCache={}, _newsActive='';
+
+const NEWS_COLORS={
+  TSLA:'#cc0000',GOOG:'#4285f4',SPY:'#00a651',
+  QQQ:'#ff6b00',AAPL:'#a2aaad',PLTR:'#9b59b6',ALL:'#ffc234'
+};
+
+async function loadNews(ticker){
+  const area=document.getElementById('newsArea');
+  if(!area)return;
+
+  // Update active button
+  _newsActive=ticker;
+  document.querySelectorAll('.news-ticker-btn').forEach(b=>{
+    b.classList.toggle('active', b.id==='nbtn-'+ticker);
+  });
+
+  // Show loading
+  area.innerHTML='<div style="text-align:center;padding:20px;color:var(--text3);font-size:12px;">⟳ Cargando noticias...</div>';
+
+  try{
+    let items=[];
+    const syms=ticker==='ALL'?['TSLA','GOOG','SPY','QQQ','AAPL','PLTR']:[ticker];
+
+    for(const sym of syms){
+      // Check cache (5min TTL)
+      if(_newsCache[sym]&&Date.now()-_newsCache[sym].ts<300000){
+        items.push(..._newsCache[sym].items);
+        continue;
+      }
+      try{
+        const rssUrl=`https://feeds.finance.yahoo.com/rss/2.0/headline?s=${sym}&region=US&lang=en-US`;
+        const proxy=`https://api.allorigins.win/get?url=${encodeURIComponent(rssUrl)}`;
+        const r=await fetch(proxy,{signal:AbortSignal.timeout(6000)});
+        if(!r.ok)throw new Error('HTTP '+r.status);
+        const j=await r.json();
+        const parser=new DOMParser();
+        const xml=parser.parseFromString(j.contents,'text/xml');
+        const entries=Array.from(xml.querySelectorAll('item')).slice(0,5).map(item=>({
+          sym,
+          title:item.querySelector('title')?.textContent||'',
+          link:item.querySelector('link')?.textContent||'',
+          pubDate:item.querySelector('pubDate')?.textContent||'',
+          source:item.querySelector('source')?.textContent||'Yahoo Finance',
+        }));
+        _newsCache[sym]={ts:Date.now(),items:entries};
+        items.push(...entries);
+        if(syms.length>1)await new Promise(r=>setTimeout(r,400));
+      }catch(e){
+        console.warn('News fetch failed for',sym,e.message);
+      }
+    }
+
+    if(!items.length){
+      area.innerHTML='<div style="text-align:center;padding:20px;color:var(--text3);font-size:12px;">Sin noticias disponibles</div>';
+      return;
+    }
+
+    // Sort by date descending
+    items.sort((a,b)=>new Date(b.pubDate)-new Date(a.pubDate));
+
+    // Render
+    area.innerHTML=items.map(item=>{
+      const col=NEWS_COLORS[item.sym]||'var(--blue)';
+      const dt=item.pubDate?new Date(item.pubDate):null;
+      const timeStr=dt?dt.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true,timeZone:'America/New_York'})+' ET':'';
+      const dateStr=dt?dt.toLocaleDateString('es-PR',{month:'short',day:'numeric'}):'';
+      return `<div class="news-card" onclick="window.open('${item.link}','_blank')">
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <span class="news-card-ticker" style="background:${col}22;color:${col};">${item.sym}</span>
+          <span class="news-card-time">${dateStr} ${timeStr}</span>
+        </div>
+        <div class="news-card-title">${item.title}</div>
+        <div class="news-card-source">${item.source}</div>
+      </div>`;
+    }).join('');
+
+  }catch(e){
+    area.innerHTML=`<div style="text-align:center;padding:20px;color:var(--red);font-size:12px;">Error cargando noticias: ${e.message}</div>`;
+  }
+}
+
+// Auto-load ALL news on init
+function initNews(){
+  setTimeout(()=>loadNews('ALL'),2000);
+  // Refresh every 5 minutes
+  setInterval(()=>{
+    if(_newsActive){
+      _newsCache={};
+      loadNews(_newsActive);
+    }
+  },5*60*1000);
+}
+
 async function init(){
   // Restore Finnhub key
   // (dashboard_pin key deprecated — removed)
@@ -3341,6 +3470,8 @@ async function init(){
     .forEach(k=>localStorage.removeItem(k));
   // Load strike ranges on init
   loadStrikeRanges();
+  // Init news panel
+  initNews();
   // Update Telegram button state on load
   if(isTgEnabled()&&getTgToken()&&getTgChat()){
     const btn=document.getElementById('telegramBtn');

@@ -149,7 +149,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
   <div class="card">
     <div style="text-align:center;margin-bottom:10px;">
       <div style="font-size:18px;font-weight:700;color:#fff;">Señales Activas</div>
-      <div style="font-size:11px;color:var(--text2);margin-top:3px;">BB Breakout 15min · A (Verde↑) · B (Roja↓) · C (Sobreexp.Alza) · D (Sobreexp.Baja) · GOOG · TSLA · SPY</div>
+      <div style="font-size:11px;color:var(--text2);margin-top:3px;">BB Breakout · Rebote MA20 · Cambio Tendencia 1H · Efecto Imán · GOOG · TSLA · SPY · QQQ · AAPL · PLTR</div>
     </div>
     <div id="signalArea">
       <div style="text-align:center;padding:20px;color:var(--text2);font-size:13px;">⟳ Calculando señales…</div>
@@ -362,7 +362,7 @@ function saveStrikeRange(){
 }
 
 function loadStrikeRanges(){
-  ['TSLA','GOOG','SPY'].forEach(ticker=>{
+  ['TSLA','GOOG','SPY','QQQ','AAPL','PLTR'].forEach(ticker=>{
     const key=`strike_range_${ticker}`;
     const saved=localStorage.getItem(key);
     if(saved){
@@ -1025,7 +1025,7 @@ async function buildSignals(){
   },90000);
   try{
 
-  for(const sym of['GOOG','TSLA','SPY']){
+  for(const sym of['GOOG','TSLA','SPY','QQQ','AAPL','PLTR']){
     let ohlc1h=null,ohlc15=null,ohlcD=null;
     let dataLabel='📡 Sin fuente';
 
@@ -1167,84 +1167,177 @@ async function buildSignals(){
     // F4: Volumen activo
     const volLabel=avgVol15_10>0?` (${(lVol15/avgVol15_10*100).toFixed(0)}% del promedio)`:'';
 
-    // ── SETUP — Pre-ruptura, precio cerca de la banda ────────────────────────
+    // ── SETUP — Pre-ruptura ─────────────────────────────────────────────────
     const distToUpper=(lUp15-lP15)/lP15*100;
     const distToLower=(lP15-lLow15)/lP15*100;
     const nearUpper=distToUpper>=0&&distToUpper<0.3;
     const nearLower=distToLower>=0&&distToLower<0.3;
-    // Setup only when price is actively touching the band AND bands are starting to expand
-    const bbwRising=lBBW15>lBBW15_1+0.05; // BBW must be meaningfully rising (>0.05% increase)
-    const setupBull=lBBW15<2.0&&nearUpper&&lP15>lMA20_15&&bbwRising&&lH15>=lUp15*0.998;
-    const setupBear=lBBW15<2.0&&nearLower&&lP15<lMA20_15&&bbwRising&&lL15<=lLow15*1.002;
+    const setupBull=lBBW15<2.0&&nearUpper&&lP15>lMA20_15&&bbwRising;
+    const setupBear=lBBW15<2.0&&nearLower&&lP15<lMA20_15&&bbwRising;
     if(setupBull||setupBear){
       const setupType=setupBull?'call':'put';
       const setupDir=setupBull?'Superior':'Inferior';
       const setupDist=(setupBull?distToUpper:distToLower).toFixed(2);
       all.push({...meta,code:'SETUP',name:`Setup BB — Precio cerca de banda ${setupDir}`,type:setupType,isSetup:true,reqs:[
-        {ok:lBBW15<2.0,              tf:'15m',text:`BB comprimido (BBW ${lBBW15.toFixed(1)}% < 2%) — energía acumulada`},
+        {ok:lBBW15<2.0,              tf:'15m',text:`BB comprimido (BBW ${lBBW15.toFixed(1)}% < 2%)`},
         {ok:setupBull||setupBear,    tf:'15m',text:`Precio a ${setupDist}% de banda ${setupDir} ($${(setupBull?lUp15:lLow15).toFixed(2)})`},
-        {ok:setupBull?lP15>lMA20_15:lP15<lMA20_15,tf:'15m',text:`MA20 alineada: precio ${setupBull?'sobre':'bajo'} $${lMA20_15.toFixed(2)}`},
-        {ok:stochCallOk||stochPutOk, tf:'15m',text:`Stochastics apoyando dirección (%K ${lK15.toFixed(0)})`},
-        {ok:bbwRising,               tf:'15m',text:`BBW expandiéndose: ${lBBW15.toFixed(2)}% vs ${lBBW15_1.toFixed(2)}% anterior`},
+        {ok:setupBull?lP15>lMA20_15:lP15<lMA20_15,tf:'15m',text:`MA20 alineada: $${lMA20_15.toFixed(2)}`},
+        {ok:stochCallOk||stochPutOk, tf:'15m',text:`Stochastics apoyando (%K ${lK15.toFixed(0)})`},
+        {ok:bbwRising,               tf:'15m',text:`BBW expandiéndose: ${lBBW15.toFixed(2)}% > ${lBBW15_1.toFixed(2)}%`},
       ]});
     }
 
-    // PATRÓN A — Vela VERDE perforando banda SUPERIOR → CALL
-    const pA_greenCandle=lP15>lO15;
-    const pA_pierceUpper=lH15>lUp15&&isExpanding15; // bands must be expanding
-    const pA_stoch=lK15>lD15&&lK15>30&&lK15<85;
-    if(pA_pierceUpper){
+    // ════════════════════════════════════════════════════════════════════════
+    // ESTRATEGIA 1 — BB BREAKOUT 15MIN
+    // Patrón A: Vela verde perforando banda superior → CALL
+    // Patrón B: Vela roja perforando banda inferior → PUT
+    // Patrón C: Sobreexpuesto alza → PUT (regreso)
+    // Patrón D: Sobreexpuesto baja → CALL (rebote)
+    // ════════════════════════════════════════════════════════════════════════
+    const pA_green=lP15>lO15, pA_up=lH15>lUp15&&isExpanding15;
+    const pB_red=lP15<lO15,   pB_dn=lL15<lLow15&&isExpanding15;
+    const pC_above=lL15>lUp15&&isExpanding15, pC_ret=lP15<lO15;
+    const pD_below=lH15<lLow15&&isExpanding15, pD_ret=lP15>lO15;
+    const stochA=lK15>lD15&&lK15>30&&lK15<85;
+    const stochB=lK15<lD15&&lK15<70&&lK15>15;
+
+    if(pA_up){
       all.push({...meta,code:'BB-A',name:'BB Salida Superior — CALL',type:'call',reqs:[
-        {ok:pA_pierceUpper, tf:'15m',text:`Vela verde perfora banda superior: high $${lH15.toFixed(2)} > BB $${lUp15.toFixed(2)}`},
-        {ok:pA_greenCandle, tf:'15m',text:`Vela alcista: cierre $${lP15.toFixed(2)} > apertura $${lO15.toFixed(2)}`},
-        {ok:volActive15,    tf:'15m',text:`Volumen de compra activo${volLabel}`},
-        {ok:pA_stoch,       tf:'15m',text:`Worden: %K (${lK15.toFixed(0)}) > %D (${lD15.toFixed(0)}) zona 30-85`},
-        {ok:lBBW15>1.5&&isExpanding15, tf:'15m',text:`BB expandiéndose activamente (BBW ${lBBW15.toFixed(1)}% > 1.5%)`},
+        {ok:pA_up,   tf:'15m',text:`High $${lH15.toFixed(2)} > BB superior $${lUp15.toFixed(2)}`},
+        {ok:pA_green,tf:'15m',text:`Vela alcista: cierre $${lP15.toFixed(2)} > apertura $${lO15.toFixed(2)}`},
+        {ok:volActive15,tf:'15m',text:`Volumen activo${volLabel}`},
+        {ok:stochA,  tf:'15m',text:`Worden: %K (${lK15.toFixed(0)}) sobre %D (${lD15.toFixed(0)})`},
+        {ok:lBBW15>1.5,tf:'15m',text:`BB con volatilidad (BBW ${lBBW15.toFixed(1)}%)`},
       ]});
     }
-
-    // PATRÓN B — Vela ROJA perforando banda INFERIOR → PUT
-    const pB_redCandle=lP15<lO15;
-    const pB_pierceLower=lL15<lLow15&&isExpanding15; // bands must be expanding
-    const pB_stoch=lK15<lD15&&lK15<70&&lK15>15;
-    if(pB_pierceLower){
+    if(pB_dn){
       all.push({...meta,code:'BB-B',name:'BB Salida Inferior — PUT',type:'put',reqs:[
-        {ok:pB_pierceLower, tf:'15m',text:`Vela roja perfora banda inferior: low $${lL15.toFixed(2)} < BB $${lLow15.toFixed(2)}`},
-        {ok:pB_redCandle,   tf:'15m',text:`Vela bajista: cierre $${lP15.toFixed(2)} < apertura $${lO15.toFixed(2)}`},
-        {ok:volActive15,    tf:'15m',text:`Volumen de venta activo${volLabel}`},
-        {ok:pB_stoch,       tf:'15m',text:`Worden: %K (${lK15.toFixed(0)}) bajo %D (${lD15.toFixed(0)}) — momentum bajista`},
-        {ok:lBBW15>1.5&&isExpanding15, tf:'15m',text:`BB expandiéndose activamente (BBW ${lBBW15.toFixed(1)}% > 1.5%)`},
+        {ok:pB_dn,  tf:'15m',text:`Low $${lL15.toFixed(2)} < BB inferior $${lLow15.toFixed(2)}`},
+        {ok:pB_red, tf:'15m',text:`Vela bajista: cierre $${lP15.toFixed(2)} < apertura $${lO15.toFixed(2)}`},
+        {ok:volActive15,tf:'15m',text:`Volumen activo${volLabel}`},
+        {ok:stochB, tf:'15m',text:`Worden: %K (${lK15.toFixed(0)}) bajo %D (${lD15.toFixed(0)})`},
+        {ok:lBBW15>1.5,tf:'15m',text:`BB con volatilidad (BBW ${lBBW15.toFixed(1)}%)`},
+      ]});
+    }
+    if(pC_above){
+      all.push({...meta,code:'BB-C',name:'BB Sobreexpuesto Alza — PUT',type:'put',reqs:[
+        {ok:pC_above,tf:'15m',text:`Vela COMPLETA sobre BB: low $${lL15.toFixed(2)} > $${lUp15.toFixed(2)}`},
+        {ok:pC_ret,  tf:'15m',text:`Primera vela bajista de regreso ($${lP15.toFixed(2)} < $${lO15.toFixed(2)})`},
+        {ok:lK15>75, tf:'15m',text:`Worden sobrecomprado: %K ${lK15.toFixed(0)} > 75`},
+        {ok:volActive15,tf:'15m',text:`Volumen activo${volLabel}`},
+        {ok:lBBW15>1.5,tf:'15m',text:`BB expandido (BBW ${lBBW15.toFixed(1)}%)`},
+      ]});
+    }
+    if(pD_below){
+      all.push({...meta,code:'BB-D',name:'BB Sobreexpuesto Baja — CALL',type:'call',reqs:[
+        {ok:pD_below,tf:'15m',text:`Vela COMPLETA bajo BB: high $${lH15.toFixed(2)} < $${lLow15.toFixed(2)}`},
+        {ok:pD_ret,  tf:'15m',text:`Primera vela alcista de rebote ($${lP15.toFixed(2)} > $${lO15.toFixed(2)})`},
+        {ok:lK15<25, tf:'15m',text:`Worden sobrevendido: %K ${lK15.toFixed(0)} < 25`},
+        {ok:volActive15,tf:'15m',text:`Volumen activo${volLabel}`},
+        {ok:lBBW15>1.5,tf:'15m',text:`BB expandido (BBW ${lBBW15.toFixed(1)}%)`},
       ]});
     }
 
-    // PATRÓN C — Sobreexpuesto AL ALZA → PUT (regreso)
-    const pC_aboveBB=lL15>lUp15&&isExpanding15;
-    const pC_redReturn=lP15<lO15;
-    const pC_stochOB=lK15>75;
-    if(pC_aboveBB){
-      all.push({...meta,code:'BB-C',name:'BB Sobreexpuesto Alza — PUT (regreso)',type:'put',reqs:[
-        {ok:pC_aboveBB,     tf:'15m',text:`Vela COMPLETA sobre banda superior: low $${lL15.toFixed(2)} > BB $${lUp15.toFixed(2)}`},
-        {ok:pC_redReturn,   tf:'15m',text:`Primera vela bajista de regreso ($${lP15.toFixed(2)} < apertura $${lO15.toFixed(2)})`},
-        {ok:pC_stochOB,     tf:'15m',text:`Worden sobrecomprado: %K (${lK15.toFixed(0)}) > 75`},
-        {ok:volActive15,    tf:'15m',text:`Volumen confirmando${volLabel}`},
-        {ok:lBBW15>1.5&&isExpanding15, tf:'15m',text:`BB expandiéndose activamente (BBW ${lBBW15.toFixed(1)}% > 1.5%)`},
+    // ════════════════════════════════════════════════════════════════════════
+    // ESTRATEGIA 2 — REBOTE MA20 15MIN
+    // Precio toca MA20, cierra en dirección del rebote
+    // CALL: precio venía de abajo, toca MA20 desde arriba y cierra verde
+    // PUT:  precio venía de arriba, toca MA20 desde abajo y cierra rojo
+    // ════════════════════════════════════════════════════════════════════════
+    const ma20Touch  = Math.abs(lL15-lMA20_15)/lMA20_15<0.002 || Math.abs(lH15-lMA20_15)/lMA20_15<0.002;
+    const ma20Bull   = lP15>lMA20_15&&pP15>lMA20_15; // precio sobre MA20
+    const ma20Bear   = lP15<lMA20_15&&pP15<lMA20_15; // precio bajo MA20
+    const ma20BounceCall = ma20Touch && lP15>lO15 && ma20Bull && lL15<=lMA20_15*1.002;
+    const ma20BouncePut  = ma20Touch && lP15<lO15 && ma20Bear && lH15>=lMA20_15*0.998;
+
+    if(ma20BounceCall){
+      all.push({...meta,code:'MA20-R',name:'Rebote MA20 — CALL',type:'call',reqs:[
+        {ok:ma20Touch,     tf:'15m',text:`Precio tocó MA20 ($${lMA20_15.toFixed(2)}) — low $${lL15.toFixed(2)}`},
+        {ok:lP15>lO15,     tf:'15m',text:`Vela alcista: cierre $${lP15.toFixed(2)} > apertura $${lO15.toFixed(2)}`},
+        {ok:ma20Bull,      tf:'15m',text:`Precio sobre MA20 — soporte confirmado`},
+        {ok:stochA,        tf:'15m',text:`Worden: %K (${lK15.toFixed(0)}) > %D (${lD15.toFixed(0)})`},
+        {ok:volActive15,   tf:'15m',text:`Volumen activo${volLabel}`},
+      ]});
+    }
+    if(ma20BouncePut){
+      all.push({...meta,code:'MA20-R',name:'Rebote MA20 — PUT',type:'put',reqs:[
+        {ok:ma20Touch,     tf:'15m',text:`Precio tocó MA20 ($${lMA20_15.toFixed(2)}) — high $${lH15.toFixed(2)}`},
+        {ok:lP15<lO15,     tf:'15m',text:`Vela bajista: cierre $${lP15.toFixed(2)} < apertura $${lO15.toFixed(2)}`},
+        {ok:ma20Bear,      tf:'15m',text:`Precio bajo MA20 — resistencia confirmada`},
+        {ok:stochB,        tf:'15m',text:`Worden: %K (${lK15.toFixed(0)}) < %D (${lD15.toFixed(0)})`},
+        {ok:volActive15,   tf:'15m',text:`Volumen activo${volLabel}`},
       ]});
     }
 
-    // PATRÓN D — Sobreexpuesto A LA BAJA → CALL (rebote)
-    const pD_belowBB=lH15<lLow15&&isExpanding15;
-    const pD_greenReturn=lP15>lO15;
-    const pD_stochOS=lK15<25;
-    if(pD_belowBB){
-      all.push({...meta,code:'BB-D',name:'BB Sobreexpuesto Baja — CALL (rebote)',type:'call',reqs:[
-        {ok:pD_belowBB,     tf:'15m',text:`Vela COMPLETA bajo banda inferior: high $${lH15.toFixed(2)} < BB $${lLow15.toFixed(2)}`},
-        {ok:pD_greenReturn, tf:'15m',text:`Primera vela alcista de rebote ($${lP15.toFixed(2)} > apertura $${lO15.toFixed(2)})`},
-        {ok:pD_stochOS,     tf:'15m',text:`Worden sobrevendido: %K (${lK15.toFixed(0)}) < 25`},
-        {ok:volActive15,    tf:'15m',text:`Volumen confirmando${volLabel}`},
-        {ok:lBBW15>1.5&&isExpanding15, tf:'15m',text:`BB expandiéndose activamente (BBW ${lBBW15.toFixed(1)}% > 1.5%)`},
+    // ════════════════════════════════════════════════════════════════════════
+    // ESTRATEGIA 3 — CAMBIO DE TENDENCIA 1H + CONFIRMACIÓN 15MIN
+    // Trendline en 1H roto + 2 velas en 15min confirmando dirección
+    // ════════════════════════════════════════════════════════════════════════
+    // Detect trendline break in 1H — use already-declared c1h/h1h/l1h/n1h
+    const tlBear=trendlineFromPivots(h1h,'highs',3); // descending highs → bearish trendline
+    const tlBull=trendlineFromPivots(l1h,'lows',3);  // ascending lows → bullish trendline
+    const tlBearVal=tlBear?tlBear.slope*(n1h-1)+tlBear.intercept:null;
+    const tlBullVal=tlBull?tlBull.slope*(n1h-1)+tlBull.intercept:null;
+
+    // Break above bearish trendline → CALL
+    const breakBull=tlBearVal!==null&&c1h[n1h-1]>tlBearVal*1.001&&c1h[n1h-2]<=tlBearVal*1.003;
+    // Break below bullish trendline → PUT
+    const breakBear=tlBullVal!==null&&c1h[n1h-1]<tlBullVal*0.999&&c1h[n1h-2]>=tlBullVal*0.997;
+
+    // 15min confirmation: 2 closes in direction of break
+    const conf15Bull=c15[n15-1]>c15[n15-2]&&c15[n15-2]>c15[n15-3];
+    const conf15Bear=c15[n15-1]<c15[n15-2]&&c15[n15-2]<c15[n15-3];
+
+    if(breakBull){
+      all.push({...meta,code:'CT-1H',name:'Cambio de Tendencia 1H — CALL',type:'call',reqs:[
+        {ok:breakBull,     tf:'1H', text:`Precio rompe trendline bajista: $${c1h[n1h-1].toFixed(2)} > $${tlBearVal.toFixed(2)} (${tlBear.pivotCount} pivots)`},
+        {ok:conf15Bull,    tf:'15m',text:`2 velas verdes confirmando el rompimiento`},
+        {ok:lP1h>lMA20_1h, tf:'1H', text:`Precio sobre MA20 1H ($${lMA20_1h.toFixed(2)})`},
+        {ok:stochA,        tf:'15m',text:`Worden: %K (${lK15.toFixed(0)}) > %D (${lD15.toFixed(0)})`},
+        {ok:volActive15,   tf:'15m',text:`Volumen activo${volLabel}`},
+      ]});
+    }
+    if(breakBear){
+      all.push({...meta,code:'CT-1H',name:'Cambio de Tendencia 1H — PUT',type:'put',reqs:[
+        {ok:breakBear,     tf:'1H', text:`Precio rompe trendline alcista: $${c1h[n1h-1].toFixed(2)} < $${tlBullVal.toFixed(2)} (${tlBull.pivotCount} pivots)`},
+        {ok:conf15Bear,    tf:'15m',text:`2 velas rojas confirmando el rompimiento`},
+        {ok:lP1h<lMA20_1h, tf:'1H', text:`Precio bajo MA20 1H ($${lMA20_1h.toFixed(2)})`},
+        {ok:stochB,        tf:'15m',text:`Worden: %K (${lK15.toFixed(0)}) < %D (${lD15.toFixed(0)})`},
+        {ok:volActive15,   tf:'15m',text:`Volumen activo${volLabel}`},
+      ]});
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // ESTRATEGIA 4 — EFECTO IMÁN 15MIN (solo apertura 9:30–9:40 AM ET)
+    // Precio abre alejado de MA20 ≥1.5% → regresa hacia ella
+    // ════════════════════════════════════════════════════════════════════════
+    const _etNow15=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+    const _mNow=_etNow15.getHours()*60+_etNow15.getMinutes();
+    const _isOpen15=_mNow>=570&&_mNow<=580; // 9:30–9:40 AM ET only
+    const distFromMA20_15=lMA20_15>0?(lP15-lMA20_15)/lMA20_15*100:0;
+    const gapUp15=distFromMA20_15>=1.5;    // precio 1.5%+ sobre MA20 → PUT (imán hacia abajo)
+    const gapDown15=distFromMA20_15<=-1.5; // precio 1.5%+ bajo MA20 → CALL (imán hacia arriba)
+
+    if((_isOpen15||_testMode||_debugMode)&&gapUp15){
+      all.push({...meta,code:'IMAN',name:'Efecto Imán Apertura — PUT',type:'put',reqs:[
+        {ok:gapUp15,       tf:'15m',text:`Precio $${lP15.toFixed(2)} está ${distFromMA20_15.toFixed(1)}% sobre MA20 ($${lMA20_15.toFixed(2)})`},
+        {ok:_isOpen15||_testMode||_debugMode,tf:'15m',text:`Ventana de apertura 9:30–9:40 AM ET`},
+        {ok:lK15>60,       tf:'15m',text:`Worden sobrecomprado en apertura (%K ${lK15.toFixed(0)})`},
+        {ok:volActive15,   tf:'15m',text:`Volumen activo${volLabel}`},
+        {ok:lBBW15>1.0,    tf:'15m',text:`Volatilidad activa (BBW ${lBBW15.toFixed(1)}%)`},
+      ]});
+    }
+    if((_isOpen15||_testMode||_debugMode)&&gapDown15){
+      all.push({...meta,code:'IMAN',name:'Efecto Imán Apertura — CALL',type:'call',reqs:[
+        {ok:gapDown15,     tf:'15m',text:`Precio $${lP15.toFixed(2)} está ${Math.abs(distFromMA20_15).toFixed(1)}% bajo MA20 ($${lMA20_15.toFixed(2)})`},
+        {ok:_isOpen15||_testMode||_debugMode,tf:'15m',text:`Ventana de apertura 9:30–9:40 AM ET`},
+        {ok:lK15<40,       tf:'15m',text:`Worden sobrevendido en apertura (%K ${lK15.toFixed(0)})`},
+        {ok:volActive15,   tf:'15m',text:`Volumen activo${volLabel}`},
+        {ok:lBBW15>1.0,    tf:'15m',text:`Volatilidad activa (BBW ${lBBW15.toFixed(1)}%)`},
       ]});
     }
   }
+
 
   // End of data fetching loop
   }catch(_sigErr){

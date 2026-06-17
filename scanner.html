@@ -1014,7 +1014,7 @@ async function buildSignals(){
   const _sigMins=_etSig.getHours()*60+_etSig.getMinutes();
   const _sigDay=_etSig.getDay();
   const _isMarketHours=_sigDay>=1&&_sigDay<=5&&_sigMins>=515&&_sigMins<960; // 8:35AM-4PM
-  if(!_isMarketHours&&!_testMode){
+  if(!_isMarketHours&&!_testMode&&!_debugMode){
     area.innerHTML='<div style="text-align:center;padding:30px;color:var(--text2);font-size:13px;"><div style="font-size:28px;margin-bottom:10px">🌙</div><div style="font-weight:600;">Mercado cerrado</div><div style="font-size:12px;margin-top:8px;color:var(--text3);">Las señales solo están disponibles durante horario de mercado (8:35 AM – 4:00 PM ET)</div></div>';
     return;
   }
@@ -1757,25 +1757,38 @@ function showRulesPopup(){
 // ═══════════════════════════════════════════════════════════════
 // STRIKE LOG
 // ═══════════════════════════════════════════════════════════════
-function openStrikeLog(ticker,color){_strikeTicker=ticker;_strikeColor=color;
-  const t=document.getElementById('strikeModalTitle');if(t){t.textContent=ticker;t.style.color=color;}
+function openStrikeLog(ticker,color){
+  _strikeTicker=ticker;_strikeColor=color;
+  // Set modal title
+  const t=document.getElementById('strikeModalTitle');
+  if(t){t.textContent=ticker;t.style.color=color;}
+  // Set today's day in select
   const days=['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
   const today=days[new Date().getDay()];
   const sel=document.getElementById('strikeDay');
-  for(let i=0;i<sel.options.length;i++){if(sel.options[i].value===today){sel.selectedIndex=i;break;}}
-  document.getElementById('strikeDist').value='';
-  document.getElementById('strikeModal').style.display='flex';
-  // Load saved range for this ticker
+  if(sel){for(let i=0;i<sel.options.length;i++){
+    if(sel.options[i].text===today||sel.options[i].value===today){sel.selectedIndex=i;break;}
+  }}
+  // Clear inputs
+  const distEl=document.getElementById('strikeDist');
+  if(distEl)distEl.value='';
+  // Show modal
+  const modal=document.getElementById('strikeModal');
+  if(!modal){console.error('strikeModal not found');return;}
+  modal.style.display='flex';
+  // Load saved range
   const defaults={TSLA:{min:100,max:250},GOOG:{min:60,max:170},SPY:{min:30,max:45}};
-  const saved=localStorage.getItem(`strike_range_${ticker}`);
-  const range=saved?JSON.parse(saved):defaults[ticker]||{min:'',max:''};
+  let range={min:'',max:''};
+  try{const saved=localStorage.getItem('strike_range_'+ticker);if(saved)range=JSON.parse(saved);}catch(e){}
+  if(!range.min)range=defaults[ticker]||{min:'',max:''};
   const minEl=document.getElementById('strikeRangeMin');
   const maxEl=document.getElementById('strikeRangeMax');
   if(minEl)minEl.value=range.min||'';
   if(maxEl)maxEl.value=range.max||'';
-  loadStrikeFundamentals(ticker);
+  // Render log
+  try{loadStrikeFundamentals(ticker);}catch(e){}
   renderStrikeLog();
-  setTimeout(()=>document.getElementById('strikeDist').focus(),100);
+  setTimeout(()=>{const d=document.getElementById('strikeDist');if(d)d.focus();},150);
 }
 function closeStrikeModal(){document.getElementById('strikeModal').style.display='none';}
 function saveStrikeFundamentals(){
@@ -3485,9 +3498,17 @@ init();
     </div>
     <!-- Log entries -->
     <div id="strikeLogArea" style="padding:10px 16px;flex:1;min-height:100px;"></div>
-    <!-- Export/Import -->
-    <div style="padding:10px 16px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end;flex-shrink:0;">
-      <button onclick="exportStrikeLog()" style="background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--text2);padding:5px 14px;font-size:12px;cursor:pointer;">↓ Exportar</button>
+    <!-- Target price + recommendation -->
+    <div style="padding:8px 16px;border-top:1px solid var(--border);display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+      <input type="number" id="strikeTargetPrice" placeholder="Target $" step="0.01"
+        style="width:100px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--green);padding:5px 8px;font-size:12px;font-family:var(--mono);outline:none;"
+        oninput="saveStrikeFundamentals()">
+      <input type="number" id="strikeRecom" placeholder="Recom. $" step="0.01"
+        style="width:100px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--blue);padding:5px 8px;font-size:12px;font-family:var(--mono);outline:none;"
+        oninput="saveStrikeFundamentals()">
+      <div style="margin-left:auto;display:flex;gap:8px;">
+        <button onclick="exportStrikeLog()" style="background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--text2);padding:5px 14px;font-size:12px;cursor:pointer;">↓ Exportar</button>
+      </div>
     </div>
   </div>
 </div>

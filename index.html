@@ -102,6 +102,14 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
 .news-card-title{font-size:12px;color:var(--text);margin-top:5px;line-height:1.4;}
 .news-card-source{font-size:10px;color:var(--text3);margin-top:4px;}
 
+/* ── Historial ── */
+.hist-filter-btn{background:var(--bg3);border:1px solid var(--border2);border-radius:12px;color:var(--text3);padding:3px 10px;font-size:11px;font-weight:600;cursor:pointer;font-family:var(--sans);}
+.hist-filter-btn.active{background:var(--blue);border-color:var(--blue);color:#fff;}
+.hist-entry{background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px;display:flex;gap:10px;align-items:flex-start;}
+.hist-entry.call{border-left:3px solid var(--green);}
+.hist-entry.put{border-left:3px solid var(--red);}
+.hist-outcome-btn{border:none;border-radius:6px;font-size:11px;font-weight:700;padding:3px 10px;cursor:pointer;white-space:nowrap;}
+
 </style>
 </head>
 <body>
@@ -141,6 +149,13 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
   <button id="telegramBtn" onclick="openTelegramModal()"
     style="background:rgba(41,182,246,.15);border:1px solid rgba(41,182,246,.4);border-radius:20px;color:#29b6f6;padding:4px 14px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--sans);white-space:nowrap;">
     ✈️ Telegram
+  </button>
+
+  <!-- Historial button -->
+  <button onclick="openHistorialModal()"
+    style="background:rgba(255,194,52,.1);border:1px solid rgba(255,194,52,.4);border-radius:20px;color:var(--yellow);padding:4px 14px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--sans);white-space:nowrap;">
+    📋 Historial
+    <span id="histBadge" style="display:none;background:var(--yellow);color:#000;border-radius:10px;padding:1px 6px;font-size:10px;margin-left:4px;">0</span>
   </button>
 
   <!-- DEBUG button -->
@@ -1389,6 +1404,16 @@ async function buildSignals(){
 
   const active=all.map(s=>({...s,passed:s.reqs.filter(r=>r.ok).length}))
     .filter(s=>_debugMode||(s.isSetup&&Math.round(s.passed/s.reqs.length*100)>=60)||(!s.isSetup&&Math.round(s.passed/s.reqs.length*100)>=75))
+    .filter(s=>_debugMode||s.isSetup||!s._detectedAt||Date.now()-s._detectedAt<3600000)
+    .map(s=>{
+      // Track first detection time
+      if(!s._detectedAt){s._detectedAt=Date.now();}
+      if(!s._timeET){
+        const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+        s._timeET=et.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true});
+      }
+      return s;
+    })
     .sort((a,b)=>b.passed-a.passed);
 
   if(!active.length){
@@ -1417,6 +1442,11 @@ async function buildSignals(){
     const hdr=s.type==='call'?'sig-call':'sig-put';
     const fullSignal=s.passed===total;
     const accentCol=s.isSetup?'#ffc234':s.type==='call'?'#00d17a':'#ff4d6d';
+    // Save to historial when signal reaches 75%+
+    if(!s.isSetup&&disp>=75){
+      s.pct_signal=disp;
+      addToHistorial(s);
+    }
     // Send Telegram SETUP notification
     if(s.isSetup){
       const _today=new Date().toLocaleDateString('es-PR');
@@ -1504,6 +1534,7 @@ async function buildSignals(){
           <div style="font-size:12px;color:rgba(255,255,255,.8);font-weight:600;">${s.name}</div>
           <div style="font-size:11px;color:rgba(255,255,255,.55);margin-top:2px;">
             $${s.price.toFixed(2)} <span style="color:${s.pct>=0?'rgba(0,209,122,.9)':'rgba(255,77,109,.9)'}">(${s.pct>=0?'+':''}${s.pct.toFixed(2)}%)</span> · ${s.dataLabel}
+            ${s._timeET?`<span style="color:rgba(255,194,52,.8);margin-left:4px;">· ${s._timeET} ET</span>`:''}
           </div>
         </div>
         <div style="text-align:right;flex-shrink:0;margin-left:10px;">
@@ -1528,6 +1559,9 @@ async function buildSignals(){
           <div style="font-size:10px;color:var(--text3);margin-bottom:4px;">📈 Precio 1H · BB (azul) · MA20 (amarillo)</div>
           ${chartSvg}
         </div>`:''}
+        ${!s.isSetup?`<textarea placeholder="📝 Notas..." rows="2"
+          style="width:100%;margin-top:8px;background:rgba(0,0,0,.25);border:1px solid rgba(255,255,255,.1);border-radius:6px;color:rgba(255,255,255,.8);font-size:11px;padding:6px 8px;resize:none;outline:none;font-family:var(--sans);box-sizing:border-box;"
+          onchange="saveSignalNote('${s.sym}','${s.code}',this.value)">${s._note||''}</textarea>`:''}
       </div>
     </div>`;
   });
@@ -3365,6 +3399,159 @@ async function manualScan(){
 // ═══ END MORNING SCANNER ═══
 
 // ═══════════════════════════════════════════════════════════════
+// HISTORIAL DE SEÑALES
+// ═══════════════════════════════════════════════════════════════
+const HIST_KEY='tdp_signal_history';
+const HIST_MAX=20;
+const HIST_DAYS=3;
+
+function getHistorial(){
+  try{
+    const raw=localStorage.getItem(HIST_KEY);
+    if(!raw)return[];
+    const all=JSON.parse(raw);
+    // Remove entries older than 3 days
+    const cutoff=Date.now()-HIST_DAYS*24*60*60*1000;
+    return all.filter(e=>e.ts>cutoff);
+  }catch(e){return[];}
+}
+
+function saveHistorial(entries){
+  try{localStorage.setItem(HIST_KEY,JSON.stringify(entries));}catch(e){}
+}
+
+function addToHistorial(signal){
+  let entries=getHistorial();
+  // Avoid duplicates: same sym+code within 1 hour
+  const recent=entries.find(e=>e.sym===signal.sym&&e.code===signal.code&&Date.now()-e.ts<3600000);
+  if(recent)return;
+  const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+  const entry={
+    id:Date.now(),
+    ts:Date.now(),
+    sym:signal.sym,
+    code:signal.code,
+    name:signal.name,
+    type:signal.type,
+    price:signal.price,
+    pct:signal.pct,
+    pct_signal:signal.pct_signal||100,
+    time:et.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true}),
+    date:et.toLocaleDateString('es-PR',{weekday:'short',month:'short',day:'numeric'}),
+    outcome:null, // null=pending, 'win'=correct, 'loss'=incorrect
+    note:'',
+  };
+  entries.unshift(entry);
+  if(entries.length>HIST_MAX)entries=entries.slice(0,HIST_MAX);
+  saveHistorial(entries);
+  updateHistBadge();
+}
+
+function updateHistBadge(){
+  const badge=document.getElementById('histBadge');
+  if(!badge)return;
+  const entries=getHistorial();
+  const pending=entries.filter(e=>e.outcome===null).length;
+  if(pending>0){badge.style.display='inline';badge.textContent=pending;}
+  else{badge.style.display='none';}
+}
+
+function setOutcome(id,outcome){
+  const entries=getHistorial();
+  const e=entries.find(e=>e.id===id);
+  if(e){e.outcome=e.outcome===outcome?null:outcome;} // toggle
+  saveHistorial(entries);
+  renderHistorialList(document.getElementById('hf-all')?.classList.contains('active')?'all':
+    document.getElementById('hf-win')?.classList.contains('active')?'win':
+    document.getElementById('hf-loss')?.classList.contains('active')?'loss':
+    document.getElementById('hf-call')?.classList.contains('active')?'call':'put');
+  updateHistBadge();
+}
+
+function saveHistNote(id,note){
+  const entries=getHistorial();
+  const e=entries.find(e=>e.id===id);
+  if(e)e.note=note;
+  saveHistorial(entries);
+}
+
+let _histFilter='all';
+function filterHistorial(f){
+  _histFilter=f;
+  document.querySelectorAll('.hist-filter-btn').forEach(b=>b.classList.remove('active'));
+  document.getElementById('hf-'+f)?.classList.add('active');
+  renderHistorialList(f);
+}
+
+function renderHistorialList(filter){
+  const area=document.getElementById('historialList');
+  if(!area)return;
+  let entries=getHistorial();
+  if(filter==='call')entries=entries.filter(e=>e.type==='call');
+  else if(filter==='put')entries=entries.filter(e=>e.type==='put');
+  else if(filter==='win')entries=entries.filter(e=>e.outcome==='win');
+  else if(filter==='loss')entries=entries.filter(e=>e.outcome==='loss');
+
+  // Stats
+  const all=getHistorial();
+  const wins=all.filter(e=>e.outcome==='win').length;
+  const losses=all.filter(e=>e.outcome==='loss').length;
+  const total=wins+losses;
+  const statsEl=document.getElementById('histStats');
+  if(statsEl)statsEl.textContent=total>0?`${wins}/${total} correctas (${Math.round(wins/total*100)}%)`:'Sin resultados aún';
+
+  if(!entries.length){
+    area.innerHTML='<div style="text-align:center;padding:30px;color:var(--text3);font-size:13px;">Sin señales en este período</div>';
+    return;
+  }
+
+  area.innerHTML=entries.map(e=>{
+    const col=e.type==='call'?'var(--green)':'var(--red)';
+    const outcomeBtn=(oc,label,col)=>`<button class="hist-outcome-btn" onclick="setOutcome(${e.id},'${oc}')"
+      style="background:${e.outcome===oc?col:'var(--bg4)'};color:${e.outcome===oc?'#fff':'var(--text3)'};">
+      ${label}</button>`;
+    return `<div class="hist-entry ${e.type}">
+      <div style="flex:1;min-width:0;">
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:4px;">
+          <span style="font-size:13px;font-weight:700;color:${col};">${e.sym}</span>
+          <span style="font-size:10px;background:var(--bg4);border:1px solid var(--border2);border-radius:8px;padding:1px 7px;color:var(--text2);">${e.code}</span>
+          <span style="font-size:11px;font-weight:700;color:${col};">${e.type.toUpperCase()}</span>
+          <span style="font-size:11px;color:var(--green);font-weight:700;">${e.pct_signal}%</span>
+          <span style="font-size:10px;color:var(--text3);margin-left:auto;">${e.date} · ${e.time} ET</span>
+        </div>
+        <div style="font-size:12px;color:var(--text2);margin-bottom:6px;">${e.name} · $${(e.price||0).toFixed(2)} · ${e.pct>=0?'+':''}${(e.pct||0).toFixed(2)}%</div>
+        <div style="display:flex;gap:6px;margin-bottom:6px;">
+          ${outcomeBtn('win','✅ Correcta','var(--green)')}
+          ${outcomeBtn('loss','❌ Incorrecta','var(--red)')}
+        </div>
+        <input type="text" placeholder="Notas..." value="${(e.note||'').replace(/"/g,'&quot;')}"
+          onchange="saveHistNote(${e.id},this.value)"
+          style="width:100%;background:var(--bg4);border:1px solid var(--border);border-radius:var(--r);color:var(--text);font-size:11px;padding:5px 8px;outline:none;box-sizing:border-box;">
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function saveSignalNote(sym,code,note){
+  const entries=getHistorial();
+  const e=entries.find(e=>e.sym===sym&&e.code===code);
+  if(e){e.note=note;saveHistorial(entries);}
+}
+function openHistorialModal(){
+  renderHistorialList(_histFilter);
+  document.getElementById('historialModal').style.display='flex';
+}
+function closeHistorialModal(){
+  document.getElementById('historialModal').style.display='none';
+}
+function clearHistorial(){
+  if(!confirm('¿Limpiar todo el historial?'))return;
+  localStorage.removeItem(HIST_KEY);
+  renderHistorialList('all');
+  updateHistBadge();
+}
+
+// ═══════════════════════════════════════════════════════════════
 // NEWS PANEL — Yahoo Finance RSS via allorigins proxy
 // ═══════════════════════════════════════════════════════════════
 let _newsCache={}, _newsActive='';
@@ -3739,6 +3926,36 @@ init();
         <button onclick="exportStrikeLog()" style="background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--text2);padding:5px 14px;font-size:12px;cursor:pointer;">↓ Exportar</button>
       </div>
     </div>
+  </div>
+</div>
+
+
+<!-- Historial Modal -->
+<div id="historialModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:1001;align-items:center;justify-content:center;padding:16px;">
+  <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:var(--rl);width:100%;max-width:720px;max-height:88vh;display:flex;flex-direction:column;">
+    <!-- Header -->
+    <div style="padding:14px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <span style="font-size:16px;">📋</span>
+        <span style="font-size:15px;font-weight:700;color:#fff;">Historial de Señales</span>
+        <span style="font-size:11px;color:var(--text3);">últimos 3 días · máx 20</span>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <span id="histStats" style="font-size:11px;color:var(--text3);"></span>
+        <button onclick="clearHistorial()" style="background:none;border:1px solid var(--border2);border-radius:var(--r);color:var(--text3);font-size:11px;padding:4px 10px;cursor:pointer;">🗑 Limpiar</button>
+        <button onclick="closeHistorialModal()" style="background:none;border:none;color:var(--text2);font-size:20px;cursor:pointer;padding:0 4px;line-height:1;">×</button>
+      </div>
+    </div>
+    <!-- Filter tabs -->
+    <div style="padding:8px 16px;border-bottom:1px solid var(--border);display:flex;gap:6px;flex-shrink:0;">
+      <button onclick="filterHistorial('all')"  class="hist-filter-btn active" id="hf-all">Todas</button>
+      <button onclick="filterHistorial('call')" class="hist-filter-btn" id="hf-call">✅ CALL</button>
+      <button onclick="filterHistorial('put')"  class="hist-filter-btn" id="hf-put">✅ PUT</button>
+      <button onclick="filterHistorial('win')"  class="hist-filter-btn" id="hf-win">🟢 Correctas</button>
+      <button onclick="filterHistorial('loss')" class="hist-filter-btn" id="hf-loss">🔴 Incorrectas</button>
+    </div>
+    <!-- Entries -->
+    <div id="historialList" style="flex:1;overflow-y:auto;padding:10px 16px;"></div>
   </div>
 </div>
 

@@ -120,7 +120,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
   <div class="logo">Trade<span>Desk</span> Pro</div>
 
   <!-- Schwab button -->
-  <button id="schwabBtn" onclick="requirePin(showSchwabModal,'PIN para Schwab')"
+  <button id="schwabBtn" onclick="showSchwabModal()"
     style="background:var(--red-bg);border:1px solid var(--red);border-radius:20px;color:var(--red);padding:4px 16px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--sans);white-space:nowrap;">
     Schwabs
   </button>
@@ -1223,8 +1223,8 @@ async function buildSignals(){
     const distToLower=(lP15-lLow15)/lP15*100;
     const nearUpper=distToUpper>=0&&distToUpper<0.3;
     const nearLower=distToLower>=0&&distToLower<0.3;
-    const setupBull=lBBW15<2.0&&nearUpper&&lP15>lMA20_15&&bbwRising;
-    const setupBear=lBBW15<2.0&&nearLower&&lP15<lMA20_15&&bbwRising;
+    const setupBull=lBBW15<2.0&&nearUpper&&lP15>lMA20_15&&bbwRising&&stochCallOk;
+    const setupBear=lBBW15<2.0&&nearLower&&lP15<lMA20_15&&bbwRising&&stochPutOk;
     if(setupBull||setupBear){
       const setupType=setupBull?'call':'put';
       const setupDir=setupBull?'Superior':'Inferior';
@@ -1252,7 +1252,7 @@ async function buildSignals(){
     const stochA=lK15>lD15&&lK15>30&&lK15<85;
     const stochB=lK15<lD15&&lK15<70&&lK15>15;
 
-    if(pA_up){
+    if(pA_up&&pA_green){
       all.push({...meta,code:'BB-A',name:'BB Salida Superior — CALL',type:'call',reqs:[
         {ok:pA_up,   tf:'15m',text:`High $${lH15.toFixed(2)} > BB superior $${lUp15.toFixed(2)}`},
         {ok:pA_green,tf:'15m',text:`Vela alcista: cierre $${lP15.toFixed(2)} > apertura $${lO15.toFixed(2)}`},
@@ -1261,7 +1261,7 @@ async function buildSignals(){
         {ok:lBBW15>1.5,tf:'15m',text:`BB con volatilidad (BBW ${lBBW15.toFixed(1)}%)`},
       ]});
     }
-    if(pB_dn){
+    if(pB_dn&&pB_red){
       all.push({...meta,code:'BB-B',name:'BB Salida Inferior — PUT',type:'put',reqs:[
         {ok:pB_dn,  tf:'15m',text:`Low $${lL15.toFixed(2)} < BB inferior $${lLow15.toFixed(2)}`},
         {ok:pB_red, tf:'15m',text:`Vela bajista: cierre $${lP15.toFixed(2)} < apertura $${lO15.toFixed(2)}`},
@@ -1298,8 +1298,8 @@ async function buildSignals(){
     const ma20Touch  = Math.abs(lL15-lMA20_15)/lMA20_15<0.002 || Math.abs(lH15-lMA20_15)/lMA20_15<0.002;
     const ma20Bull   = lP15>lMA20_15&&pP15>lMA20_15; // precio sobre MA20
     const ma20Bear   = lP15<lMA20_15&&pP15<lMA20_15; // precio bajo MA20
-    const ma20BounceCall = ma20Touch && lP15>lO15 && ma20Bull && lL15<=lMA20_15*1.002;
-    const ma20BouncePut  = ma20Touch && lP15<lO15 && ma20Bear && lH15>=lMA20_15*0.998;
+    const ma20BounceCall = ma20Touch && lP15>lO15 && ma20Bull && lL15<=lMA20_15*1.002 && align1hBull;
+    const ma20BouncePut  = ma20Touch && lP15<lO15 && ma20Bear && lH15>=lMA20_15*0.998 && align1hBear;
 
     if(ma20BounceCall){
       all.push({...meta,code:'MA20-R',name:'Rebote MA20 — CALL',type:'call',reqs:[

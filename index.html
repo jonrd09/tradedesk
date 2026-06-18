@@ -1528,35 +1528,28 @@ async function buildSignals(){
       s.pct_signal=disp;
       addToHistorial(s);
     }
-    // Send Telegram SETUP notification
+    // Send Telegram SETUP notification — una vez por ventana de escaneo
     if(s.isSetup){
       const _today=new Date().toLocaleDateString('es-PR');
-      const _setupKey=`tg_sent_setup_${s.sym}_${_today}`;
-      if(!localStorage.getItem(_setupKey)){
+      const _etS=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+      const _mS=_etS.getHours()*60+_etS.getMinutes();
+      const _winS=(_mS>=570&&_mS<630)?'apertura':(_mS>=780&&_mS<840)?'mediodia':(_mS>=930&&_mS<950)?'cierre':'resto';
+      const _setupKey=`tg_sent_setup_${s.sym}_${_today}_${_winS}`;
+      if(isTgEnabled()&&!localStorage.getItem(_setupKey)){
         localStorage.setItem(_setupKey,'1');
-        const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
-        const time=et.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true});
-        const msg=`⚡ *SETUP DETECTADO — ${s.sym}*
-
-`+
-          `📊 ${s.name}
-`+
-          `💰 Precio: *$${s.price.toFixed(2)}*
-`+
-          `🎯 BB comprimido — ruptura inminente
-`+
-          `🕐 ${time} ET
-
-`+
-          `_Prepárate para la señal real_`;
+        const time=_etS.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true});
+        const msg=`⚡ *SETUP DETECTADO — ${s.sym}*\n\n📊 ${s.name}\n💰 Precio: *$${s.price.toFixed(2)}*\n🎯 BB comprimido — ruptura inminente\n🕐 ${time} ET\n\n_Prepárate para la señal real_`;
         getTgToken()&&sendTelegram(msg,getTgToken(),getTgChat());
       }
     }
-    // Send Telegram notification for new signals (track sent to avoid duplicates)
+    // Send Telegram notification for new signals
+    // Clave de deduplicación: por ventana de escaneo del día (no por hora)
+    // Ventanas: apertura(570-630), mediodia(780-840), cierre(930-950), resto(otras)
     const _etNow=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
-    const _hourKey=`${_etNow.toLocaleDateString('es-PR')}_${_etNow.getHours()}`;
-    const _sigKey=`tg_sent_${s.sym}_${s.code}_${_hourKey}`;
-    if(disp>=75&&!localStorage.getItem(_sigKey)){
+    const _nowM=_etNow.getHours()*60+_etNow.getMinutes();
+    const _window=(_nowM>=570&&_nowM<630)?'apertura':(_nowM>=780&&_nowM<840)?'mediodia':(_nowM>=930&&_nowM<950)?'cierre':'resto';
+    const _sigKey=`tg_sent_${s.sym}_${s.code}_${s.type}_${_etNow.toLocaleDateString('es-PR')}_${_window}`;
+    if(disp>=75&&isTgEnabled()&&!localStorage.getItem(_sigKey)){
       localStorage.setItem(_sigKey,'1');
       notifySignal(s.sym,s.code,s.name,s.type,disp,s.price,s.pct);
     }

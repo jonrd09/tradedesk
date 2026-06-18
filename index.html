@@ -158,10 +158,14 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
     <span id="histBadge" style="display:none;background:var(--yellow);color:#000;border-radius:10px;padding:1px 6px;font-size:10px;margin-left:4px;">0</span>
   </button>
 
-  <!-- DEBUG button -->
-  <button id="testBtn" onclick="runDebugMode()"
-    style="background:rgba(167,139,250,.15);border:1px solid rgba(167,139,250,.5);border-radius:20px;color:var(--purple);padding:4px 14px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--sans);white-space:nowrap;">
-    🔍 Debug
+  <!-- LIVE indicator + TEST button -->
+  <button id="liveBtn" onclick="setLiveMode()"
+    style="background:var(--green-bg);border:1px solid var(--green);border-radius:20px;color:var(--green);padding:4px 14px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--sans);white-space:nowrap;">
+    🟢 Live
+  </button>
+  <button id="testBtn" onclick="setTestMode()"
+    style="background:var(--bg3);border:1px solid var(--border2);border-radius:20px;color:var(--text3);padding:4px 14px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--sans);white-space:nowrap;">
+    🧪 Test
   </button>
 </header>
 
@@ -2327,44 +2331,36 @@ function renderInsiderTable(data){
 // ═══════════════════════════════════════════════════════════════
 // TEST MODE — Datos históricos reales para verificar lógica
 // ═══════════════════════════════════════════════════════════════
-async function runDebugMode(){
-  const btn=document.getElementById('testBtn');
-  // Ciclo: Normal → Debug (datos reales sin filtro) → Test (datos sintéticos) → Normal
-  if(!_debugMode&&!_testMode){
-    // → Modo Debug: datos reales, sin filtro de 75%
-    _debugMode=true;
-    btn.textContent='🔍 Debug ON';
-    btn.style.background='rgba(255,194,52,.25)';
-    btn.style.borderColor='rgba(255,194,52,.8)';
-    btn.style.color='#ffc234';
-    await buildSignals();
-    const area=document.getElementById('signalArea');
-    area.innerHTML='<div style="text-align:center;padding:6px 12px;color:#ffc234;font-size:11px;font-weight:700;border:1px solid rgba(255,194,52,.3);border-radius:8px;margin-bottom:10px;background:rgba(255,194,52,.08);">🔍 DEBUG — Datos reales · Sin filtro de 75% · Click para modo Test</div>'+area.innerHTML;
-  } else if(_debugMode&&!_testMode){
-    // → Modo Test: datos sintéticos que cumplen los 5 criterios de breakout
-    _debugMode=false;
-    btn.textContent='🧪 Test ON';
-    btn.style.background='rgba(167,139,250,.25)';
-    btn.style.borderColor='rgba(167,139,250,.8)';
-    btn.style.color='var(--purple)';
-    await runTestMode();
-  } else {
-    // → Modo Normal
-    _debugMode=false;
-    _testMode=false;
-    btn.textContent='🔍 Debug';
-    btn.style.background='rgba(167,139,250,.15)';
-    btn.style.borderColor='rgba(167,139,250,.5)';
-    btn.style.color='var(--purple)';
-    btn.style.opacity='1';
-    btn.disabled=false;
-    await buildSignals();
-  }
+function _setLiveBtnActive(){
+  const lb=document.getElementById('liveBtn');
+  const tb=document.getElementById('testBtn');
+  if(lb){lb.style.background='var(--green-bg)';lb.style.borderColor='var(--green)';lb.style.color='var(--green)';lb.textContent='🟢 Live';}
+  if(tb){tb.style.background='var(--bg3)';tb.style.borderColor='var(--border2)';tb.style.color='var(--text3)';tb.textContent='🧪 Test';}
 }
+function _setTestBtnActive(){
+  const lb=document.getElementById('liveBtn');
+  const tb=document.getElementById('testBtn');
+  if(lb){lb.style.background='var(--bg3)';lb.style.borderColor='var(--border2)';lb.style.color='var(--text3)';lb.textContent='🟢 Live';}
+  if(tb){tb.style.background='var(--green-bg)';tb.style.borderColor='var(--green)';tb.style.color='var(--green)';tb.textContent='🟢 Test ON';}
+}
+async function setLiveMode(){
+  _debugMode=false;_testMode=false;
+  _setLiveBtnActive();
+  await buildSignals();
+}
+async function setTestMode(){
+  _debugMode=false;
+  _setTestBtnActive();
+  const tb=document.getElementById('testBtn');
+  if(tb){tb.textContent='⟳ Cargando…';tb.style.opacity='.7';}
+  await runTestMode();
+  if(tb){tb.style.opacity='1';}
+  _setTestBtnActive();
+}
+// Keep runDebugMode as alias for backward compat (opening scanner etc)
+async function runDebugMode(){ await setLiveMode(); }
 
 async function runTestMode(){
-  const btn=document.getElementById('testBtn');
-  if(btn){btn.textContent='⟳ Cargando…';btn.style.opacity='.6';btn.disabled=true;}
 
   const now=Math.floor(Date.now()/1000);
 
@@ -2429,12 +2425,9 @@ async function runTestMode(){
   await buildSignals();
   _testMode=false;
 
-  // Restaurar botón
-  if(btn){btn.textContent='🧪 Test ON';btn.style.opacity='1';btn.disabled=false;}
-
   // Banner de test
   const area=document.getElementById('signalArea');
-  const banner='<div style="text-align:center;padding:8px 12px;color:var(--purple);font-size:11px;font-weight:700;border:1px solid rgba(167,139,250,.3);border-radius:var(--r);margin-bottom:10px;background:rgba(167,139,250,.08);">🧪 TEST — Datos sintéticos · GOOG BB-A CALL + TSLA BB-B PUT · Click para salir</div>';
+  const banner='<div style="text-align:center;padding:8px 12px;color:var(--green);font-size:11px;font-weight:700;border:1px solid rgba(0,209,122,.3);border-radius:var(--r);margin-bottom:10px;background:rgba(0,209,122,.08);">🟢 TEST — Datos sintéticos · GOOG BB-A CALL + TSLA BB-B PUT · Presiona 🟢 Live para volver</div>';
   area.innerHTML=banner+area.innerHTML;
 }
 

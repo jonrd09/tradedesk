@@ -1115,7 +1115,7 @@ async function buildSignals(){
   const _sigTimeout=setTimeout(()=>{
     if(area.innerHTML.includes('⟳'))
       area.innerHTML='<div style="text-align:center;padding:30px;color:var(--text2);font-size:13px;"><div style="font-size:28px;margin-bottom:10px">⏱</div><div style="font-weight:600;color:var(--yellow);">Tiempo agotado</div><div style="font-size:12px;margin-top:8px;color:var(--text3);">Schwab tardó demasiado. Revisa tu conexión o intenta en unos minutos.</div></div>';
-  },90000);
+  },30000);
   try{
 
   for(const sym of['GOOG','TSLA','SPY','QQQ','AAPL','PLTR']){
@@ -1136,14 +1136,15 @@ async function buildSignals(){
       }
       if(schwabToken){
         try{
-          // Sequential fetches — menos carga en Schwab, menos timeouts
-          const r1=await Promise.race([fetchSchwabCandles(sym,'minute',60,100),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),20000))]).catch(()=>null);
+          // Sequential fetches — timeout 8s por fetch, skip símbolo si falla
+          const _t=()=>new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),8000));
+          const r1=await Promise.race([fetchSchwabCandles(sym,'minute',60,100),_t()]).catch(e=>{addLog('warn','Schwab',`${sym} 1H timeout/error`,e.message);return null;});
           if(r1&&closes(r1).length>=10){ohlc1h=r1;dataLabel='📡 Schwab';}
-          await new Promise(r=>setTimeout(r,400));
-          const r2=await Promise.race([fetchSchwabCandles(sym,'minute',15,60),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),20000))]).catch(()=>null);
+          await new Promise(r=>setTimeout(r,200));
+          const r2=await Promise.race([fetchSchwabCandles(sym,'minute',15,60),_t()]).catch(e=>{addLog('warn','Schwab',`${sym} 15m timeout/error`,e.message);return null;});
           if(r2&&closes(r2).length>=5) ohlc15=r2;
-          await new Promise(r=>setTimeout(r,400));
-          const r3=await Promise.race([fetchSchwabCandles(sym,'D',1,90),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),20000))]).catch(()=>null);
+          await new Promise(r=>setTimeout(r,200));
+          const r3=await Promise.race([fetchSchwabCandles(sym,'D',1,90),_t()]).catch(e=>{addLog('warn','Schwab',`${sym} Daily timeout/error`,e.message);return null;});
           if(r3&&closes(r3).length>=10) ohlcD=r3;
         }catch(e){addLog('warn','Schwab',`${sym} señales error`,e.message);}
       }
@@ -3895,6 +3896,25 @@ async function init(){
     }
   },20*60*1000);
 
+  // ── Calendario de feriados del mercado NYSE 2025-2026 ─────────────────────
+  const _MARKET_HOLIDAYS=new Set([
+    // 2025
+    '1/1/2025','1/20/2025','2/17/2025','4/18/2025','5/26/2025',
+    '6/19/2025','7/4/2025','9/1/2025','11/27/2025','12/25/2025',
+    // 2026
+    '1/1/2026','1/19/2026','2/16/2026','4/3/2026','5/25/2026',
+    '6/19/2026','7/3/2026','9/7/2026','11/26/2026','12/25/2026',
+  ]);
+
+  function _isMarketDay(){
+    const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+    const day=et.getDay();
+    if(day===0||day===6)return false;
+    const key=`${et.getMonth()+1}/${et.getDate()}/${et.getFullYear()}`;
+    if(_MARKET_HOLIDAYS.has(key))return false;
+    return true;
+  }
+
   // ── Scanner de Apertura 9:35 AM ET ────────────────────────────────────────
   // Corre UNA vez por día exactamente a las 9:35 AM para detectar breakouts
   // de la primera vela de 15min y disparar Telegram con prioridad máxima
@@ -3940,25 +3960,6 @@ async function init(){
     // Revisar inmediatamente en caso de que la página cargue justo en esa ventana
     checkOpeningTime();
   })();
-
-  // ── Calendario de feriados del mercado NYSE 2025-2026 ─────────────────────
-  const _MARKET_HOLIDAYS=new Set([
-    // 2025
-    '1/1/2025','1/20/2025','2/17/2025','4/18/2025','5/26/2025',
-    '6/19/2025','7/4/2025','9/1/2025','11/27/2025','12/25/2025',
-    // 2026
-    '1/1/2026','1/19/2026','2/16/2026','4/3/2026','5/25/2026',
-    '6/19/2026','7/3/2026','9/7/2026','11/26/2026','12/25/2026',
-  ]);
-
-  function _isMarketDay(){
-    const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
-    const day=et.getDay();
-    if(day===0||day===6)return false; // fin de semana
-    const key=`${et.getMonth()+1}/${et.getDate()}/${et.getFullYear()}`;
-    if(_MARKET_HOLIDAYS.has(key))return false; // feriado
-    return true;
-  }
 
   // Ventanas de escaneo activo cada 3 minutos (ET):
   // 9:30–10:30 AM  →  570–630 mins

@@ -3863,11 +3863,11 @@ async function init(){
       });
     }
     function checkOpeningTime(){
+      if(!_isMarketDay())return; // feriado o fin de semana
       const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
-      const day=et.getDay(),h=et.getHours(),m=et.getMinutes();
-      const isWeekday=day>=1&&day<=5;
+      const h=et.getHours(),m=et.getMinutes();
       // Ventana 9:35–9:37 AM ET — 2 min de margen para no perder el momento
-      if(isWeekday&&h===9&&m>=35&&m<=37) runOpeningScanner();
+      if(h===9&&m>=35&&m<=37) runOpeningScanner();
     }
     // Revisar cada 30 segundos — liviano
     setInterval(checkOpeningTime,30000);
@@ -3875,21 +3875,65 @@ async function init(){
     checkOpeningTime();
   })();
 
-  // Auto-refresh señales cada 10 min durante mercado — para no perder señales
+  // ── Calendario de feriados del mercado NYSE 2025-2026 ─────────────────────
+  const _MARKET_HOLIDAYS=new Set([
+    // 2025
+    '1/1/2025','1/20/2025','2/17/2025','4/18/2025','5/26/2025',
+    '6/19/2025','7/4/2025','9/1/2025','11/27/2025','12/25/2025',
+    // 2026
+    '1/1/2026','1/19/2026','2/16/2026','4/3/2026','5/25/2026',
+    '6/19/2026','7/3/2026','9/7/2026','11/26/2026','12/25/2026',
+  ]);
+
+  function _isMarketDay(){
+    const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+    const day=et.getDay();
+    if(day===0||day===6)return false; // fin de semana
+    const key=`${et.getMonth()+1}/${et.getDate()}/${et.getFullYear()}`;
+    if(_MARKET_HOLIDAYS.has(key))return false; // feriado
+    return true;
+  }
+
+  // Ventanas de escaneo activo cada 3 minutos (ET):
+  // 9:30–10:30 AM  →  570–630 mins
+  // 1:00–2:00 PM   →  780–840 mins
+  // 3:30–3:50 PM   →  930–950 mins
+  // Resto del mercado (10:30AM–1PM, 2PM–3:30PM) → cada 10 min
+  // Fuera de mercado → no escanear
+  function _getScanInterval(){
+    if(!_isMarketDay())return null;
+    const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+    const mins=et.getHours()*60+et.getMinutes();
+    // Ventanas activas de 3 minutos
+    if((mins>=570&&mins<630)||(mins>=780&&mins<840)||(mins>=930&&mins<950))return 3;
+    // Mercado abierto pero fuera de ventana activa → cada 10 min
+    if(mins>=570&&mins<960)return 10;
+    return null; // fuera de horario
+  }
+
+  // Motor de escaneo inteligente — corre cada 30 segundos y decide si ejecutar
+  let _lastScanMins=-1;
+  let _lastScanInterval=-1;
   if(window._sigInterval)clearInterval(window._sigInterval);
   window._sigInterval=setInterval(async()=>{
+    if(_testMode)return; // no interferir con modo test
+    const interval=_getScanInterval();
+    if(interval===null)return; // mercado cerrado o feriado
+
     const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
-    const mins=et.getHours()*60+et.getMinutes(),day=et.getDay();
-    const isOpen=day>=1&&day<=5&&mins>=570&&mins<960;
-    const isPre=day>=1&&day<=5&&mins>=515&&mins<570;
-    if(isOpen||isPre){
-      // Clear Telegram sent flags so signals re-evaluate fresh each cycle
-      // Only clear SETUP flags — real signals keep anti-duplicate for the session
+    const nowMins=et.getHours()*60+et.getMinutes();
+
+    // Ejecutar si pasaron suficientes minutos desde el último scan
+    const minutesSinceLast=nowMins-_lastScanMins;
+    if(_lastScanMins===-1||minutesSinceLast>=interval){
+      _lastScanMins=nowMins;
+      _lastScanInterval=interval;
+      // Solo limpiar flags de SETUP — señales reales mantienen anti-duplicado
       Object.keys(sessionStorage).filter(k=>k.startsWith('tg_sent_setup_')).forEach(k=>sessionStorage.removeItem(k));
       await buildSignals();
       await checkMarketBlockMove();
     }
-  },10*60*1000);
+  },30*1000); // tick cada 30 segundos — liviano
 }
 init();
 </script>

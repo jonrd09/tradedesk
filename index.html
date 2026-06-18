@@ -1261,7 +1261,7 @@ async function buildSignals(){
     // F4: Volumen activo
     const volLabel=avgVol15_10>0?` (${(lVol15/avgVol15_10*100).toFixed(0)}% del promedio)`:'';
 
-    // ── SETUP — Pre-ruptura ─────────────────────────────────────────────────
+    // ── SETUP — Pre-ruptura (precio < 0.3% de la banda) ────────────────────
     const distToUpper=(lUp15-lP15)/lP15*100;
     const distToLower=(lP15-lLow15)/lP15*100;
     const nearUpper=distToUpper>=0&&distToUpper<0.3;
@@ -1278,6 +1278,36 @@ async function buildSignals(){
         {ok:setupBull?lP15>lMA20_15:lP15<lMA20_15,tf:'15m',text:`MA20 alineada: $${lMA20_15.toFixed(2)}`},
         {ok:stochCallOk||stochPutOk, tf:'15m',text:`Stochastics apoyando (%K ${lK15.toFixed(0)})`},
         {ok:bbwRising,               tf:'15m',text:`BBW expandiéndose: ${lBBW15.toFixed(2)}% > ${lBBW15_1.toFixed(2)}%`},
+      ]});
+    }
+
+    // ── PREP — Nivel intermedio: MA20 cruzada + BB expandiendo + acercándose ─
+    // Precio cruzó MA20, BB expandiéndose, todavía dentro de la banda
+    // pero entre 0.3% y 1.5% de la banda → "listo para entrar"
+    // Este es el setup de la foto de las 3:30 PM
+    const prepZoneUp = distToUpper>=0.3&&distToUpper<1.5; // entre 0.3% y 1.5% de banda sup
+    const prepZoneDn = distToLower>=0.3&&distToLower<1.5; // entre 0.3% y 1.5% de banda inf
+    const ma20CrossedUp = pP15<lMA20_15&&lP15>=lMA20_15; // cruzó MA20 hacia arriba
+    const ma20CrossedDn = pP15>lMA20_15&&lP15<=lMA20_15; // cruzó MA20 hacia abajo
+    // Precio sobre MA20 y moviéndose hacia la banda (aunque no haya cruzado esta vela)
+    const movingToUpper = lP15>lMA20_15&&lP15>pP15&&bbwRising; // subiendo hacia banda sup
+    const movingToLower = lP15<lMA20_15&&lP15<pP15&&bbwRising; // bajando hacia banda inf
+    const prepBull = bbwRising&&lBBW15>=0.8&&prepZoneUp&&(ma20CrossedUp||movingToUpper)&&lP15>lO15;
+    const prepBear = bbwRising&&lBBW15>=0.8&&prepZoneDn&&(ma20CrossedDn||movingToLower)&&lP15<lO15;
+
+    if(prepBull||prepBear){
+      const prepType=prepBull?'call':'put';
+      const prepDir=prepBull?'Superior':'Inferior';
+      const prepDist=(prepBull?distToUpper:distToLower).toFixed(2);
+      const prepBand=(prepBull?lUp15:lLow15).toFixed(2);
+      all.push({...meta,code:'PREP',name:`Preparación — Acercándose a banda ${prepDir}`,type:prepType,isSetup:true,reqs:[
+        {ok:bbwRising&&lBBW15>=0.8,  tf:'15m',text:`BB expandiéndose: BBW ${lBBW15.toFixed(2)}%`},
+        {ok:prepBull?prepZoneUp:prepZoneDn, tf:'15m',text:`Precio a ${prepDist}% de banda ${prepDir} ($${prepBand}) — zona de entrada`},
+        {ok:ma20CrossedUp||movingToUpper||ma20CrossedDn||movingToLower,
+                                     tf:'15m',text:`MA20 ${prepBull?'cruzada/precio subiendo':'cruzada/precio bajando'} ($${lMA20_15.toFixed(2)})`},
+        {ok:prepBull?stochCallOk:stochPutOk, tf:'15m',text:`Stochastics a favor: %K ${lK15.toFixed(0)}`},
+        {ok:prepBull?align1hBull||(lP1h>lMA20_1h):align1hBear||(lP1h<lMA20_1h),
+                                     tf:'1H', text:`1H acompañando — precio ${prepBull?'sobre':'bajo'} MA20`},
       ]});
     }
 
@@ -1568,17 +1598,20 @@ async function buildSignals(){
       s.pct_signal=disp;
       addToHistorial(s);
     }
-    // Send Telegram SETUP notification — una vez por ventana de escaneo
+    // Send Telegram SETUP/PREP notification — una vez por ventana de escaneo
     if(s.isSetup){
       const _today=new Date().toLocaleDateString('es-PR');
       const _etS=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
       const _mS=_etS.getHours()*60+_etS.getMinutes();
       const _winS=(_mS>=570&&_mS<630)?'apertura':(_mS>=780&&_mS<840)?'mediodia':(_mS>=930&&_mS<950)?'cierre':'resto';
-      const _setupKey=`tg_sent_setup_${s.sym}_${_today}_${_winS}`;
+      const _setupKey=`tg_sent_${s.code}_${s.sym}_${_today}_${_winS}`;
       if(isTgEnabled()&&!localStorage.getItem(_setupKey)){
         localStorage.setItem(_setupKey,'1');
         const time=_etS.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true});
-        const msg=`⚡ *SETUP DETECTADO — ${s.sym}*\n\n📊 ${s.name}\n💰 Precio: *$${s.price.toFixed(2)}*\n🎯 BB comprimido — ruptura inminente\n🕐 ${time} ET\n\n_Prepárate para la señal real_`;
+        const dir=s.type==='call'?'📈 CALL':'📉 PUT';
+        const msg=s.code==='PREP'
+          ?`🟡 *PREP ${dir} — ${s.sym}*\n\n📊 ${s.name}\n💰 Precio: *$${s.price.toFixed(2)}*\n🎯 MA20 cruzada · BB expandiendo · acercándose a banda\n🕐 ${time} ET\n\n_Prepárate — puede romper en la próxima vela_`
+          :`⚡ *SETUP ${dir} — ${s.sym}*\n\n📊 ${s.name}\n💰 Precio: *$${s.price.toFixed(2)}*\n🎯 Precio a < 0.3% de la banda — ruptura inminente\n🕐 ${time} ET\n\n_La señal real viene pronto_`;
         getTgToken()&&sendTelegram(msg,getTgToken(),getTgChat());
       }
     }

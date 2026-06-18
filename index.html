@@ -2292,117 +2292,112 @@ function renderInsiderTable(data){
 // ═══════════════════════════════════════════════════════════════
 async function runDebugMode(){
   const btn=document.getElementById('testBtn');
-  // Toggle debug mode
-  _debugMode=!_debugMode;
-  if(_debugMode){
+  // Ciclo: Normal → Debug (datos reales sin filtro) → Test (datos sintéticos) → Normal
+  if(!_debugMode&&!_testMode){
+    // → Modo Debug: datos reales, sin filtro de 75%
+    _debugMode=true;
     btn.textContent='🔍 Debug ON';
     btn.style.background='rgba(255,194,52,.25)';
     btn.style.borderColor='rgba(255,194,52,.8)';
     btn.style.color='#ffc234';
-    // Run buildSignals with real data but show ALL signals (even 1/7)
     await buildSignals();
-    // Add debug banner
     const area=document.getElementById('signalArea');
-    area.innerHTML='<div style="text-align:center;padding:6px 12px;color:#ffc234;font-size:11px;font-weight:700;border:1px solid rgba(255,194,52,.3);border-radius:8px;margin-bottom:10px;background:rgba(255,194,52,.08);">🔍 MODO DEBUG — Mostrando TODAS las señales con datos reales (sin filtro de 75%)</div>'+area.innerHTML;
-  }else{
+    area.innerHTML='<div style="text-align:center;padding:6px 12px;color:#ffc234;font-size:11px;font-weight:700;border:1px solid rgba(255,194,52,.3);border-radius:8px;margin-bottom:10px;background:rgba(255,194,52,.08);">🔍 DEBUG — Datos reales · Sin filtro de 75% · Click para modo Test</div>'+area.innerHTML;
+  } else if(_debugMode&&!_testMode){
+    // → Modo Test: datos sintéticos que cumplen los 5 criterios de breakout
+    _debugMode=false;
+    btn.textContent='🧪 Test ON';
+    btn.style.background='rgba(167,139,250,.25)';
+    btn.style.borderColor='rgba(167,139,250,.8)';
+    btn.style.color='var(--purple)';
+    await runTestMode();
+  } else {
+    // → Modo Normal
+    _debugMode=false;
+    _testMode=false;
     btn.textContent='🔍 Debug';
     btn.style.background='rgba(167,139,250,.15)';
     btn.style.borderColor='rgba(167,139,250,.5)';
     btn.style.color='var(--purple)';
-    // Rebuild with normal 75% filter
+    btn.style.opacity='1';
+    btn.disabled=false;
     await buildSignals();
   }
 }
 
 async function runTestMode(){
   const btn=document.getElementById('testBtn');
-  if(btn){btn.textContent='⟳ Probando…';btn.style.opacity='.6';btn.disabled=true;}
-
-  // Helper: build OHLC with explicit control over each candle
-  function ohlc(closes,spreadPct=0.004){
-    const h=closes.map((v,i)=>Math.max(v,i>0?closes[i-1]:v)*( 1+spreadPct));
-    const l=closes.map((v,i)=>Math.min(v,i>0?closes[i-1]:v)*(1-spreadPct));
-    const o=closes.map((_,i)=>i===0?closes[0]:closes[i-1]);
-    const v=closes.map(()=>Math.floor(1e6+Math.random()*5e6));
-    return{c:closes,h,l,o,v};
-  }
-  // Build a clean descending series with 4+ pivot highs going lower each time
-  function bearSeries(start,n,dropPerBar){
-    return Array.from({length:n},(_,i)=>+(start - i*dropPerBar + (i%3===0?dropPerBar*0.3:0)).toFixed(2));
-  }
-  // Build a clean ascending series
-  function bullSeries(start,n,risePerBar){
-    return Array.from({length:n},(_,i)=>+(start + i*risePerBar).toFixed(2));
-  }
+  if(btn){btn.textContent='⟳ Cargando…';btn.style.opacity='.6';btn.disabled=true;}
 
   const now=Math.floor(Date.now()/1000);
 
-  // ── GOOG → E1: Cambio de Tendencia al Alza ──────────────────────────────
-  // Need: 4+ descending highs in 1H, then price breaks above trendline AND closes above MA20
-  // MA20 of last 20 bars needs to be below final price
-  // Build: 30 bars descending (creates trendline + MA20 below price at end), last 5 bars breakout
+  // Helper: build OHLC arrays
+  function makeOhlc(closes, highs, lows, opens, vols){
+    return {c:closes, h:highs||closes.map(v=>v*1.003), l:lows||closes.map(v=>v*0.997), o:opens||closes.map((v,i)=>i===0?v:closes[i-1]), v:vols||closes.map(()=>100000)};
+  }
+
+  // ── GOOG → BB-A CALL: breakout banda superior con los 5 criterios ──────────
+  // Necesitamos: BBW ≥1.5% expandiéndose, high > BB superior, cuerpo verde ≥0.3%,
+  // MA20 slope positivo, volumen ≥130% promedio
+  // Construimos 30 velas de 15min tranquilas + última vela de ruptura fuerte
   const gBase=365;
-  // 30 descending bars to establish downtrend + MA20
-  const gDown=bearSeries(gBase+15, 30, 0.6);
-  // 5 bars of strong breakout — last bar closes significantly above MA20
-  const gBreak=[gBase-3, gBase-1, gBase+2, gBase+5, gBase+8];
-  const g1h=[...gDown, ...gBreak]; // 35 bars total, last bar = gBase+8
-  // 15min: fully bullish — price above MA20, BB upper rising, 3+ green candles
-  const g15=bullSeries(gBase+2, 40, 0.18);
-  // Daily: 25 bars, price ending near MA20 (within 0.5%)
-  const gD=bearSeries(gBase+8, 25, 0.25);
-  _candleCache['GOOG_60']={data:ohlc(g1h,0.003),ts:now};
-  _candleCache['GOOG_15']={data:ohlc(g15,0.002),ts:now};
-  _candleCache['GOOG_D']={data:ohlc(gD,0.006),ts:now};
+  // 29 velas tranquilas — BB comprimido, precio subiendo suave
+  const g15c=[...Array.from({length:29},(_,i)=>+(gBase + i*0.15).toFixed(2))];
+  // Última vela: breakout fuerte — cierre muy por encima de apertura y de la banda
+  const gLastOpen=g15c[28]+0.1;
+  const gLastClose=gLastOpen+2.8; // cuerpo 2.8 puntos ≈ 0.77% — bien encima de 0.3%
+  const gLastHigh=gLastClose+0.5; // perfora banda superior
+  g15c.push(+(gLastClose).toFixed(2));
+  const g15h=[...Array.from({length:29},(_,i)=>+(gBase+0.3+i*0.15).toFixed(2)), gLastHigh];
+  const g15l=[...Array.from({length:29},(_,i)=>+(gBase-0.3+i*0.15).toFixed(2)), gLastOpen-0.2];
+  const g15o=[...Array.from({length:29},(_,i)=>+(gBase-0.1+i*0.15).toFixed(2)), gLastOpen];
+  // Volumen: últimas 10 velas normales ~100k, última vela 280k (≥130%)
+  const g15v=[...Array.from({length:20},()=>90000),...Array.from({length:9},()=>105000), 280000];
+  _candleCache['GOOG_15']={data:makeOhlc(g15c,g15h,g15l,g15o,g15v),ts:now};
+  // 1H: tendencia alcista — precio sobre MA20 con slope positivo
+  const g1hc=Array.from({length:50},(_,i)=>+(gBase-5+i*0.25).toFixed(2));
+  _candleCache['GOOG_60']={data:makeOhlc(g1hc),ts:now};
+  // Daily: 30 días alcistas
+  const gDc=Array.from({length:30},(_,i)=>+(gBase-15+i*0.6).toFixed(2));
+  _candleCache['GOOG_D']={data:makeOhlc(gDc),ts:now};
 
-  // ── TSLA → E7: Efecto Imán Tendencia Bajista (CALL) ─────────────────────
-  // Need: MA20 < MA40 in 1H, price 2%+ below MA20, 1st 15m candle fully below BB lower,
-  // stoch %K crosses above %D
-  const tBase=391;
-  // 50 bars strong downtrend: MA20 well below MA40, price at bottom
-  const t1h=bearSeries(tBase+25, 50, 0.9); // ends at ~tBase-20
-  const tFinal=t1h[t1h.length-1]; // ~tBase-20
-  // 15min: 40 bars descending then last candle well below BB lower with stoch setup
-  // Build descending 15min so stoch %K was low and is now crossing %D
-  const t15down=bearSeries(tFinal+8, 32, 0.3);
-  // Last 8 bars: price at extreme low then tiny bounce for stoch cross
-  const t15end=[tFinal-4,tFinal-5,tFinal-6,tFinal-7,tFinal-7.5,tFinal-7.2,tFinal-6.8,tFinal-6.5];
-  const t15=[...t15down,...t15end];
-  // Daily: 25 bars descending (dailyBearish3 — last 3 closes below MA20)
-  const tD=bearSeries(tBase+10, 25, 0.8);
-  _candleCache['TSLA_60']={data:ohlc(t1h,0.004),ts:now};
-  _candleCache['TSLA_15']={data:ohlc(t15,0.003),ts:now};
-  _candleCache['TSLA_D']={data:ohlc(tD,0.008),ts:now};
+  // ── TSLA → BB-B PUT: breakout banda inferior con los 5 criterios ──────────
+  // Necesitamos: BBW ≥1.5% expandiéndose, low < BB inferior, cuerpo rojo ≥0.3%,
+  // MA20 slope negativo, volumen ≥130% promedio
+  const tBase=390;
+  // 29 velas tranquilas — BB comprimido, precio bajando suave
+  const t15c=[...Array.from({length:29},(_,i)=>+(tBase - i*0.2).toFixed(2))];
+  // Última vela: breakout bajista fuerte
+  const tLastOpen=t15c[28]-0.1;
+  const tLastClose=tLastOpen-3.5; // cuerpo 3.5 puntos ≈ 0.9% rojo
+  const tLastLow=tLastClose-0.6; // perfora banda inferior
+  t15c.push(+(tLastClose).toFixed(2));
+  const t15h=[...Array.from({length:29},(_,i)=>+(tBase+0.4-i*0.2).toFixed(2)), tLastOpen+0.2];
+  const t15l=[...Array.from({length:29},(_,i)=>+(tBase-0.4-i*0.2).toFixed(2)), tLastLow];
+  const t15o=[...Array.from({length:29},(_,i)=>+(tBase+0.1-i*0.2).toFixed(2)), tLastOpen];
+  const t15v=[...Array.from({length:20},()=>95000),...Array.from({length:9},()=>110000), 320000];
+  _candleCache['TSLA_15']={data:makeOhlc(t15c,t15h,t15l,t15o,t15v),ts:now};
+  // 1H: tendencia bajista — precio bajo MA20 con slope negativo
+  const t1hc=Array.from({length:50},(_,i)=>+(tBase+10-i*0.4).toFixed(2));
+  _candleCache['TSLA_60']={data:makeOhlc(t1hc),ts:now};
+  const tDc=Array.from({length:30},(_,i)=>+(tBase+15-i*0.7).toFixed(2));
+  _candleCache['TSLA_D']={data:makeOhlc(tDc),ts:now};
 
-  // ── SPY → E3: Rebote Punto Medio al Alza ────────────────────────────────
-  // Need: bearish 1H (BB upper slope down + price below MA20),
-  // daily price within 0.5% of MA20 (below it), respects MA20D, rebound in 15min
-  const sBase=594;
-  // 1H: 40 bars slight downtrend so price ends below MA20 and BB upper is sloping down
-  const s1h=bearSeries(sBase+4, 40, 0.22); // ends ~sBase-4.4
-  const sFinal=s1h[s1h.length-1];
-  // Daily: price needs to end JUST below MA20 daily (within 0.5%)
-  // MA20 of a 25-bar daily series ending at sBase will be ~sBase
-  // Make series end at sBase*0.997 (0.3% below MA20)
-  const sDbase=sBase+6;
-  const sD=bearSeries(sDbase, 25, 0.28); // MA20 ≈ sBase+6 - 12*0.28 = sBase+2.6, last = sBase+6-24*0.28 = sBase-0.72
-  // 15min: rebounding — price above MA20_15, BB upper rising, 3 green candles
-  const s15=bullSeries(sFinal-2, 40, 0.15);
-  _candleCache['SPY_60']={data:ohlc(s1h,0.002),ts:now};
-  _candleCache['SPY_15']={data:ohlc(s15,0.002),ts:now};
-  _candleCache['SPY_D']={data:ohlc(sD,0.005),ts:now};
+  // Limpiar sig_expired para que los datos de test no queden bloqueados
+  Object.keys(sessionStorage).filter(k=>k.startsWith('sig_expired_')).forEach(k=>sessionStorage.removeItem(k));
+  Object.keys(_sigDetectedAt).forEach(k=>delete _sigDetectedAt[k]);
 
-  // Run signals with injected data — bypass all API calls
+  // Correr señales con datos inyectados
   _testMode=true;
   await buildSignals();
   _testMode=false;
 
-  // Restore button
-  if(btn){btn.textContent='🧪 Test';btn.style.opacity='1';btn.disabled=false;}
+  // Restaurar botón
+  if(btn){btn.textContent='🧪 Test ON';btn.style.opacity='1';btn.disabled=false;}
 
-  // Prepend test banner
+  // Banner de test
   const area=document.getElementById('signalArea');
-  const banner='<div style="text-align:center;padding:8px 12px;color:var(--purple);font-size:11px;font-weight:700;border:1px solid rgba(167,139,250,.3);border-radius:var(--r);margin-bottom:10px;background:rgba(167,139,250,.08);">🧪 MODO TEST — Datos sintéticos · No son señales reales</div>';
+  const banner='<div style="text-align:center;padding:8px 12px;color:var(--purple);font-size:11px;font-weight:700;border:1px solid rgba(167,139,250,.3);border-radius:var(--r);margin-bottom:10px;background:rgba(167,139,250,.08);">🧪 TEST — Datos sintéticos · GOOG BB-A CALL + TSLA BB-B PUT · Click para salir</div>';
   area.innerHTML=banner+area.innerHTML;
 }
 

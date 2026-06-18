@@ -503,39 +503,81 @@ let _refreshInFlight = null;
 async function getSchwabToken(){
   const token=localStorage.getItem('schwab_access_token')||'';
   const expiry=parseInt(localStorage.getItem('schwab_token_expiry')||'0');
-  // Renovar si quedan menos de 5 minutos (300000ms) — no esperar a que expire
-  const valid=token&&Date.now()<expiry-300000;
-  if(valid)return token;
-  if(token&&Date.now()<expiry)addLog('warn','Schwab','Token expira en <5min — renovando automáticamente');
+  const stillValid=token&&Date.now()<expiry;
+  const needsRenewal=token&&Date.now()>expiry-300000; // quedan menos de 5 min
+
+  // Si el token es válido y le queda tiempo de sobra — úsalo directo
+  if(stillValid&&!needsRenewal)return token;
+
+  // Si el token es válido pero está por expirar — intentar renovar en background
+  // pero si falla, usar el token actual (no bloquear señales)
+  if(stillValid&&needsRenewal){
+    addLog('warn','Schwab','Token expira pronto — renovando en background');
+    // Renovar sin await para no bloquear — usar token actual mientras tanto
+    (async()=>{
+      try{
+        const refresh=localStorage.getItem('schwab_refresh_token')||'';
+        const secret=localStorage.getItem('schwab_client_secret')||'';
+        if(!refresh||!secret)return;
+        const proxyUrl=localStorage.getItem('proxy_url')||'';
+        let r;
+        if(proxyUrl){
+          try{
+            r=await fetch(`${proxyUrl}/schwab/refresh`,{
+              method:'POST',headers:{'Content-Type':'application/json'},
+              body:JSON.stringify({refresh_token:refresh}),
+              signal:AbortSignal.timeout(8000)
+            });
+          }catch(e){r=null;}
+        }
+        if(!r||!r.ok){
+          const creds=btoa(getSchwabClientId()+':'+secret);
+          r=await fetch('https://api.schwabapi.com/v1/oauth/token',{
+            method:'POST',
+            headers:{'Authorization':'Basic '+creds,'Content-Type':'application/x-www-form-urlencoded'},
+            body:new URLSearchParams({grant_type:'refresh_token',refresh_token:refresh}),
+            signal:AbortSignal.timeout(8000)
+          });
+        }
+        if(r&&r.ok){
+          const d=await r.json();
+          if(d.access_token){
+            localStorage.setItem('schwab_access_token',d.access_token);
+            if(d.refresh_token){
+              localStorage.setItem('schwab_refresh_token',d.refresh_token);
+              localStorage.setItem('schwab_refresh_expiry',Date.now()+7*24*60*60*1000);
+            }
+            localStorage.setItem('schwab_token_expiry',Date.now()+(d.expires_in||1800)*1000);
+            _updateSchwabBtn(true);
+            addLog('warn','Schwab','Token renovado exitosamente en background');
+          }
+        }
+      }catch(e){addLog('warn','Schwab','Renovación background falló — usando token actual',e.message);}
+    })();
+    return token; // usar token actual sin esperar renovación
+  }
+
+  // Token expirado completamente — intentar renovar de forma bloqueante
   const refresh=localStorage.getItem('schwab_refresh_token')||'';
   const secret=localStorage.getItem('schwab_client_secret')||'';
   if(!refresh||!secret){
-    addLog('error','Schwab','No hay refresh_token o client_secret — reconecta Schwab');
+    addLog('error','Schwab','Token expirado y sin refresh_token — reconecta Schwab');
     return null;
   }
-  // Single-flight: if refresh already in progress, wait for it instead of firing another
   if(_refreshInFlight) return _refreshInFlight;
-  _refreshInFlight = (async()=>{
+  _refreshInFlight=(async()=>{
     try{
       const proxyUrl=localStorage.getItem('proxy_url')||'';
       let r;
-
       if(proxyUrl){
-        // Try proxy first
         try{
           r=await fetch(`${proxyUrl}/schwab/refresh`,{
-            method:'POST',
-            headers:{'Content-Type':'application/json'},
+            method:'POST',headers:{'Content-Type':'application/json'},
             body:JSON.stringify({refresh_token:refresh}),
             signal:AbortSignal.timeout(8000)
           });
-        }catch(proxyErr){
-          addLog('warn','Schwab',`Proxy falló, intentando conexión directa`,proxyErr.message);
-          r=null;
-        }
+        }catch(proxyErr){addLog('warn','Schwab','Proxy falló, intentando directo',proxyErr.message);r=null;}
       }
-
-      // Direct fallback if no proxy or proxy failed
       if(!r||!r.ok){
         const creds=btoa(getSchwabClientId()+':'+secret);
         r=await fetch('https://api.schwabapi.com/v1/oauth/token',{
@@ -545,15 +587,13 @@ async function getSchwabToken(){
           signal:AbortSignal.timeout(8000)
         });
       }
-
       if(!r.ok){
         const err=await r.text().catch(()=>'');
-        addLog('error','Schwab',`Renovación de token falló → HTTP ${r.status}`,err.substring(0,100));
+        addLog('error','Schwab',`Renovación falló → HTTP ${r.status}`,err.substring(0,100));
         if(r.status===401||r.status===400){
           localStorage.removeItem('schwab_access_token');
           localStorage.removeItem('schwab_refresh_token');
           localStorage.removeItem('schwab_token_expiry');
-          addLog('error','Schwab','Sesión expirada — reconecta Schwab manualmente');
           _updateSchwabBtn(false);
         }
         return null;
@@ -563,18 +603,15 @@ async function getSchwabToken(){
       localStorage.setItem('schwab_access_token',d.access_token);
       if(d.refresh_token){
         localStorage.setItem('schwab_refresh_token',d.refresh_token);
-        // Schwab rotates refresh token — update its expiry
         localStorage.setItem('schwab_refresh_expiry',Date.now()+7*24*60*60*1000);
       }
       localStorage.setItem('schwab_token_expiry',Date.now()+(d.expires_in||1800)*1000);
       _updateSchwabBtn(true);
       return d.access_token;
     }catch(e){
-      addLog('error','Schwab',`Error renovando token`,e.message);
+      addLog('error','Schwab','Error renovando token',e.message);
       return null;
-    }finally{
-      _refreshInFlight=null;
-    }
+    }finally{_refreshInFlight=null;}
   })();
   return _refreshInFlight;
 }

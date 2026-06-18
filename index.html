@@ -1376,6 +1376,46 @@ async function buildSignals(){
     }
 
     // ════════════════════════════════════════════════════════════════════════
+    // PATRÓN MA20-X — CRUCE MA20 CON EXPANSIÓN BB (setup tipo 3:30 PM)
+    // Precio venía BAJO la MA20, cruza hacia arriba Y el BB empieza a expandirse
+    // → señal de alerta temprana al 75% para entrar cuando la vela avance
+    // ════════════════════════════════════════════════════════════════════════
+    // CALL: vela anterior cerró bajo MA20, vela actual cierra SOBRE MA20 (cruce real)
+    const ma20CrossUp = pP15 < lMA20_15 && lP15 >= lMA20_15 && lP15 > lO15;
+    // PUT: vela anterior cerró sobre MA20, vela actual cierra BAJO MA20 (cruce real)
+    const ma20CrossDn = pP15 > lMA20_15 && lP15 <= lMA20_15 && lP15 < lO15;
+    // BB expandiéndose — volatilidad arrancando
+    const bbExpandingNow = bbwRising && lBBW15 >= 0.8;
+    // MA20 apuntando en la dirección del cruce (línea amarilla curvándose)
+    const ma20CurveUp = lMA20_15 >= ma20_15.filter(v=>v!=null).slice(-5)[0]; // MA20 >= hace 5 velas
+    const ma20CurveDn = lMA20_15 <= ma20_15.filter(v=>v!=null).slice(-5)[0];
+    // Precio venía comprimido dentro del BB (no fue un spike)
+    const wasInsideBB = pP15 > lLow15 && pP15 < lUp15;
+    // 1H alineado — confirmación de tendencia mayor
+    const c1hLast4 = c1h.slice(-4);
+    const trend1hUp = c1hLast4[3] > c1hLast4[0]; // últimas 4 velas 1H subiendo
+    const trend1hDn = c1hLast4[3] < c1hLast4[0]; // últimas 4 velas 1H bajando
+
+    if(ma20CrossUp&&bbExpandingNow){
+      all.push({...meta,code:'MA20-X',name:'Cruce MA20 Alcista — CALL',type:'call',isSetup:false,reqs:[
+        {ok:ma20CrossUp,      tf:'15m',text:`Cruce MA20: anterior $${pP15.toFixed(2)} → actual $${lP15.toFixed(2)} (MA20: $${lMA20_15.toFixed(2)})`},
+        {ok:bbExpandingNow,   tf:'15m',text:`BB expandiéndose: BBW ${lBBW15.toFixed(2)}% subiendo`},
+        {ok:ma20CurveUp,      tf:'15m',text:`MA20 curvándose al alza (línea amarilla)`},
+        {ok:wasInsideBB,      tf:'15m',text:`Precio venía comprimido dentro del BB`},
+        {ok:trend1hUp||align1hBull, tf:'1H', text:`Tendencia 1H acompañando al alza`},
+      ]});
+    }
+    if(ma20CrossDn&&bbExpandingNow){
+      all.push({...meta,code:'MA20-X',name:'Cruce MA20 Bajista — PUT',type:'put',isSetup:false,reqs:[
+        {ok:ma20CrossDn,      tf:'15m',text:`Cruce MA20: anterior $${pP15.toFixed(2)} → actual $${lP15.toFixed(2)} (MA20: $${lMA20_15.toFixed(2)})`},
+        {ok:bbExpandingNow,   tf:'15m',text:`BB expandiéndose: BBW ${lBBW15.toFixed(2)}% subiendo`},
+        {ok:ma20CurveDn,      tf:'15m',text:`MA20 curvándose a la baja (línea amarilla)`},
+        {ok:wasInsideBB,      tf:'15m',text:`Precio venía comprimido dentro del BB`},
+        {ok:trend1hDn||align1hBear, tf:'1H', text:`Tendencia 1H acompañando a la baja`},
+      ]});
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
     // ESTRATEGIA 3 — CAMBIO DE TENDENCIA 1H + CONFIRMACIÓN 15MIN
     // Trendline en 1H roto + 2 velas en 15min confirmando dirección
     // ════════════════════════════════════════════════════════════════════════

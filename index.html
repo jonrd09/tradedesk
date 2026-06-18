@@ -317,6 +317,8 @@ function getStoredPin(){return localStorage.getItem('app_pin')||'';}
 let _pinBuffer='',_pinCallback=null;
 let _testMode=false;
 let _debugMode=false; // shows all signals regardless of % threshold
+// Persiste el tiempo de primera detección de cada señal — clave: sym_code_type
+const _sigDetectedAt={};
 let currentTicker='GOOG';
 let _insiderData=[];
 let _insiderSort={col:'shares',dir:-1};
@@ -1240,36 +1242,46 @@ async function buildSignals(){
 
     // ════════════════════════════════════════════════════════════════════════
     // ESTRATEGIA 1 — BB BREAKOUT 15MIN
-    // Patrón A: Vela verde perforando banda superior → CALL
-    // Patrón B: Vela roja perforando banda inferior → PUT
-    // Patrón C: Sobreexpuesto alza → PUT (regreso)
-    // Patrón D: Sobreexpuesto baja → CALL (rebote)
+    // 5 criterios basados en la vela de ruptura real (alta volatilidad)
+    // Crit 1: Alta volatilidad — BBW expandiéndose activamente (>= 1.5%)
+    // Crit 2: Ruptura de banda — precio perfora la banda en la dirección
+    // Crit 3: Vela de cuerpo grande en la dirección (cierre > apertura para CALL, <  para PUT) — cuerpo >= 0.3% del precio
+    // Crit 4: MA20 (línea amarilla) apuntando en la dirección de la señal
+    // Crit 5: Volumen fuerte — >= 130% del promedio de las últimas 10 velas
     // ════════════════════════════════════════════════════════════════════════
-    const pA_green=lP15>lO15, pA_up=lH15>lUp15&&isExpanding15;
-    const pB_red=lP15<lO15,   pB_dn=lL15<lLow15&&isExpanding15;
-    const pC_above=lL15>lUp15&&isExpanding15, pC_ret=lP15<lO15;
-    const pD_below=lH15<lLow15&&isExpanding15, pD_ret=lP15>lO15;
+    const candleBody15=Math.abs(lP15-lO15)/lP15*100; // tamaño del cuerpo en %
+    const bigBodyCall=lP15>lO15&&candleBody15>=0.3;   // vela verde con cuerpo >= 0.3%
+    const bigBodyPut =lP15<lO15&&candleBody15>=0.3;   // vela roja  con cuerpo >= 0.3%
+    const bbBreakUp  =lH15>lUp15&&isExpanding15;       // high perfora banda superior
+    const bbBreakDn  =lL15<lLow15&&isExpanding15;      // low  perfora banda inferior
+    const ma20SlopeUp=bbUpperSlope(c15)>0&&lMA20_15>ma20_15.filter(v=>v!=null).slice(-4)[0]; // MA20 subiendo
+    const ma20SlopeDn=bbLowerSlope(c15)<0&&lMA20_15<ma20_15.filter(v=>v!=null).slice(-4)[0]; // MA20 bajando
+    const volStrong15 =avgVol15_10>0?lVol15>avgVol15_10*1.3:true; // >= 130% del promedio
     const stochA=lK15>lD15&&lK15>30&&lK15<85;
     const stochB=lK15<lD15&&lK15<70&&lK15>15;
 
-    if(pA_up&&pA_green){
+    // Patrón A: CALL — breakout superior con los 5 criterios
+    if(bbBreakUp&&bigBodyCall){
       all.push({...meta,code:'BB-A',name:'BB Salida Superior — CALL',type:'call',reqs:[
-        {ok:pA_up,   tf:'15m',text:`High $${lH15.toFixed(2)} > BB superior $${lUp15.toFixed(2)}`},
-        {ok:pA_green,tf:'15m',text:`Vela alcista: cierre $${lP15.toFixed(2)} > apertura $${lO15.toFixed(2)}`},
-        {ok:volActive15,tf:'15m',text:`Volumen activo${volLabel}`},
-        {ok:stochA,  tf:'15m',text:`Worden: %K (${lK15.toFixed(0)}) sobre %D (${lD15.toFixed(0)})`},
-        {ok:lBBW15>1.5,tf:'15m',text:`BB con volatilidad (BBW ${lBBW15.toFixed(1)}%)`},
+        {ok:lBBW15>=1.5&&bbwRising,  tf:'15m',text:`Alta volatilidad: BBW ${lBBW15.toFixed(1)}% expandiéndose`},
+        {ok:bbBreakUp,               tf:'15m',text:`Ruptura: high $${lH15.toFixed(2)} > BB superior $${lUp15.toFixed(2)}`},
+        {ok:bigBodyCall,             tf:'15m',text:`Vela fuerte: cuerpo ${candleBody15.toFixed(2)}% (cierre $${lP15.toFixed(2)} > apertura $${lO15.toFixed(2)})`},
+        {ok:ma20SlopeUp,             tf:'15m',text:`MA20 apuntando arriba: $${lMA20_15.toFixed(2)}`},
+        {ok:volStrong15,             tf:'15m',text:`Volumen fuerte${volLabel}`},
       ]});
     }
-    if(pB_dn&&pB_red){
+    // Patrón B: PUT — breakout inferior con los 5 criterios
+    if(bbBreakDn&&bigBodyPut){
       all.push({...meta,code:'BB-B',name:'BB Salida Inferior — PUT',type:'put',reqs:[
-        {ok:pB_dn,  tf:'15m',text:`Low $${lL15.toFixed(2)} < BB inferior $${lLow15.toFixed(2)}`},
-        {ok:pB_red, tf:'15m',text:`Vela bajista: cierre $${lP15.toFixed(2)} < apertura $${lO15.toFixed(2)}`},
-        {ok:volActive15,tf:'15m',text:`Volumen activo${volLabel}`},
-        {ok:stochB, tf:'15m',text:`Worden: %K (${lK15.toFixed(0)}) bajo %D (${lD15.toFixed(0)})`},
-        {ok:lBBW15>1.5,tf:'15m',text:`BB con volatilidad (BBW ${lBBW15.toFixed(1)}%)`},
+        {ok:lBBW15>=1.5&&bbwRising,  tf:'15m',text:`Alta volatilidad: BBW ${lBBW15.toFixed(1)}% expandiéndose`},
+        {ok:bbBreakDn,               tf:'15m',text:`Ruptura: low $${lL15.toFixed(2)} < BB inferior $${lLow15.toFixed(2)}`},
+        {ok:bigBodyPut,              tf:'15m',text:`Vela fuerte: cuerpo ${candleBody15.toFixed(2)}% (cierre $${lP15.toFixed(2)} < apertura $${lO15.toFixed(2)})`},
+        {ok:ma20SlopeDn,             tf:'15m',text:`MA20 apuntando abajo: $${lMA20_15.toFixed(2)}`},
+        {ok:volStrong15,             tf:'15m',text:`Volumen fuerte${volLabel}`},
       ]});
     }
+    // Patrón C: PUT de regreso — vela completa SOBRE la banda superior
+    const pC_above=lL15>lUp15&&isExpanding15, pC_ret=lP15<lO15;
     if(pC_above){
       all.push({...meta,code:'BB-C',name:'BB Sobreexpuesto Alza — PUT',type:'put',reqs:[
         {ok:pC_above,tf:'15m',text:`Vela COMPLETA sobre BB: low $${lL15.toFixed(2)} > $${lUp15.toFixed(2)}`},
@@ -1279,6 +1291,8 @@ async function buildSignals(){
         {ok:lBBW15>1.5,tf:'15m',text:`BB expandido (BBW ${lBBW15.toFixed(1)}%)`},
       ]});
     }
+    // Patrón D: CALL de rebote — vela completa BAJO la banda inferior
+    const pD_below=lH15<lLow15&&isExpanding15, pD_ret=lP15>lO15;
     if(pD_below){
       all.push({...meta,code:'BB-D',name:'BB Sobreexpuesto Baja — CALL',type:'call',reqs:[
         {ok:pD_below,tf:'15m',text:`Vela COMPLETA bajo BB: high $${lH15.toFixed(2)} < $${lLow15.toFixed(2)}`},
@@ -1404,15 +1418,41 @@ async function buildSignals(){
 
   const active=all.map(s=>({...s,passed:s.reqs.filter(r=>r.ok).length}))
     .filter(s=>_debugMode||(s.isSetup&&Math.round(s.passed/s.reqs.length*100)>=60)||(!s.isSetup&&Math.round(s.passed/s.reqs.length*100)>=75))
-    .filter(s=>_debugMode||s.isSetup||!s._detectedAt||Date.now()-s._detectedAt<3600000)
+    // Bloquear señales ya expiradas en esta sesión — evita que reaparezcan aunque los datos las regeneren
+    .filter(s=>{
+      if(_debugMode||s.isSetup)return true;
+      const _dk=`${s.sym}_${s.code}_${s.type}`;
+      const _expKey=`sig_expired_${_dk}`;
+      if(sessionStorage.getItem(_expKey))return false; // ya expiró esta sesión — nunca más
+      return true;
+    })
     .map(s=>{
-      // Track first detection time
-      if(!s._detectedAt){s._detectedAt=Date.now();}
-      if(!s._timeET){
+      // Persist first detection time across buildSignals() cycles using module-level store
+      const _dk=`${s.sym}_${s.code}_${s.type}`;
+      if(!_sigDetectedAt[_dk]){
+        _sigDetectedAt[_dk]=Date.now();
+        // Guardar también el timeET en el primer ciclo
         const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
         s._timeET=et.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true});
+        _sigDetectedAt[_dk+'_timeET']=s._timeET;
       }
+      s._detectedAt=_sigDetectedAt[_dk];
+      s._timeET=s._timeET||_sigDetectedAt[_dk+'_timeET']||'';
       return s;
+    })
+    // Expirar señales con más de 1 hora y marcarlas como bloqueadas en sessionStorage
+    .filter(s=>{
+      if(_debugMode||s.isSetup)return true;
+      const _dk=`${s.sym}_${s.code}_${s.type}`;
+      const age=Date.now()-s._detectedAt;
+      if(age>=3600000){
+        // Marcar como expirada — no volverá a aparecer en el panel esta sesión
+        try{sessionStorage.setItem(`sig_expired_${_dk}`,'1');}catch(e){}
+        delete _sigDetectedAt[_dk];
+        delete _sigDetectedAt[_dk+'_timeET'];
+        return false;
+      }
+      return true;
     })
     .sort((a,b)=>b.passed-a.passed);
 
@@ -3764,6 +3804,52 @@ async function init(){
     }
   },20*60*1000);
 
+  // ── Scanner de Apertura 9:35 AM ET ────────────────────────────────────────
+  // Corre UNA vez por día exactamente a las 9:35 AM para detectar breakouts
+  // de la primera vela de 15min y disparar Telegram con prioridad máxima
+  (function scheduleOpeningScanner(){
+    function runOpeningScanner(){
+      const _today=new Date().toLocaleDateString('es-PR');
+      const _ranKey=`opening_scan_ran_${_today}`;
+      if(localStorage.getItem(_ranKey))return; // ya corrió hoy
+      localStorage.setItem(_ranKey,'1');
+      // Limpiar todas las claves de deduplicación de Telegram para este scan
+      // para que las señales de apertura siempre disparen Telegram aunque
+      // ya se hayan notificado antes hoy (raro a las 9:35, pero por seguridad)
+      Object.keys(localStorage).filter(k=>k.startsWith('tg_sent_')&&k.includes(_today)).forEach(k=>localStorage.removeItem(k));
+      Object.keys(sessionStorage).filter(k=>k.startsWith('tg_sent_')).forEach(k=>sessionStorage.removeItem(k));
+      // Limpiar señales expiradas de la sesión anterior para que el nuevo día empiece limpio
+      Object.keys(sessionStorage).filter(k=>k.startsWith('sig_expired_')).forEach(k=>sessionStorage.removeItem(k));
+      // Resetear _sigDetectedAt para que las señales de apertura arranquen el timer desde cero
+      Object.keys(_sigDetectedAt).forEach(k=>delete _sigDetectedAt[k]);
+      addLog('warn','Scanner','🔔 Scanner de apertura 9:35 AM — ejecutando');
+      buildSignals().then(()=>{
+        // Enviar resumen de apertura por Telegram si hay token configurado
+        if(isTgEnabled()&&getTgToken()&&getTgChat()){
+          const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+          const time=et.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true});
+          const area=document.getElementById('signalArea');
+          const count=area?.querySelectorAll('.sig-card')?.length||0;
+          const msg=count>0
+            ?`🔔 *SCANNER 9:35 AM — ${count} señal${count>1?'es':''} detectada${count>1?'s':''}*\n\n🕐 ${time} ET\n_Revisa TradeDesk Pro para entrar 9:40–9:45 AM_`
+            :`📊 *SCANNER 9:35 AM — Sin señales de breakout*\n\n🕐 ${time} ET\n_Mercado abrió sin ruptura de Bollinger_`;
+          sendTelegram(msg,getTgToken(),getTgChat());
+        }
+      });
+    }
+    function checkOpeningTime(){
+      const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+      const day=et.getDay(),h=et.getHours(),m=et.getMinutes();
+      const isWeekday=day>=1&&day<=5;
+      // Ventana 9:35–9:37 AM ET — 2 min de margen para no perder el momento
+      if(isWeekday&&h===9&&m>=35&&m<=37) runOpeningScanner();
+    }
+    // Revisar cada 30 segundos — liviano
+    setInterval(checkOpeningTime,30000);
+    // Revisar inmediatamente en caso de que la página cargue justo en esa ventana
+    checkOpeningTime();
+  })();
+
   // Auto-refresh señales cada 10 min durante mercado — para no perder señales
   if(window._sigInterval)clearInterval(window._sigInterval);
   window._sigInterval=setInterval(async()=>{
@@ -3929,6 +4015,72 @@ init();
   </div>
 </div>
 
+
+<!-- ══ SCHWAB MODAL ═══════════════════════════════════════════ -->
+<div id="schwabModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:2000;align-items:center;justify-content:center;">
+  <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:var(--rl);width:460px;max-width:95vw;">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border);">
+      <div>
+        <div style="font-size:15px;font-weight:700;color:#fff;">🔗 Conexión Schwab</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px;">Ingresa tu App Key y Secret de developer.schwab.com</div>
+      </div>
+      <button onclick="document.getElementById('schwabModal').style.display='none'" style="background:none;border:1px solid var(--border2);border-radius:var(--r);color:var(--text2);padding:6px 12px;font-size:12px;cursor:pointer;">✕</button>
+    </div>
+    <div style="padding:20px;">
+      <div style="font-size:11px;color:var(--text3);margin-bottom:5px;">App Key (Client ID)</div>
+      <input id="schwabClientId" type="text" placeholder="Tu Schwab App Key..."
+        style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--text);padding:8px 10px;font-size:12px;font-family:var(--mono);outline:none;box-sizing:border-box;margin-bottom:12px;">
+      <div style="font-size:11px;color:var(--text3);margin-bottom:5px;">App Secret</div>
+      <input id="schwabClientSecret" type="password" placeholder="Tu Schwab App Secret..."
+        style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--text);padding:8px 10px;font-size:12px;font-family:var(--mono);outline:none;box-sizing:border-box;margin-bottom:12px;">
+      <div style="font-size:11px;color:var(--text3);margin-bottom:5px;">Proxy URL (opcional — para mayor seguridad)</div>
+      <input id="proxyUrlInput" type="text" placeholder="https://tu-proxy.workers.dev"
+        style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--text);padding:8px 10px;font-size:12px;font-family:var(--mono);outline:none;box-sizing:border-box;margin-bottom:4px;">
+      <div id="schwabKeyError" style="display:none;color:var(--red);font-size:11px;margin-bottom:10px;">⚠ App Key y Secret son requeridos</div>
+      <div style="display:flex;gap:8px;margin-top:14px;">
+        <button onclick="saveSchwabKeys()" style="flex:1;background:var(--green);color:#001a0e;border:none;border-radius:var(--r);padding:9px;font-size:13px;font-weight:700;cursor:pointer;">🔗 Conectar Schwab</button>
+        <button id="schwabDisconnectBtn" onclick="disconnectSchwab()" style="display:none;flex:1;background:var(--red-bg);color:var(--red);border:1px solid var(--red);border-radius:var(--r);padding:9px;font-size:13px;font-weight:700;cursor:pointer;"></button>
+      </div>
+      <div style="margin-top:14px;padding:10px 12px;background:rgba(61,139,255,.06);border:1px solid rgba(61,139,255,.15);border-radius:var(--r);">
+        <div style="font-size:11px;color:var(--blue);font-weight:700;margin-bottom:4px;">¿Cómo obtener las credenciales?</div>
+        <div style="font-size:11px;color:var(--text3);line-height:1.6;">
+          1. Ve a <strong style="color:#fff">developer.schwab.com</strong><br>
+          2. Crea una app → copia App Key y Secret<br>
+          3. Redirect URL: <strong style="color:#fff">https://jonrd09.github.io/tradedesk/</strong>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ PIN MODAL ══════════════════════════════════════════════ -->
+<div id="pinModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:3000;align-items:center;justify-content:center;">
+  <div class="pin-box">
+    <div style="font-size:15px;font-weight:700;color:#fff;margin-bottom:4px;">🔐 PIN Requerido</div>
+    <div id="pinLabel" style="font-size:12px;color:var(--text3);margin-bottom:4px;">Ingresa tu PIN</div>
+    <div class="pin-dots">
+      <div class="pin-dot" id="pd0"></div>
+      <div class="pin-dot" id="pd1"></div>
+      <div class="pin-dot" id="pd2"></div>
+      <div class="pin-dot" id="pd3"></div>
+    </div>
+    <div id="pinError" style="font-size:11px;color:var(--red);min-height:16px;margin-bottom:6px;"></div>
+    <div class="pin-keys">
+      <button class="pin-key" onclick="pinPress('1')">1</button>
+      <button class="pin-key" onclick="pinPress('2')">2</button>
+      <button class="pin-key" onclick="pinPress('3')">3</button>
+      <button class="pin-key" onclick="pinPress('4')">4</button>
+      <button class="pin-key" onclick="pinPress('5')">5</button>
+      <button class="pin-key" onclick="pinPress('6')">6</button>
+      <button class="pin-key" onclick="pinPress('7')">7</button>
+      <button class="pin-key" onclick="pinPress('8')">8</button>
+      <button class="pin-key" onclick="pinPress('9')">9</button>
+      <button class="pin-key" onclick="pinBack()" style="font-size:14px;">⌫</button>
+      <button class="pin-key" onclick="pinPress('0')">0</button>
+      <button class="pin-key" onclick="closePinModal()" style="font-size:11px;color:var(--text3);">✕</button>
+    </div>
+  </div>
+</div>
 
 <!-- Historial Modal -->
 <div id="historialModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:1001;align-items:center;justify-content:center;padding:16px;">

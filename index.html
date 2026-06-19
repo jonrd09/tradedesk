@@ -839,21 +839,41 @@ function resetPin(){if(confirm('¿Resetear PIN? Deberás configurar uno nuevo la
 // ═══════════════════════════════════════════════════════════════
 // CLOCK & MARKET STATUS
 // ═══════════════════════════════════════════════════════════════
+// Feriados de mercado de EE.UU. (NYSE/NASDAQ cerrados todo el día) — fuente: NYSE oficial.
+// Formato 'YYYY-MM-DD' en hora del Este. Cierres tempranos (1pm) NO se listan aquí.
+const MARKET_HOLIDAYS=new Set([
+  // 2026
+  '2026-01-01','2026-01-19','2026-02-16','2026-04-03','2026-05-25',
+  '2026-06-19','2026-07-03','2026-09-07','2026-11-26','2026-12-25',
+  // 2027
+  '2027-01-01','2027-01-18','2027-02-15','2027-03-26','2027-05-31',
+  '2027-06-18','2027-07-05','2027-09-06','2027-11-25','2027-12-24',
+]);
+// ¿Es feriado de mercado? Recibe un Date ya en hora del Este.
+function isMarketHoliday(etDate){
+  const y=etDate.getFullYear();
+  const m=String(etDate.getMonth()+1).padStart(2,'0');
+  const d=String(etDate.getDate()).padStart(2,'0');
+  return MARKET_HOLIDAYS.has(`${y}-${m}-${d}`);
+}
+
 function tick(){
   const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
   document.getElementById('clockEl').textContent=et.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:true})+' ET';
   const d=et.getDay(),h=et.getHours(),m=et.getMinutes();
   const isWeekday=d>=1&&d<=5;
+  const isHoliday=isMarketHoliday(et);
   const minsSinceMidnight=h*60+m;
-  // Market regular: 9:30AM-4:00PM ET
-  const isOpen=isWeekday&&minsSinceMidnight>=570&&minsSinceMidnight<960;
+  // Market regular: 9:30AM-4:00PM ET — pero NO en feriados
+  const isOpen=isWeekday&&!isHoliday&&minsSinceMidnight>=570&&minsSinceMidnight<960;
   // Premarket: 4:00AM-9:30AM ET
-  const isPre=isWeekday&&minsSinceMidnight>=240&&minsSinceMidnight<570;
+  const isPre=isWeekday&&!isHoliday&&minsSinceMidnight>=240&&minsSinceMidnight<570;
   // After hours: 4:00PM-8:00PM ET
-  const isAfter=isWeekday&&minsSinceMidnight>=960&&minsSinceMidnight<1200;
+  const isAfter=isWeekday&&!isHoliday&&minsSinceMidnight>=960&&minsSinceMidnight<1200;
   const ms=document.getElementById('mktStatus');
   if(ms){
-    if(isOpen){ms.textContent='● ABIERTO';ms.className='mkt-open';}
+    if(isHoliday){ms.textContent='● CERRADO (feriado)';ms.className='mkt-closed';}
+    else if(isOpen){ms.textContent='● ABIERTO';ms.className='mkt-open';}
     else if(isPre){ms.textContent='● PRE-MARKET';ms.className='mkt-pre';}
     else if(isAfter){ms.textContent='● AFTER-HOURS';ms.className='mkt-pre';}
     else{ms.textContent='● CERRADO';ms.className='mkt-closed';}
@@ -1046,9 +1066,10 @@ async function buildSignals(){
   const _etSig=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
   const _sigMins=_etSig.getHours()*60+_etSig.getMinutes();
   const _sigDay=_etSig.getDay();
-  const _isMarketHours=_sigDay>=1&&_sigDay<=5&&_sigMins>=515&&_sigMins<960; // 8:35AM-4PM
+  const _isMarketHours=_sigDay>=1&&_sigDay<=5&&!isMarketHoliday(_etSig)&&_sigMins>=515&&_sigMins<960; // 8:35AM-4PM, sin feriados
   if(!_isMarketHours&&!_testMode&&!_debugMode){
-    area.innerHTML='<div style="text-align:center;padding:30px;color:var(--text2);font-size:13px;"><div style="font-size:28px;margin-bottom:10px">🌙</div><div style="font-weight:600;">Mercado cerrado</div><div style="font-size:12px;margin-top:8px;color:var(--text3);">Las señales solo están disponibles durante horario de mercado (8:35 AM – 4:00 PM ET)</div></div>';
+    const _holidayMsg=isMarketHoliday(_etSig)?'Hoy es feriado de mercado — la bolsa está cerrada.':'Las señales solo están disponibles durante horario de mercado (8:35 AM – 4:00 PM ET)';
+    area.innerHTML='<div style="text-align:center;padding:30px;color:var(--text2);font-size:13px;"><div style="font-size:28px;margin-bottom:10px">🌙</div><div style="font-weight:600;">Mercado cerrado</div><div style="font-size:12px;margin-top:8px;color:var(--text3);">'+_holidayMsg+'</div></div>';
     return;
   }
   // Global safety timeout — never leave spinner stuck
@@ -2834,8 +2855,9 @@ function minsSinceOpen() {
   return (et.getHours()-9)*60 + (et.getMinutes()-30) + et.getSeconds()/60;
 }
 function isMarketDay() {
-  const d = msEtNow().getDay();
-  return d>=1 && d<=5;
+  const et = msEtNow();
+  const d = et.getDay();
+  return d>=1 && d<=5 && !isMarketHoliday(et);
 }
 function marketPhaseNow() {
   if (!isMarketDay()) return 'closed';

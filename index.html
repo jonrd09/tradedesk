@@ -196,7 +196,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
   <div class="card">
     <div style="text-align:center;margin-bottom:10px;">
       <div style="font-size:18px;font-weight:700;color:#fff;">Señales Activas</div>
-      <div style="font-size:11px;color:var(--text2);margin-top:3px;">BB Breakout · Rebote MA20 · Cambio Tendencia 1H · Efecto Imán · GOOG · TSLA · SPY · QQQ · AAPL · PLTR</div>
+      <div style="font-size:11px;color:var(--text2);margin-top:3px;">BB Entrada Temprana · Rebote MA20 · Cambio Tendencia 1H · Efecto Imán · GOOG · TSLA · SPY · QQQ · AAPL · PLTR</div>
     </div>
     <div id="signalArea">
       <div style="text-align:center;padding:20px;color:var(--text2);font-size:13px;">⟳ Calculando señales…</div>
@@ -1260,6 +1260,9 @@ async function buildSignals(){
     // Estocástico — SOLO dirección (peso pequeño, no bloquea). Sin pisos/techos.
     const stochCallDir=lK15>lD15; // %K sobre %D (subiendo)
     const stochPutDir =lK15<lD15; // %K bajo %D (bajando)
+    // stochA/stochB — usados por otras estrategias (Rebote MA20, Cambio Tendencia 1H)
+    const stochA=lK15>lD15&&lK15>30&&lK15<85;
+    const stochB=lK15<lD15&&lK15<70&&lK15>15;
     // Precio acercándose a la banda DESDE ADENTRO (cerca pero aún dentro)
     const distToUpperPct=(lUp15-lH15)/lP15*100; // qué tan cerca está el high de la banda sup
     const distToLowerPct=(lL15-lLow15)/lP15*100; // qué tan cerca está el low de la banda inf
@@ -2752,18 +2755,6 @@ async function testTelegram(){
 
 async function sendTelegram(msg, token, chatId){
   try{
-    const proxyUrl=localStorage.getItem('proxy_url')||'';
-    if(proxyUrl){
-      // Vía proxy — el bot_token vive como secret en el Worker, nunca toca el browser
-      const r=await fetch(`${proxyUrl}/telegram/notify`,{
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({chat_id:chatId,text:msg,parse_mode:'Markdown'}),
-        signal:AbortSignal.timeout(6000)
-      });
-      return r.ok;
-    }
-    // Fallback directo — token expuesto en el browser (configura el proxy!)
     const r=await fetch(`https://api.telegram.org/bot${token}/sendMessage`,{
       method:'POST',
       headers:{'Content-Type':'application/json'},

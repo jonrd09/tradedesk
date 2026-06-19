@@ -1240,45 +1240,84 @@ async function buildSignals(){
     // Crit 4: MA20 (línea amarilla) apuntando en la dirección de la señal
     // Crit 5: Volumen fuerte — >= 130% del promedio de las últimas 10 velas
     // ════════════════════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════════════════
+    // ESTRATEGIA 1 — ENTRADA TEMPRANA BB 15MIN (sistema PONDERADO)
+    // Bollinger es OBLIGATORIO (gate). El resto suma puntos. Umbral: 70%.
+    // Pesos: Bollinger 60 · Medias H/D 25 · Volumen 5 · Estocástico 5 · HLines 5 (manual)
+    // ════════════════════════════════════════════════════════════════════════
     const candleBody15=Math.abs(lP15-lO15)/lP15*100; // tamaño del cuerpo en %
     const bigBodyCall=lP15>lO15&&candleBody15>=0.3;   // vela verde con cuerpo >= 0.3%
     const bigBodyPut =lP15<lO15&&candleBody15>=0.3;   // vela roja  con cuerpo >= 0.3%
-    const bbBreakUp  =lH15>lUp15&&isExpanding15;       // high perfora banda superior
-    const bbBreakDn  =lL15<lLow15&&isExpanding15;      // low  perfora banda inferior
-    const ma20SlopeUp=bbUpperSlope(c15)>0&&lMA20_15>ma20_15.filter(v=>v!=null).slice(-4)[0]; // MA20 subiendo
-    const ma20SlopeDn=bbLowerSlope(c15)<0&&lMA20_15<ma20_15.filter(v=>v!=null).slice(-4)[0]; // MA20 bajando
-    const volStrong15 =avgVol15_10>0?lVol15>avgVol15_10*1.3:true; // >= 130% del promedio
-    const stochA=lK15>lD15&&lK15>30&&lK15<85;
-    const stochB=lK15<lD15&&lK15<70&&lK15>15;
+    // Pendiente PURA de la media de Bollinger (línea amarilla) — últimas 4 velas.
+    const _ma4=ma20_15.filter(v=>v!=null).slice(-4)[0];
+    const mediaUp=_ma4!=null&&lMA20_15>_ma4; // media subiendo
+    const mediaDn=_ma4!=null&&lMA20_15<_ma4; // media bajando
+    // Cruce de medias — CONTEXTO en Hora y Día (no en 15min).
+    const maCallCross=lMA20_1h>lMA40_1h&&lMA20D>lMA40D; // alcista: MA20 sobre MA40 en 1H y Día
+    const maPutCross =lMA40_1h>lMA20_1h&&lMA40D>lMA20D; // bajista: MA40 sobre MA20 en 1H y Día
+    // Volumen sobre la línea (promedio de últimas 10)
+    const volOverLine=avgVol15_10>0?lVol15>avgVol15_10:true; // > 100% del promedio
+    // Estocástico — SOLO dirección (peso pequeño, no bloquea). Sin pisos/techos.
+    const stochCallDir=lK15>lD15; // %K sobre %D (subiendo)
+    const stochPutDir =lK15<lD15; // %K bajo %D (bajando)
+    // Precio acercándose a la banda DESDE ADENTRO (cerca pero aún dentro)
+    const distToUpperPct=(lUp15-lH15)/lP15*100; // qué tan cerca está el high de la banda sup
+    const distToLowerPct=(lL15-lLow15)/lP15*100; // qué tan cerca está el low de la banda inf
+    const approachingUpper=lH15<=lUp15&&distToUpperPct>=0&&distToUpperPct<0.3; // cerca, aún adentro
+    const approachingLower=lL15>=lLow15&&distToLowerPct>=0&&distToLowerPct<0.3; // cerca, aún adentro
 
-    // Patrón A: CALL — breakout superior con los 5 criterios
-    if(bbBreakUp&&bigBodyCall){
-      all.push({...meta,code:'BB-A',name:'BB Salida Superior — CALL',type:'call',reqs:[
-        {ok:lBBW15>=1.5&&bbwRising,  tf:'15m',text:`Alta volatilidad: BBW ${lBBW15.toFixed(1)}% expandiéndose`},
-        {ok:bbBreakUp,               tf:'15m',text:`Ruptura: high $${lH15.toFixed(2)} > BB superior $${lUp15.toFixed(2)}`},
-        {ok:bigBodyCall,             tf:'15m',text:`Vela fuerte: cuerpo ${candleBody15.toFixed(2)}% (cierre $${lP15.toFixed(2)} > apertura $${lO15.toFixed(2)})`},
-        {ok:ma20SlopeUp,             tf:'15m',text:`MA20 apuntando arriba: $${lMA20_15.toFixed(2)}`},
-        {ok:volStrong15,             tf:'15m',text:`Volumen fuerte${volLabel}`},
+    // Pesos del modelo ponderado
+    const W={bollinger:60,medias:25,volumen:5,estocastico:5,hlines:5};
+    const SCORE_THRESHOLD=70;
+
+    // BB-A: CALL — Bollinger (gate) alcista
+    const bollGateCall=lBBW15>=1.5&&mediaUp&&approachingUpper&&bigBodyCall;
+    if(bollGateCall){
+      let score=W.bollinger;            // gate cumplido → 60
+      if(maCallCross)  score+=W.medias; // +25
+      if(volOverLine)  score+=W.volumen;// +5
+      if(stochCallDir) score+=W.estocastico; // +5
+      // hlines (5%) es manual — no se autocalcula; queda como recordatorio en la tarjeta
+      all.push({...meta,code:'BB-A',name:'BB Entrada Temprana — CALL',type:'call',
+        weighted:true,score,threshold:SCORE_THRESHOLD,reqs:[
+        {ok:lBBW15>=1.5,      tf:'15m',weight:'BB',text:`Alta volatilidad: bandas abiertas (BBW ${lBBW15.toFixed(1)}%)`},
+        {ok:mediaUp,          tf:'15m',weight:'BB',text:`Media de Bollinger apuntando arriba: $${lMA20_15.toFixed(2)}`},
+        {ok:approachingUpper, tf:'15m',weight:'BB',text:`Precio acercándose a banda superior desde adentro ($${lH15.toFixed(2)} → $${lUp15.toFixed(2)})`},
+        {ok:bigBodyCall,      tf:'15m',weight:'BB',text:`Vela verde con cuerpo ${candleBody15.toFixed(2)}%`},
+        {ok:maCallCross,      tf:'H/D',weight:'25%',text:`Contexto alcista: MA20>MA40 en Hora y Día`},
+        {ok:volOverLine,      tf:'15m',weight:'5%',text:`Volumen sobre la línea${volLabel}`},
+        {ok:stochCallDir,     tf:'15m',weight:'5%',text:`Worden a favor: %K ${lK15.toFixed(0)} > %D ${lD15.toFixed(0)}`},
+        {ok:false,            tf:'H/D',weight:'5%',text:`HLines (techos/pisos) — revisa manual en tu pantalla`,manual:true},
       ]});
     }
-    // Patrón B: PUT — breakout inferior con los 5 criterios
-    if(bbBreakDn&&bigBodyPut){
-      all.push({...meta,code:'BB-B',name:'BB Salida Inferior — PUT',type:'put',reqs:[
-        {ok:lBBW15>=1.5&&bbwRising,  tf:'15m',text:`Alta volatilidad: BBW ${lBBW15.toFixed(1)}% expandiéndose`},
-        {ok:bbBreakDn,               tf:'15m',text:`Ruptura: low $${lL15.toFixed(2)} < BB inferior $${lLow15.toFixed(2)}`},
-        {ok:bigBodyPut,              tf:'15m',text:`Vela fuerte: cuerpo ${candleBody15.toFixed(2)}% (cierre $${lP15.toFixed(2)} < apertura $${lO15.toFixed(2)})`},
-        {ok:ma20SlopeDn,             tf:'15m',text:`MA20 apuntando abajo: $${lMA20_15.toFixed(2)}`},
-        {ok:volStrong15,             tf:'15m',text:`Volumen fuerte${volLabel}`},
+    // BB-B: PUT — Bollinger (gate) bajista
+    const bollGatePut=lBBW15>=1.5&&mediaDn&&approachingLower&&bigBodyPut;
+    if(bollGatePut){
+      let score=W.bollinger;
+      if(maPutCross)  score+=W.medias;
+      if(volOverLine) score+=W.volumen;
+      if(stochPutDir) score+=W.estocastico;
+      all.push({...meta,code:'BB-B',name:'BB Entrada Temprana — PUT',type:'put',
+        weighted:true,score,threshold:SCORE_THRESHOLD,reqs:[
+        {ok:lBBW15>=1.5,      tf:'15m',weight:'BB',text:`Alta volatilidad: bandas abiertas (BBW ${lBBW15.toFixed(1)}%)`},
+        {ok:mediaDn,          tf:'15m',weight:'BB',text:`Media de Bollinger apuntando abajo: $${lMA20_15.toFixed(2)}`},
+        {ok:approachingLower, tf:'15m',weight:'BB',text:`Precio acercándose a banda inferior desde adentro ($${lL15.toFixed(2)} → $${lLow15.toFixed(2)})`},
+        {ok:bigBodyPut,       tf:'15m',weight:'BB',text:`Vela roja con cuerpo ${candleBody15.toFixed(2)}%`},
+        {ok:maPutCross,       tf:'H/D',weight:'25%',text:`Contexto bajista: MA40>MA20 en Hora y Día`},
+        {ok:volOverLine,      tf:'15m',weight:'5%',text:`Volumen sobre la línea${volLabel}`},
+        {ok:stochPutDir,      tf:'15m',weight:'5%',text:`Worden a favor: %K ${lK15.toFixed(0)} < %D ${lD15.toFixed(0)}`},
+        {ok:false,            tf:'H/D',weight:'5%',text:`HLines (techos/pisos) — revisa manual en tu pantalla`,manual:true},
       ]});
     }
     // Patrón C: PUT de regreso — EFECTO IMÁN: vela completa SOBRE la banda superior
     // Tesis: SIN volatilidad previa (BB comprimido) el precio se dispara expuesto
     // y es "succionado" de vuelta al disipador (la media). Por eso pedimos BBW BAJO.
     const bbCompressed15=lBBW15<1.5; // comprimido = sin volatilidad acumulada
-    const pC_above=lL15>lUp15&&bbCompressed15, pC_ret=lP15<lO15;
+    // Worden en el GATILLO: la sobrecompra valida que el precio regrese (efecto imán)
+    const pC_above=lL15>lUp15&&bbCompressed15&&lK15>75, pC_ret=lP15<lO15;
     if(pC_above){
       all.push({...meta,code:'BB-C',name:'BB Efecto Imán Alza — PUT',type:'put',reqs:[
-        {ok:pC_above,tf:'15m',text:`Vela COMPLETA sobre BB: low $${lL15.toFixed(2)} > $${lUp15.toFixed(2)}`},
+        {ok:lL15>lUp15,tf:'15m',text:`Vela COMPLETA sobre BB: low $${lL15.toFixed(2)} > $${lUp15.toFixed(2)}`},
         {ok:pC_ret,  tf:'15m',text:`Primera vela bajista de regreso ($${lP15.toFixed(2)} < $${lO15.toFixed(2)})`},
         {ok:lK15>75, tf:'15m',text:`Worden sobrecomprado: %K ${lK15.toFixed(0)} > 75`},
         {ok:volActive15,tf:'15m',text:`Volumen activo${volLabel}`},
@@ -1287,10 +1326,11 @@ async function buildSignals(){
     }
     // Patrón D: CALL de rebote — EFECTO IMÁN: vela completa BAJO la banda inferior
     // Mismo principio invertido: BB comprimido, vela expuesta abajo, regreso al alza.
-    const pD_below=lH15<lLow15&&bbCompressed15, pD_ret=lP15>lO15;
+    // Worden en el GATILLO: la sobreventa valida el rebote.
+    const pD_below=lH15<lLow15&&bbCompressed15&&lK15<25, pD_ret=lP15>lO15;
     if(pD_below){
       all.push({...meta,code:'BB-D',name:'BB Efecto Imán Baja — CALL',type:'call',reqs:[
-        {ok:pD_below,tf:'15m',text:`Vela COMPLETA bajo BB: high $${lH15.toFixed(2)} < $${lLow15.toFixed(2)}`},
+        {ok:lH15<lLow15,tf:'15m',text:`Vela COMPLETA bajo BB: high $${lH15.toFixed(2)} < $${lLow15.toFixed(2)}`},
         {ok:pD_ret,  tf:'15m',text:`Primera vela alcista de rebote ($${lP15.toFixed(2)} > $${lO15.toFixed(2)})`},
         {ok:lK15<25, tf:'15m',text:`Worden sobrevendido: %K ${lK15.toFixed(0)} < 25`},
         {ok:volActive15,tf:'15m',text:`Volumen activo${volLabel}`},
@@ -1411,8 +1451,18 @@ async function buildSignals(){
     return;
   }
 
-  const active=all.map(s=>({...s,passed:s.reqs.filter(r=>r.ok).length}))
-    .filter(s=>_debugMode||(s.isSetup&&Math.round(s.passed/s.reqs.length*100)>=60)||(!s.isSetup&&Math.round(s.passed/s.reqs.length*100)>=75))
+  const active=all.map(s=>{
+      const passed=s.reqs.filter(r=>r.ok).length;
+      // Señales ponderadas usan su score (0-100); las demás usan passed/reqs.
+      const pct=s.weighted?s.score:Math.round(passed/s.reqs.length*100);
+      return {...s,passed,pct};
+    })
+    .filter(s=>{
+      if(_debugMode)return true;
+      if(s.weighted)return s.pct>=(s.threshold||70); // umbral ponderado
+      if(s.isSetup)return s.pct>=60;
+      return s.pct>=75; // estrategias legacy
+    })
     // Bloquear señales ya expiradas en esta sesión — evita que reaparezcan aunque los datos las regeneren
     .filter(s=>{
       if(_debugMode||s.isSetup)return true;
@@ -1471,14 +1521,15 @@ async function buildSignals(){
 
   active.forEach(s=>{
     const total=s.reqs.length;
-    const disp=Math.round(s.passed/total*100);
-    const pctLabel=Math.round(s.passed/total*100);
+    const disp=s.weighted?s.pct:Math.round(s.passed/total*100);
+    const pctLabel=disp;
     const col=disp===100?'var(--green)':disp>=86?'var(--green)':'var(--yellow)';
     const hdr=s.type==='call'?'sig-call':'sig-put';
-    const fullSignal=s.passed===total;
+    const fullSignal=s.weighted?s.pct>=100:s.passed===total;
     const accentCol=s.isSetup?'#ffc234':s.type==='call'?'#00d17a':'#ff4d6d';
-    // Save to historial when signal reaches 75%+
-    if(!s.isSetup&&disp>=75){
+    // Save to historial when signal passes its threshold
+    const _passThreshold=s.weighted?(s.threshold||70):75;
+    if(!s.isSetup&&disp>=_passThreshold){
       s.pct_signal=disp;
       addToHistorial(s);
     }
@@ -1510,7 +1561,7 @@ async function buildSignals(){
     const _etNow=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
     const _hourKey=`${_etNow.toLocaleDateString('es-PR')}_${_etNow.getHours()}`;
     const _sigKey=`tg_sent_${s.sym}_${s.code}_${_hourKey}`;
-    if(disp>=75&&!localStorage.getItem(_sigKey)){
+    if(disp>=_passThreshold&&!localStorage.getItem(_sigKey)){
       localStorage.setItem(_sigKey,'1');
       notifySignal(s.sym,s.code,s.name,s.type,disp,s.price,s.pct);
     }

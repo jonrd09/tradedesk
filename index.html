@@ -158,14 +158,10 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
     <span id="histBadge" style="display:none;background:var(--yellow);color:#000;border-radius:10px;padding:1px 6px;font-size:10px;margin-left:4px;">0</span>
   </button>
 
-  <!-- LIVE indicator + TEST button -->
-  <button id="liveBtn" onclick="setLiveMode()"
-    style="background:var(--green-bg);border:1px solid var(--green);border-radius:20px;color:var(--green);padding:4px 14px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--sans);white-space:nowrap;">
-    🟢 Live
-  </button>
-  <button id="testBtn" onclick="setTestMode()"
-    style="background:var(--bg3);border:1px solid var(--border2);border-radius:20px;color:var(--text3);padding:4px 14px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--sans);white-space:nowrap;">
-    🧪 Test
+  <!-- DEBUG button -->
+  <button id="testBtn" onclick="runDebugMode()"
+    style="background:rgba(167,139,250,.15);border:1px solid rgba(167,139,250,.5);border-radius:20px;color:var(--purple);padding:4px 14px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--sans);white-space:nowrap;">
+    🔍 Debug
   </button>
 </header>
 
@@ -507,81 +503,39 @@ let _refreshInFlight = null;
 async function getSchwabToken(){
   const token=localStorage.getItem('schwab_access_token')||'';
   const expiry=parseInt(localStorage.getItem('schwab_token_expiry')||'0');
-  const stillValid=token&&Date.now()<expiry;
-  const needsRenewal=token&&Date.now()>expiry-300000; // quedan menos de 5 min
-
-  // Si el token es válido y le queda tiempo de sobra — úsalo directo
-  if(stillValid&&!needsRenewal)return token;
-
-  // Si el token es válido pero está por expirar — intentar renovar en background
-  // pero si falla, usar el token actual (no bloquear señales)
-  if(stillValid&&needsRenewal){
-    addLog('warn','Schwab','Token expira pronto — renovando en background');
-    // Renovar sin await para no bloquear — usar token actual mientras tanto
-    (async()=>{
-      try{
-        const refresh=localStorage.getItem('schwab_refresh_token')||'';
-        const secret=localStorage.getItem('schwab_client_secret')||'';
-        if(!refresh||!secret)return;
-        const proxyUrl=localStorage.getItem('proxy_url')||'';
-        let r;
-        if(proxyUrl){
-          try{
-            r=await fetch(`${proxyUrl}/schwab/refresh`,{
-              method:'POST',headers:{'Content-Type':'application/json'},
-              body:JSON.stringify({refresh_token:refresh}),
-              signal:AbortSignal.timeout(8000)
-            });
-          }catch(e){r=null;}
-        }
-        if(!r||!r.ok){
-          const creds=btoa(getSchwabClientId()+':'+secret);
-          r=await fetch('https://api.schwabapi.com/v1/oauth/token',{
-            method:'POST',
-            headers:{'Authorization':'Basic '+creds,'Content-Type':'application/x-www-form-urlencoded'},
-            body:new URLSearchParams({grant_type:'refresh_token',refresh_token:refresh}),
-            signal:AbortSignal.timeout(8000)
-          });
-        }
-        if(r&&r.ok){
-          const d=await r.json();
-          if(d.access_token){
-            localStorage.setItem('schwab_access_token',d.access_token);
-            if(d.refresh_token){
-              localStorage.setItem('schwab_refresh_token',d.refresh_token);
-              localStorage.setItem('schwab_refresh_expiry',Date.now()+7*24*60*60*1000);
-            }
-            localStorage.setItem('schwab_token_expiry',Date.now()+(d.expires_in||1800)*1000);
-            _updateSchwabBtn(true);
-            addLog('warn','Schwab','Token renovado exitosamente en background');
-          }
-        }
-      }catch(e){addLog('warn','Schwab','Renovación background falló — usando token actual',e.message);}
-    })();
-    return token; // usar token actual sin esperar renovación
-  }
-
-  // Token expirado completamente — intentar renovar de forma bloqueante
+  // Renovar si quedan menos de 5 minutos (300000ms) — no esperar a que expire
+  const valid=token&&Date.now()<expiry-300000;
+  if(valid)return token;
+  if(token&&Date.now()<expiry)addLog('warn','Schwab','Token expira en <5min — renovando automáticamente');
   const refresh=localStorage.getItem('schwab_refresh_token')||'';
   const secret=localStorage.getItem('schwab_client_secret')||'';
   if(!refresh||!secret){
-    addLog('error','Schwab','Token expirado y sin refresh_token — reconecta Schwab');
+    addLog('error','Schwab','No hay refresh_token o client_secret — reconecta Schwab');
     return null;
   }
+  // Single-flight: if refresh already in progress, wait for it instead of firing another
   if(_refreshInFlight) return _refreshInFlight;
-  _refreshInFlight=(async()=>{
+  _refreshInFlight = (async()=>{
     try{
       const proxyUrl=localStorage.getItem('proxy_url')||'';
       let r;
+
       if(proxyUrl){
+        // Try proxy first
         try{
           r=await fetch(`${proxyUrl}/schwab/refresh`,{
-            method:'POST',headers:{'Content-Type':'application/json'},
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
             body:JSON.stringify({refresh_token:refresh}),
             signal:AbortSignal.timeout(8000)
           });
-        }catch(proxyErr){addLog('warn','Schwab','Proxy falló, intentando directo',proxyErr.message);r=null;}
+        }catch(proxyErr){
+          addLog('warn','Schwab',`Proxy falló, intentando conexión directa`,proxyErr.message);
+          r=null;
+        }
       }
+
+      // Direct fallback if no proxy or proxy failed
       if(!r||!r.ok){
         const creds=btoa(getSchwabClientId()+':'+secret);
         r=await fetch('https://api.schwabapi.com/v1/oauth/token',{
@@ -591,13 +545,15 @@ async function getSchwabToken(){
           signal:AbortSignal.timeout(8000)
         });
       }
+
       if(!r.ok){
         const err=await r.text().catch(()=>'');
-        addLog('error','Schwab',`Renovación falló → HTTP ${r.status}`,err.substring(0,100));
+        addLog('error','Schwab',`Renovación de token falló → HTTP ${r.status}`,err.substring(0,100));
         if(r.status===401||r.status===400){
           localStorage.removeItem('schwab_access_token');
           localStorage.removeItem('schwab_refresh_token');
           localStorage.removeItem('schwab_token_expiry');
+          addLog('error','Schwab','Sesión expirada — reconecta Schwab manualmente');
           _updateSchwabBtn(false);
         }
         return null;
@@ -607,15 +563,18 @@ async function getSchwabToken(){
       localStorage.setItem('schwab_access_token',d.access_token);
       if(d.refresh_token){
         localStorage.setItem('schwab_refresh_token',d.refresh_token);
+        // Schwab rotates refresh token — update its expiry
         localStorage.setItem('schwab_refresh_expiry',Date.now()+7*24*60*60*1000);
       }
       localStorage.setItem('schwab_token_expiry',Date.now()+(d.expires_in||1800)*1000);
       _updateSchwabBtn(true);
       return d.access_token;
     }catch(e){
-      addLog('error','Schwab','Error renovando token',e.message);
+      addLog('error','Schwab',`Error renovando token`,e.message);
       return null;
-    }finally{_refreshInFlight=null;}
+    }finally{
+      _refreshInFlight=null;
+    }
   })();
   return _refreshInFlight;
 }
@@ -976,28 +935,9 @@ function genCandles(base,n,vol){
   return a;
 }
 const _candleCache={};
-// Returns {c,h,l,o} arrays (close,high,low,open) or null
-async function fetchCandles(sym,resolution,bars){
-  const key=getKey();if(!key||key.length<8)return null;
-  const ck=`${sym}_${resolution}`;
-  const cached=_candleCache[ck];
-  const now=Math.floor(Date.now()/1000);
-  if(cached&&(now-cached.ts)<600)return cached.data;
-  const to=now,from=to-bars*(resolution==='60'?3600:resolution==='D'?86400:900)*3;
-  const url=`https://finnhub.io/api/v1/stock/candle?symbol=${sym}&resolution=${resolution}&from=${from}&to=${to}&token=${key}`;
-  try{
-    const r=await fetch(url,{signal:AbortSignal.timeout(5000)});
-    if(!r.ok)return null;
-    const data=await r.json();
-    if(data&&data.s==='ok'&&data.c&&data.c.length>=5){
-      const sl=n=>(data[n]||[]).slice(-bars);
-      const ohlc={c:sl('c'),h:sl('h'),l:sl('l'),o:sl('o')};
-      _candleCache[ck]={data:ohlc,ts:now};
-      return ohlc;
-    }
-  }catch(e){}
-  return null;
-}
+// NOTA: fetchCandles (Finnhub /stock/candle) eliminado — devolvía 403 en plan
+// gratuito y no tenía call sites. El path real usa fetchSchwabCandles. _candleCache
+// se conserva porque test mode lo usa.
 // Helper: extract closes array from ohlc or plain array
 function closes(d){return d&&d.c?d.c:(Array.isArray(d)?d:[]);}
 function highs(d){return d&&d.h?d.h:closes(d);}
@@ -1115,7 +1055,7 @@ async function buildSignals(){
   const _sigTimeout=setTimeout(()=>{
     if(area.innerHTML.includes('⟳'))
       area.innerHTML='<div style="text-align:center;padding:30px;color:var(--text2);font-size:13px;"><div style="font-size:28px;margin-bottom:10px">⏱</div><div style="font-weight:600;color:var(--yellow);">Tiempo agotado</div><div style="font-size:12px;margin-top:8px;color:var(--text3);">Schwab tardó demasiado. Revisa tu conexión o intenta en unos minutos.</div></div>';
-  },30000);
+  },90000);
   try{
 
   for(const sym of['GOOG','TSLA','SPY','QQQ','AAPL','PLTR']){
@@ -1136,15 +1076,14 @@ async function buildSignals(){
       }
       if(schwabToken){
         try{
-          // Sequential fetches — timeout 8s por fetch, skip símbolo si falla
-          const _t=()=>new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),8000));
-          const r1=await Promise.race([fetchSchwabCandles(sym,'minute',60,100),_t()]).catch(e=>{addLog('warn','Schwab',`${sym} 1H timeout/error`,e.message);return null;});
+          // Sequential fetches — menos carga en Schwab, menos timeouts
+          const r1=await Promise.race([fetchSchwabCandles(sym,'minute',60,100),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),20000))]).catch(()=>null);
           if(r1&&closes(r1).length>=10){ohlc1h=r1;dataLabel='📡 Schwab';}
-          await new Promise(r=>setTimeout(r,200));
-          const r2=await Promise.race([fetchSchwabCandles(sym,'minute',15,60),_t()]).catch(e=>{addLog('warn','Schwab',`${sym} 15m timeout/error`,e.message);return null;});
+          await new Promise(r=>setTimeout(r,400));
+          const r2=await Promise.race([fetchSchwabCandles(sym,'minute',15,60),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),20000))]).catch(()=>null);
           if(r2&&closes(r2).length>=5) ohlc15=r2;
-          await new Promise(r=>setTimeout(r,200));
-          const r3=await Promise.race([fetchSchwabCandles(sym,'D',1,90),_t()]).catch(e=>{addLog('warn','Schwab',`${sym} Daily timeout/error`,e.message);return null;});
+          await new Promise(r=>setTimeout(r,400));
+          const r3=await Promise.race([fetchSchwabCandles(sym,'D',1,90),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),20000))]).catch(()=>null);
           if(r3&&closes(r3).length>=10) ohlcD=r3;
         }catch(e){addLog('warn','Schwab',`${sym} señales error`,e.message);}
       }
@@ -1153,6 +1092,16 @@ async function buildSignals(){
     if(!ohlc1h||!ohlc15||!ohlcD){
       const missing=[!ohlc1h?'1H':null,!ohlc15?'15m':null,!ohlcD?'D':null].filter(Boolean).join(', ');
       if(!_testMode)addLog('warn','Señales',`${sym} → Sin datos (${missing})`);
+      continue;
+    }
+
+    // Guard: nunca calcular señales sobre datos corruptos (NaN/Infinity).
+    // stochastic/sma propagan NaN a través de .filter(v=>v!=null), así que validamos antes.
+    const _allFinite=arr=>arr&&arr.length>0&&arr.every(v=>Number.isFinite(v));
+    const _dataClean=['c','h','l','o'].every(k=>
+      _allFinite(ohlc1h[k])&&_allFinite(ohlc15[k])&&_allFinite(ohlcD[k]));
+    if(!_dataClean){
+      if(!_testMode)addLog('warn','Señales',`${sym} → Datos corruptos (NaN) — señal omitida`);
       continue;
     }
 
@@ -1262,7 +1211,7 @@ async function buildSignals(){
     // F4: Volumen activo
     const volLabel=avgVol15_10>0?` (${(lVol15/avgVol15_10*100).toFixed(0)}% del promedio)`:'';
 
-    // ── SETUP — Pre-ruptura (precio < 0.3% de la banda) ────────────────────
+    // ── SETUP — Pre-ruptura ─────────────────────────────────────────────────
     const distToUpper=(lUp15-lP15)/lP15*100;
     const distToLower=(lP15-lLow15)/lP15*100;
     const nearUpper=distToUpper>=0&&distToUpper<0.3;
@@ -1279,36 +1228,6 @@ async function buildSignals(){
         {ok:setupBull?lP15>lMA20_15:lP15<lMA20_15,tf:'15m',text:`MA20 alineada: $${lMA20_15.toFixed(2)}`},
         {ok:stochCallOk||stochPutOk, tf:'15m',text:`Stochastics apoyando (%K ${lK15.toFixed(0)})`},
         {ok:bbwRising,               tf:'15m',text:`BBW expandiéndose: ${lBBW15.toFixed(2)}% > ${lBBW15_1.toFixed(2)}%`},
-      ]});
-    }
-
-    // ── PREP — Nivel intermedio: MA20 cruzada + BB expandiendo + acercándose ─
-    // Precio cruzó MA20, BB expandiéndose, todavía dentro de la banda
-    // pero entre 0.3% y 1.5% de la banda → "listo para entrar"
-    // Este es el setup de la foto de las 3:30 PM
-    const prepZoneUp = distToUpper>=0.3&&distToUpper<1.5; // entre 0.3% y 1.5% de banda sup
-    const prepZoneDn = distToLower>=0.3&&distToLower<1.5; // entre 0.3% y 1.5% de banda inf
-    const ma20CrossedUp = pP15<lMA20_15&&lP15>=lMA20_15; // cruzó MA20 hacia arriba
-    const ma20CrossedDn = pP15>lMA20_15&&lP15<=lMA20_15; // cruzó MA20 hacia abajo
-    // Precio sobre MA20 y moviéndose hacia la banda (aunque no haya cruzado esta vela)
-    const movingToUpper = lP15>lMA20_15&&lP15>pP15&&bbwRising; // subiendo hacia banda sup
-    const movingToLower = lP15<lMA20_15&&lP15<pP15&&bbwRising; // bajando hacia banda inf
-    const prepBull = bbwRising&&lBBW15>=0.8&&prepZoneUp&&(ma20CrossedUp||movingToUpper)&&lP15>lO15;
-    const prepBear = bbwRising&&lBBW15>=0.8&&prepZoneDn&&(ma20CrossedDn||movingToLower)&&lP15<lO15;
-
-    if(prepBull||prepBear){
-      const prepType=prepBull?'call':'put';
-      const prepDir=prepBull?'Superior':'Inferior';
-      const prepDist=(prepBull?distToUpper:distToLower).toFixed(2);
-      const prepBand=(prepBull?lUp15:lLow15).toFixed(2);
-      all.push({...meta,code:'PREP',name:`Preparación — Acercándose a banda ${prepDir}`,type:prepType,isSetup:true,reqs:[
-        {ok:bbwRising&&lBBW15>=0.8,  tf:'15m',text:`BB expandiéndose: BBW ${lBBW15.toFixed(2)}%`},
-        {ok:prepBull?prepZoneUp:prepZoneDn, tf:'15m',text:`Precio a ${prepDist}% de banda ${prepDir} ($${prepBand}) — zona de entrada`},
-        {ok:ma20CrossedUp||movingToUpper||ma20CrossedDn||movingToLower,
-                                     tf:'15m',text:`MA20 ${prepBull?'cruzada/precio subiendo':'cruzada/precio bajando'} ($${lMA20_15.toFixed(2)})`},
-        {ok:prepBull?stochCallOk:stochPutOk, tf:'15m',text:`Stochastics a favor: %K ${lK15.toFixed(0)}`},
-        {ok:prepBull?align1hBull||(lP1h>lMA20_1h):align1hBear||(lP1h<lMA20_1h),
-                                     tf:'1H', text:`1H acompañando — precio ${prepBull?'sobre':'bajo'} MA20`},
       ]});
     }
 
@@ -1352,26 +1271,30 @@ async function buildSignals(){
         {ok:volStrong15,             tf:'15m',text:`Volumen fuerte${volLabel}`},
       ]});
     }
-    // Patrón C: PUT de regreso — vela completa SOBRE la banda superior
-    const pC_above=lL15>lUp15&&isExpanding15, pC_ret=lP15<lO15;
+    // Patrón C: PUT de regreso — EFECTO IMÁN: vela completa SOBRE la banda superior
+    // Tesis: SIN volatilidad previa (BB comprimido) el precio se dispara expuesto
+    // y es "succionado" de vuelta al disipador (la media). Por eso pedimos BBW BAJO.
+    const bbCompressed15=lBBW15<1.5; // comprimido = sin volatilidad acumulada
+    const pC_above=lL15>lUp15&&bbCompressed15, pC_ret=lP15<lO15;
     if(pC_above){
-      all.push({...meta,code:'BB-C',name:'BB Sobreexpuesto Alza — PUT',type:'put',reqs:[
+      all.push({...meta,code:'BB-C',name:'BB Efecto Imán Alza — PUT',type:'put',reqs:[
         {ok:pC_above,tf:'15m',text:`Vela COMPLETA sobre BB: low $${lL15.toFixed(2)} > $${lUp15.toFixed(2)}`},
         {ok:pC_ret,  tf:'15m',text:`Primera vela bajista de regreso ($${lP15.toFixed(2)} < $${lO15.toFixed(2)})`},
         {ok:lK15>75, tf:'15m',text:`Worden sobrecomprado: %K ${lK15.toFixed(0)} > 75`},
         {ok:volActive15,tf:'15m',text:`Volumen activo${volLabel}`},
-        {ok:lBBW15>1.5,tf:'15m',text:`BB expandido (BBW ${lBBW15.toFixed(1)}%)`},
+        {ok:bbCompressed15,tf:'15m',text:`BB comprimido sin volatilidad (BBW ${lBBW15.toFixed(1)}% < 1.5%)`},
       ]});
     }
-    // Patrón D: CALL de rebote — vela completa BAJO la banda inferior
-    const pD_below=lH15<lLow15&&isExpanding15, pD_ret=lP15>lO15;
+    // Patrón D: CALL de rebote — EFECTO IMÁN: vela completa BAJO la banda inferior
+    // Mismo principio invertido: BB comprimido, vela expuesta abajo, regreso al alza.
+    const pD_below=lH15<lLow15&&bbCompressed15, pD_ret=lP15>lO15;
     if(pD_below){
-      all.push({...meta,code:'BB-D',name:'BB Sobreexpuesto Baja — CALL',type:'call',reqs:[
+      all.push({...meta,code:'BB-D',name:'BB Efecto Imán Baja — CALL',type:'call',reqs:[
         {ok:pD_below,tf:'15m',text:`Vela COMPLETA bajo BB: high $${lH15.toFixed(2)} < $${lLow15.toFixed(2)}`},
         {ok:pD_ret,  tf:'15m',text:`Primera vela alcista de rebote ($${lP15.toFixed(2)} > $${lO15.toFixed(2)})`},
         {ok:lK15<25, tf:'15m',text:`Worden sobrevendido: %K ${lK15.toFixed(0)} < 25`},
         {ok:volActive15,tf:'15m',text:`Volumen activo${volLabel}`},
-        {ok:lBBW15>1.5,tf:'15m',text:`BB expandido (BBW ${lBBW15.toFixed(1)}%)`},
+        {ok:bbCompressed15,tf:'15m',text:`BB comprimido sin volatilidad (BBW ${lBBW15.toFixed(1)}% < 1.5%)`},
       ]});
     }
 
@@ -1403,46 +1326,6 @@ async function buildSignals(){
         {ok:ma20Bear,      tf:'15m',text:`Precio bajo MA20 — resistencia confirmada`},
         {ok:stochB,        tf:'15m',text:`Worden: %K (${lK15.toFixed(0)}) < %D (${lD15.toFixed(0)})`},
         {ok:volActive15,   tf:'15m',text:`Volumen activo${volLabel}`},
-      ]});
-    }
-
-    // ════════════════════════════════════════════════════════════════════════
-    // PATRÓN MA20-X — CRUCE MA20 CON EXPANSIÓN BB (setup tipo 3:30 PM)
-    // Precio venía BAJO la MA20, cruza hacia arriba Y el BB empieza a expandirse
-    // → señal de alerta temprana al 75% para entrar cuando la vela avance
-    // ════════════════════════════════════════════════════════════════════════
-    // CALL: vela anterior cerró bajo MA20, vela actual cierra SOBRE MA20 (cruce real)
-    const ma20CrossUp = pP15 < lMA20_15 && lP15 >= lMA20_15 && lP15 > lO15;
-    // PUT: vela anterior cerró sobre MA20, vela actual cierra BAJO MA20 (cruce real)
-    const ma20CrossDn = pP15 > lMA20_15 && lP15 <= lMA20_15 && lP15 < lO15;
-    // BB expandiéndose — volatilidad arrancando
-    const bbExpandingNow = bbwRising && lBBW15 >= 0.8;
-    // MA20 apuntando en la dirección del cruce (línea amarilla curvándose)
-    const ma20CurveUp = lMA20_15 >= ma20_15.filter(v=>v!=null).slice(-5)[0]; // MA20 >= hace 5 velas
-    const ma20CurveDn = lMA20_15 <= ma20_15.filter(v=>v!=null).slice(-5)[0];
-    // Precio venía comprimido dentro del BB (no fue un spike)
-    const wasInsideBB = pP15 > lLow15 && pP15 < lUp15;
-    // 1H alineado — confirmación de tendencia mayor
-    const c1hLast4 = c1h.slice(-4);
-    const trend1hUp = c1hLast4[3] > c1hLast4[0]; // últimas 4 velas 1H subiendo
-    const trend1hDn = c1hLast4[3] < c1hLast4[0]; // últimas 4 velas 1H bajando
-
-    if(ma20CrossUp&&bbExpandingNow){
-      all.push({...meta,code:'MA20-X',name:'Cruce MA20 Alcista — CALL',type:'call',isSetup:false,reqs:[
-        {ok:ma20CrossUp,      tf:'15m',text:`Cruce MA20: anterior $${pP15.toFixed(2)} → actual $${lP15.toFixed(2)} (MA20: $${lMA20_15.toFixed(2)})`},
-        {ok:bbExpandingNow,   tf:'15m',text:`BB expandiéndose: BBW ${lBBW15.toFixed(2)}% subiendo`},
-        {ok:ma20CurveUp,      tf:'15m',text:`MA20 curvándose al alza (línea amarilla)`},
-        {ok:wasInsideBB,      tf:'15m',text:`Precio venía comprimido dentro del BB`},
-        {ok:trend1hUp||align1hBull, tf:'1H', text:`Tendencia 1H acompañando al alza`},
-      ]});
-    }
-    if(ma20CrossDn&&bbExpandingNow){
-      all.push({...meta,code:'MA20-X',name:'Cruce MA20 Bajista — PUT',type:'put',isSetup:false,reqs:[
-        {ok:ma20CrossDn,      tf:'15m',text:`Cruce MA20: anterior $${pP15.toFixed(2)} → actual $${lP15.toFixed(2)} (MA20: $${lMA20_15.toFixed(2)})`},
-        {ok:bbExpandingNow,   tf:'15m',text:`BB expandiéndose: BBW ${lBBW15.toFixed(2)}% subiendo`},
-        {ok:ma20CurveDn,      tf:'15m',text:`MA20 curvándose a la baja (línea amarilla)`},
-        {ok:wasInsideBB,      tf:'15m',text:`Precio venía comprimido dentro del BB`},
-        {ok:trend1hDn||align1hBear, tf:'1H', text:`Tendencia 1H acompañando a la baja`},
       ]});
     }
 
@@ -1599,31 +1482,35 @@ async function buildSignals(){
       s.pct_signal=disp;
       addToHistorial(s);
     }
-    // Send Telegram SETUP/PREP notification — una vez por ventana de escaneo
+    // Send Telegram SETUP notification
     if(s.isSetup){
       const _today=new Date().toLocaleDateString('es-PR');
-      const _etS=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
-      const _mS=_etS.getHours()*60+_etS.getMinutes();
-      const _winS=(_mS>=570&&_mS<630)?'apertura':(_mS>=780&&_mS<840)?'mediodia':(_mS>=930&&_mS<950)?'cierre':'resto';
-      const _setupKey=`tg_sent_${s.code}_${s.sym}_${_today}_${_winS}`;
-      if(isTgEnabled()&&!localStorage.getItem(_setupKey)){
+      const _setupKey=`tg_sent_setup_${s.sym}_${_today}`;
+      if(!localStorage.getItem(_setupKey)){
         localStorage.setItem(_setupKey,'1');
-        const time=_etS.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true});
-        const dir=s.type==='call'?'📈 CALL':'📉 PUT';
-        const msg=s.code==='PREP'
-          ?`🟡 *PREP ${dir} — ${s.sym}*\n\n📊 ${s.name}\n💰 Precio: *$${s.price.toFixed(2)}*\n🎯 MA20 cruzada · BB expandiendo · acercándose a banda\n🕐 ${time} ET\n\n_Prepárate — puede romper en la próxima vela_`
-          :`⚡ *SETUP ${dir} — ${s.sym}*\n\n📊 ${s.name}\n💰 Precio: *$${s.price.toFixed(2)}*\n🎯 Precio a < 0.3% de la banda — ruptura inminente\n🕐 ${time} ET\n\n_La señal real viene pronto_`;
+        const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+        const time=et.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true});
+        const msg=`⚡ *SETUP DETECTADO — ${s.sym}*
+
+`+
+          `📊 ${s.name}
+`+
+          `💰 Precio: *$${s.price.toFixed(2)}*
+`+
+          `🎯 BB comprimido — ruptura inminente
+`+
+          `🕐 ${time} ET
+
+`+
+          `_Prepárate para la señal real_`;
         getTgToken()&&sendTelegram(msg,getTgToken(),getTgChat());
       }
     }
-    // Send Telegram notification for new signals
-    // Clave de deduplicación: por ventana de escaneo del día (no por hora)
-    // Ventanas: apertura(570-630), mediodia(780-840), cierre(930-950), resto(otras)
+    // Send Telegram notification for new signals (track sent to avoid duplicates)
     const _etNow=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
-    const _nowM=_etNow.getHours()*60+_etNow.getMinutes();
-    const _window=(_nowM>=570&&_nowM<630)?'apertura':(_nowM>=780&&_nowM<840)?'mediodia':(_nowM>=930&&_nowM<950)?'cierre':'resto';
-    const _sigKey=`tg_sent_${s.sym}_${s.code}_${s.type}_${_etNow.toLocaleDateString('es-PR')}_${_window}`;
-    if(disp>=75&&isTgEnabled()&&!localStorage.getItem(_sigKey)){
+    const _hourKey=`${_etNow.toLocaleDateString('es-PR')}_${_etNow.getHours()}`;
+    const _sigKey=`tg_sent_${s.sym}_${s.code}_${_hourKey}`;
+    if(disp>=75&&!localStorage.getItem(_sigKey)){
       localStorage.setItem(_sigKey,'1');
       notifySignal(s.sym,s.code,s.name,s.type,disp,s.price,s.pct);
     }
@@ -2398,103 +2285,119 @@ function renderInsiderTable(data){
 // ═══════════════════════════════════════════════════════════════
 // TEST MODE — Datos históricos reales para verificar lógica
 // ═══════════════════════════════════════════════════════════════
-function _setLiveBtnActive(){
-  const lb=document.getElementById('liveBtn');
-  const tb=document.getElementById('testBtn');
-  if(lb){lb.style.background='var(--green-bg)';lb.style.borderColor='var(--green)';lb.style.color='var(--green)';lb.textContent='🟢 Live';}
-  if(tb){tb.style.background='var(--bg3)';tb.style.borderColor='var(--border2)';tb.style.color='var(--text3)';tb.textContent='🧪 Test';}
+async function runDebugMode(){
+  const btn=document.getElementById('testBtn');
+  // Toggle debug mode
+  _debugMode=!_debugMode;
+  if(_debugMode){
+    btn.textContent='🔍 Debug ON';
+    btn.style.background='rgba(255,194,52,.25)';
+    btn.style.borderColor='rgba(255,194,52,.8)';
+    btn.style.color='#ffc234';
+    // Run buildSignals with real data but show ALL signals (even 1/7)
+    await buildSignals();
+    // Add debug banner
+    const area=document.getElementById('signalArea');
+    area.innerHTML='<div style="text-align:center;padding:6px 12px;color:#ffc234;font-size:11px;font-weight:700;border:1px solid rgba(255,194,52,.3);border-radius:8px;margin-bottom:10px;background:rgba(255,194,52,.08);">🔍 MODO DEBUG — Mostrando TODAS las señales con datos reales (sin filtro de 75%)</div>'+area.innerHTML;
+  }else{
+    btn.textContent='🔍 Debug';
+    btn.style.background='rgba(167,139,250,.15)';
+    btn.style.borderColor='rgba(167,139,250,.5)';
+    btn.style.color='var(--purple)';
+    // Rebuild with normal 75% filter
+    await buildSignals();
+  }
 }
-function _setTestBtnActive(){
-  const lb=document.getElementById('liveBtn');
-  const tb=document.getElementById('testBtn');
-  if(lb){lb.style.background='var(--bg3)';lb.style.borderColor='var(--border2)';lb.style.color='var(--text3)';lb.textContent='🟢 Live';}
-  if(tb){tb.style.background='var(--green-bg)';tb.style.borderColor='var(--green)';tb.style.color='var(--green)';tb.textContent='🟢 Test ON';}
-}
-async function setLiveMode(){
-  _debugMode=false;_testMode=false;
-  _setLiveBtnActive();
-  await buildSignals();
-}
-async function setTestMode(){
-  _debugMode=false;
-  _setTestBtnActive();
-  const tb=document.getElementById('testBtn');
-  if(tb){tb.textContent='⟳ Cargando…';tb.style.opacity='.7';}
-  await runTestMode();
-  if(tb){tb.style.opacity='1';}
-  _setTestBtnActive();
-}
-// Keep runDebugMode as alias for backward compat (opening scanner etc)
-async function runDebugMode(){ await setLiveMode(); }
 
 async function runTestMode(){
+  const btn=document.getElementById('testBtn');
+  if(btn){btn.textContent='⟳ Probando…';btn.style.opacity='.6';btn.disabled=true;}
+
+  // Helper: build OHLC with explicit control over each candle
+  function ohlc(closes,spreadPct=0.004){
+    const h=closes.map((v,i)=>Math.max(v,i>0?closes[i-1]:v)*( 1+spreadPct));
+    const l=closes.map((v,i)=>Math.min(v,i>0?closes[i-1]:v)*(1-spreadPct));
+    const o=closes.map((_,i)=>i===0?closes[0]:closes[i-1]);
+    const v=closes.map(()=>Math.floor(1e6+Math.random()*5e6));
+    return{c:closes,h,l,o,v};
+  }
+  // Build a clean descending series with 4+ pivot highs going lower each time
+  function bearSeries(start,n,dropPerBar){
+    return Array.from({length:n},(_,i)=>+(start - i*dropPerBar + (i%3===0?dropPerBar*0.3:0)).toFixed(2));
+  }
+  // Build a clean ascending series
+  function bullSeries(start,n,risePerBar){
+    return Array.from({length:n},(_,i)=>+(start + i*risePerBar).toFixed(2));
+  }
 
   const now=Math.floor(Date.now()/1000);
 
-  // Helper: build OHLC arrays
-  function makeOhlc(closes, highs, lows, opens, vols){
-    return {c:closes, h:highs||closes.map(v=>v*1.003), l:lows||closes.map(v=>v*0.997), o:opens||closes.map((v,i)=>i===0?v:closes[i-1]), v:vols||closes.map(()=>100000)};
-  }
-
-  // ── GOOG → BB-A CALL: breakout banda superior con los 5 criterios ──────────
-  // Necesitamos: BBW ≥1.5% expandiéndose, high > BB superior, cuerpo verde ≥0.3%,
-  // MA20 slope positivo, volumen ≥130% promedio
-  // Construimos 30 velas de 15min tranquilas + última vela de ruptura fuerte
+  // ── GOOG → E1: Cambio de Tendencia al Alza ──────────────────────────────
+  // Need: 4+ descending highs in 1H, then price breaks above trendline AND closes above MA20
+  // MA20 of last 20 bars needs to be below final price
+  // Build: 30 bars descending (creates trendline + MA20 below price at end), last 5 bars breakout
   const gBase=365;
-  // 29 velas tranquilas — BB comprimido, precio subiendo suave
-  const g15c=[...Array.from({length:29},(_,i)=>+(gBase + i*0.15).toFixed(2))];
-  // Última vela: breakout fuerte — cierre muy por encima de apertura y de la banda
-  const gLastOpen=g15c[28]+0.1;
-  const gLastClose=gLastOpen+2.8; // cuerpo 2.8 puntos ≈ 0.77% — bien encima de 0.3%
-  const gLastHigh=gLastClose+0.5; // perfora banda superior
-  g15c.push(+(gLastClose).toFixed(2));
-  const g15h=[...Array.from({length:29},(_,i)=>+(gBase+0.3+i*0.15).toFixed(2)), gLastHigh];
-  const g15l=[...Array.from({length:29},(_,i)=>+(gBase-0.3+i*0.15).toFixed(2)), gLastOpen-0.2];
-  const g15o=[...Array.from({length:29},(_,i)=>+(gBase-0.1+i*0.15).toFixed(2)), gLastOpen];
-  // Volumen: últimas 10 velas normales ~100k, última vela 280k (≥130%)
-  const g15v=[...Array.from({length:20},()=>90000),...Array.from({length:9},()=>105000), 280000];
-  _candleCache['GOOG_15']={data:makeOhlc(g15c,g15h,g15l,g15o,g15v),ts:now};
-  // 1H: tendencia alcista — precio sobre MA20 con slope positivo
-  const g1hc=Array.from({length:50},(_,i)=>+(gBase-5+i*0.25).toFixed(2));
-  _candleCache['GOOG_60']={data:makeOhlc(g1hc),ts:now};
-  // Daily: 30 días alcistas
-  const gDc=Array.from({length:30},(_,i)=>+(gBase-15+i*0.6).toFixed(2));
-  _candleCache['GOOG_D']={data:makeOhlc(gDc),ts:now};
+  // 30 descending bars to establish downtrend + MA20
+  const gDown=bearSeries(gBase+15, 30, 0.6);
+  // 5 bars of strong breakout — last bar closes significantly above MA20
+  const gBreak=[gBase-3, gBase-1, gBase+2, gBase+5, gBase+8];
+  const g1h=[...gDown, ...gBreak]; // 35 bars total, last bar = gBase+8
+  // 15min: fully bullish — price above MA20, BB upper rising, 3+ green candles
+  const g15=bullSeries(gBase+2, 40, 0.18);
+  // Daily: 25 bars, price ending near MA20 (within 0.5%)
+  const gD=bearSeries(gBase+8, 25, 0.25);
+  _candleCache['GOOG_60']={data:ohlc(g1h,0.003),ts:now};
+  _candleCache['GOOG_15']={data:ohlc(g15,0.002),ts:now};
+  _candleCache['GOOG_D']={data:ohlc(gD,0.006),ts:now};
 
-  // ── TSLA → BB-B PUT: breakout banda inferior con los 5 criterios ──────────
-  // Necesitamos: BBW ≥1.5% expandiéndose, low < BB inferior, cuerpo rojo ≥0.3%,
-  // MA20 slope negativo, volumen ≥130% promedio
-  const tBase=390;
-  // 29 velas tranquilas — BB comprimido, precio bajando suave
-  const t15c=[...Array.from({length:29},(_,i)=>+(tBase - i*0.2).toFixed(2))];
-  // Última vela: breakout bajista fuerte
-  const tLastOpen=t15c[28]-0.1;
-  const tLastClose=tLastOpen-3.5; // cuerpo 3.5 puntos ≈ 0.9% rojo
-  const tLastLow=tLastClose-0.6; // perfora banda inferior
-  t15c.push(+(tLastClose).toFixed(2));
-  const t15h=[...Array.from({length:29},(_,i)=>+(tBase+0.4-i*0.2).toFixed(2)), tLastOpen+0.2];
-  const t15l=[...Array.from({length:29},(_,i)=>+(tBase-0.4-i*0.2).toFixed(2)), tLastLow];
-  const t15o=[...Array.from({length:29},(_,i)=>+(tBase+0.1-i*0.2).toFixed(2)), tLastOpen];
-  const t15v=[...Array.from({length:20},()=>95000),...Array.from({length:9},()=>110000), 320000];
-  _candleCache['TSLA_15']={data:makeOhlc(t15c,t15h,t15l,t15o,t15v),ts:now};
-  // 1H: tendencia bajista — precio bajo MA20 con slope negativo
-  const t1hc=Array.from({length:50},(_,i)=>+(tBase+10-i*0.4).toFixed(2));
-  _candleCache['TSLA_60']={data:makeOhlc(t1hc),ts:now};
-  const tDc=Array.from({length:30},(_,i)=>+(tBase+15-i*0.7).toFixed(2));
-  _candleCache['TSLA_D']={data:makeOhlc(tDc),ts:now};
+  // ── TSLA → E7: Efecto Imán Tendencia Bajista (CALL) ─────────────────────
+  // Need: MA20 < MA40 in 1H, price 2%+ below MA20, 1st 15m candle fully below BB lower,
+  // stoch %K crosses above %D
+  const tBase=391;
+  // 50 bars strong downtrend: MA20 well below MA40, price at bottom
+  const t1h=bearSeries(tBase+25, 50, 0.9); // ends at ~tBase-20
+  const tFinal=t1h[t1h.length-1]; // ~tBase-20
+  // 15min: 40 bars descending then last candle well below BB lower with stoch setup
+  // Build descending 15min so stoch %K was low and is now crossing %D
+  const t15down=bearSeries(tFinal+8, 32, 0.3);
+  // Last 8 bars: price at extreme low then tiny bounce for stoch cross
+  const t15end=[tFinal-4,tFinal-5,tFinal-6,tFinal-7,tFinal-7.5,tFinal-7.2,tFinal-6.8,tFinal-6.5];
+  const t15=[...t15down,...t15end];
+  // Daily: 25 bars descending (dailyBearish3 — last 3 closes below MA20)
+  const tD=bearSeries(tBase+10, 25, 0.8);
+  _candleCache['TSLA_60']={data:ohlc(t1h,0.004),ts:now};
+  _candleCache['TSLA_15']={data:ohlc(t15,0.003),ts:now};
+  _candleCache['TSLA_D']={data:ohlc(tD,0.008),ts:now};
 
-  // Limpiar sig_expired para que los datos de test no queden bloqueados
-  Object.keys(sessionStorage).filter(k=>k.startsWith('sig_expired_')).forEach(k=>sessionStorage.removeItem(k));
-  Object.keys(_sigDetectedAt).forEach(k=>delete _sigDetectedAt[k]);
+  // ── SPY → E3: Rebote Punto Medio al Alza ────────────────────────────────
+  // Need: bearish 1H (BB upper slope down + price below MA20),
+  // daily price within 0.5% of MA20 (below it), respects MA20D, rebound in 15min
+  const sBase=594;
+  // 1H: 40 bars slight downtrend so price ends below MA20 and BB upper is sloping down
+  const s1h=bearSeries(sBase+4, 40, 0.22); // ends ~sBase-4.4
+  const sFinal=s1h[s1h.length-1];
+  // Daily: price needs to end JUST below MA20 daily (within 0.5%)
+  // MA20 of a 25-bar daily series ending at sBase will be ~sBase
+  // Make series end at sBase*0.997 (0.3% below MA20)
+  const sDbase=sBase+6;
+  const sD=bearSeries(sDbase, 25, 0.28); // MA20 ≈ sBase+6 - 12*0.28 = sBase+2.6, last = sBase+6-24*0.28 = sBase-0.72
+  // 15min: rebounding — price above MA20_15, BB upper rising, 3 green candles
+  const s15=bullSeries(sFinal-2, 40, 0.15);
+  _candleCache['SPY_60']={data:ohlc(s1h,0.002),ts:now};
+  _candleCache['SPY_15']={data:ohlc(s15,0.002),ts:now};
+  _candleCache['SPY_D']={data:ohlc(sD,0.005),ts:now};
 
-  // Correr señales con datos inyectados
+  // Run signals with injected data — bypass all API calls
   _testMode=true;
   await buildSignals();
   _testMode=false;
 
-  // Banner de test
+  // Restore button
+  if(btn){btn.textContent='🧪 Test';btn.style.opacity='1';btn.disabled=false;}
+
+  // Prepend test banner
   const area=document.getElementById('signalArea');
-  const banner='<div style="text-align:center;padding:8px 12px;color:var(--green);font-size:11px;font-weight:700;border:1px solid rgba(0,209,122,.3);border-radius:var(--r);margin-bottom:10px;background:rgba(0,209,122,.08);">🟢 TEST — Datos sintéticos · GOOG BB-A CALL + TSLA BB-B PUT · Presiona 🟢 Live para volver</div>';
+  const banner='<div style="text-align:center;padding:8px 12px;color:var(--purple);font-size:11px;font-weight:700;border:1px solid rgba(167,139,250,.3);border-radius:var(--r);margin-bottom:10px;background:rgba(167,139,250,.08);">🧪 MODO TEST — Datos sintéticos · No son señales reales</div>';
   area.innerHTML=banner+area.innerHTML;
 }
 
@@ -2798,6 +2701,18 @@ async function testTelegram(){
 
 async function sendTelegram(msg, token, chatId){
   try{
+    const proxyUrl=localStorage.getItem('proxy_url')||'';
+    if(proxyUrl){
+      // Vía proxy — el bot_token vive como secret en el Worker, nunca toca el browser
+      const r=await fetch(`${proxyUrl}/telegram/notify`,{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({chat_id:chatId,text:msg,parse_mode:'Markdown'}),
+        signal:AbortSignal.timeout(6000)
+      });
+      return r.ok;
+    }
+    // Fallback directo — token expuesto en el browser (configura el proxy!)
     const r=await fetch(`https://api.telegram.org/bot${token}/sendMessage`,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
@@ -3896,25 +3811,6 @@ async function init(){
     }
   },20*60*1000);
 
-  // ── Calendario de feriados del mercado NYSE 2025-2026 ─────────────────────
-  const _MARKET_HOLIDAYS=new Set([
-    // 2025
-    '1/1/2025','1/20/2025','2/17/2025','4/18/2025','5/26/2025',
-    '6/19/2025','7/4/2025','9/1/2025','11/27/2025','12/25/2025',
-    // 2026
-    '1/1/2026','1/19/2026','2/16/2026','4/3/2026','5/25/2026',
-    '6/19/2026','7/3/2026','9/7/2026','11/26/2026','12/25/2026',
-  ]);
-
-  function _isMarketDay(){
-    const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
-    const day=et.getDay();
-    if(day===0||day===6)return false;
-    const key=`${et.getMonth()+1}/${et.getDate()}/${et.getFullYear()}`;
-    if(_MARKET_HOLIDAYS.has(key))return false;
-    return true;
-  }
-
   // ── Scanner de Apertura 9:35 AM ET ────────────────────────────────────────
   // Corre UNA vez por día exactamente a las 9:35 AM para detectar breakouts
   // de la primera vela de 15min y disparar Telegram con prioridad máxima
@@ -3949,11 +3845,11 @@ async function init(){
       });
     }
     function checkOpeningTime(){
-      if(!_isMarketDay())return; // feriado o fin de semana
       const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
-      const h=et.getHours(),m=et.getMinutes();
+      const day=et.getDay(),h=et.getHours(),m=et.getMinutes();
+      const isWeekday=day>=1&&day<=5;
       // Ventana 9:35–9:37 AM ET — 2 min de margen para no perder el momento
-      if(h===9&&m>=35&&m<=37) runOpeningScanner();
+      if(isWeekday&&h===9&&m>=35&&m<=37) runOpeningScanner();
     }
     // Revisar cada 30 segundos — liviano
     setInterval(checkOpeningTime,30000);
@@ -3961,46 +3857,21 @@ async function init(){
     checkOpeningTime();
   })();
 
-  // Ventanas de escaneo activo cada 3 minutos (ET):
-  // 9:30–10:30 AM  →  570–630 mins
-  // 1:00–2:00 PM   →  780–840 mins
-  // 3:30–3:50 PM   →  930–950 mins
-  // Resto del mercado (10:30AM–1PM, 2PM–3:30PM) → cada 10 min
-  // Fuera de mercado → no escanear
-  function _getScanInterval(){
-    if(!_isMarketDay())return null;
-    const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
-    const mins=et.getHours()*60+et.getMinutes();
-    // Ventanas activas de 3 minutos
-    if((mins>=570&&mins<630)||(mins>=780&&mins<840)||(mins>=930&&mins<950))return 3;
-    // Mercado abierto pero fuera de ventana activa → cada 10 min
-    if(mins>=570&&mins<960)return 10;
-    return null; // fuera de horario
-  }
-
-  // Motor de escaneo inteligente — corre cada 30 segundos y decide si ejecutar
-  let _lastScanMins=-1;
-  let _lastScanInterval=-1;
+  // Auto-refresh señales cada 10 min durante mercado — para no perder señales
   if(window._sigInterval)clearInterval(window._sigInterval);
   window._sigInterval=setInterval(async()=>{
-    if(_testMode)return; // no interferir con modo test
-    const interval=_getScanInterval();
-    if(interval===null)return; // mercado cerrado o feriado
-
     const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
-    const nowMins=et.getHours()*60+et.getMinutes();
-
-    // Ejecutar si pasaron suficientes minutos desde el último scan
-    const minutesSinceLast=nowMins-_lastScanMins;
-    if(_lastScanMins===-1||minutesSinceLast>=interval){
-      _lastScanMins=nowMins;
-      _lastScanInterval=interval;
-      // Solo limpiar flags de SETUP — señales reales mantienen anti-duplicado
+    const mins=et.getHours()*60+et.getMinutes(),day=et.getDay();
+    const isOpen=day>=1&&day<=5&&mins>=570&&mins<960;
+    const isPre=day>=1&&day<=5&&mins>=515&&mins<570;
+    if(isOpen||isPre){
+      // Clear Telegram sent flags so signals re-evaluate fresh each cycle
+      // Only clear SETUP flags — real signals keep anti-duplicate for the session
       Object.keys(sessionStorage).filter(k=>k.startsWith('tg_sent_setup_')).forEach(k=>sessionStorage.removeItem(k));
       await buildSignals();
       await checkMarketBlockMove();
     }
-  },30*1000); // tick cada 30 segundos — liviano
+  },10*60*1000);
 }
 init();
 </script>

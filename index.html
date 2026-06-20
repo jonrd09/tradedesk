@@ -2122,15 +2122,14 @@ function openStrikeLog(ticker,color){
 }
 function closeStrikeModal(){document.getElementById('strikeModal').style.display='none';}
 function saveStrikeFundamentals(){
-  const tp=document.getElementById('strikeTargetPrice')?.value||'';
   const rec=document.getElementById('strikeRecom')?.value||'';
-  try{localStorage.setItem('fundamental_'+_strikeTicker,JSON.stringify({tp,rec}));}catch(e){}
+  try{localStorage.setItem('fundamental_'+_strikeTicker,JSON.stringify({rec}));}catch(e){}
 }
 function loadStrikeFundamentals(ticker){
   try{
     const s=JSON.parse(localStorage.getItem('fundamental_'+ticker)||'{}');
-    const tEl=document.getElementById('strikeTargetPrice');const rEl=document.getElementById('strikeRecom');
-    if(tEl)tEl.value=s.tp||'';if(rEl){rEl.value=s.rec||'';updateRecomLabel();}
+    const rEl=document.getElementById('strikeRecom');
+    if(rEl){rEl.value=s.rec||'';updateRecomLabel();}
   }catch(e){}
 }
 function updateRecomLabel(){
@@ -4097,6 +4096,11 @@ init();
         <span style="font-size:16px;">📋</span>
         <span style="font-size:15px;font-weight:700;color:#fff;">Strike Log — </span>
         <span id="strikeModalTitle" style="font-size:15px;font-weight:700;color:var(--blue);">GOOG</span>
+        <span style="font-size:11px;color:var(--text3);margin-left:8px;">Recom. $</span>
+        <input type="number" id="strikeRecom" placeholder="0.00" step="0.01"
+          style="width:70px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--blue);padding:4px 8px;font-size:13px;font-family:var(--mono);outline:none;text-align:center;"
+          oninput="saveStrikeFundamentals();updateRecomLabel()">
+        <span id="recomLabel" style="font-size:11px;color:var(--text2);">—</span>
       </div>
       <button onclick="closeStrikeModal()" style="background:none;border:none;color:var(--text2);font-size:20px;cursor:pointer;padding:0 4px;line-height:1;">×</button>
     </div>
@@ -4129,14 +4133,8 @@ init();
     </div>
     <!-- Log entries -->
     <div id="strikeLogArea" style="padding:10px 16px;flex:1;min-height:100px;"></div>
-    <!-- Target price + recommendation -->
+    <!-- Footer: export -->
     <div style="padding:8px 16px;border-top:1px solid var(--border);display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-      <input type="number" id="strikeTargetPrice" placeholder="Target $" step="0.01"
-        style="width:100px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--green);padding:5px 8px;font-size:12px;font-family:var(--mono);outline:none;"
-        oninput="saveStrikeFundamentals()">
-      <input type="number" id="strikeRecom" placeholder="Recom. $" step="0.01"
-        style="width:100px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--blue);padding:5px 8px;font-size:12px;font-family:var(--mono);outline:none;"
-        oninput="saveStrikeFundamentals()">
       <div style="margin-left:auto;display:flex;gap:8px;">
         <button onclick="exportStrikeLog()" style="background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--text2);padding:5px 14px;font-size:12px;cursor:pointer;">↓ Exportar</button>
       </div>

@@ -269,6 +269,31 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
       </div>
     </div>
 
+    <!-- ATH manual por ticker (aviso "cerca de máximo histórico" en señales) -->
+    <div style="background:var(--bg3);border-radius:var(--r);padding:10px;margin-bottom:10px;">
+      <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">Máximo histórico (ATH) — aviso a 3%</div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;">
+        <div style="display:flex;flex-direction:column;gap:3px;">
+          <label style="font-size:10px;color:#cc0000;font-weight:700;font-family:var(--mono);text-align:center;">TSLA</label>
+          <input type="number" id="ath-TSLA" placeholder="ATH" step="0.01"
+            style="background:var(--bg4);border:1px solid var(--border);border-radius:var(--r);color:var(--text);padding:5px 6px;font-size:13px;font-family:var(--mono);width:100%;outline:none;text-align:center;"
+            oninput="saveATH('TSLA')">
+        </div>
+        <div style="display:flex;flex-direction:column;gap:3px;">
+          <label style="font-size:10px;color:#4285f4;font-weight:700;font-family:var(--mono);text-align:center;">GOOG</label>
+          <input type="number" id="ath-GOOG" placeholder="ATH" step="0.01"
+            style="background:var(--bg4);border:1px solid var(--border);border-radius:var(--r);color:var(--text);padding:5px 6px;font-size:13px;font-family:var(--mono);width:100%;outline:none;text-align:center;"
+            oninput="saveATH('GOOG')">
+        </div>
+        <div style="display:flex;flex-direction:column;gap:3px;">
+          <label style="font-size:10px;color:#00a651;font-weight:700;font-family:var(--mono);text-align:center;">SPY</label>
+          <input type="number" id="ath-SPY" placeholder="ATH" step="0.01"
+            style="background:var(--bg4);border:1px solid var(--border);border-radius:var(--r);color:var(--text);padding:5px 6px;font-size:13px;font-family:var(--mono);width:100%;outline:none;text-align:center;"
+            oninput="saveATH('SPY')">
+        </div>
+      </div>
+    </div>
+
     <!-- Calc inputs -->
     <div class="inp-row" style="margin-bottom:8px;">
       <div class="ig"><label class="ilbl">Precio Comprado ($)</label><input class="inp" type="number" id="cBought" placeholder="ej. 1.45" step="0.01" oninput="calcLimit()"></div>
@@ -1633,6 +1658,18 @@ async function buildSignals(){
       ?`<span style="background:rgba(0,209,122,.35);color:#00d17a;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;">✅ COMPLETA</span>`
       :`<span style="background:rgba(255,194,52,.25);color:#ffc234;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;">★ ${pctLabel}% — EN FORMACIÓN</span>`;
 
+    // Aviso de ATH: si el precio está dentro del 3% del máximo histórico (manual)
+    const _ath=getATH(s.sym);
+    let athWarn='';
+    if(_ath&&s.price){
+      const distPct=(_ath-s.price)/_ath*100;
+      if(distPct>=0&&distPct<=3){
+        athWarn=`<div style="font-size:11px;color:#ffc234;font-weight:700;margin-top:3px;background:rgba(255,194,52,.12);border:1px solid rgba(255,194,52,.3);border-radius:6px;padding:3px 8px;display:inline-block;">⚠️ OJO: cerca de ATH $${_ath.toFixed(2)} (a ${distPct.toFixed(1)}%)</div>`;
+      } else if(distPct<0){
+        athWarn=`<div style="font-size:11px;color:#ff6b9d;font-weight:700;margin-top:3px;background:rgba(255,77,109,.12);border:1px solid rgba(255,77,109,.3);border-radius:6px;padding:3px 8px;display:inline-block;">🚀 Nuevo máximo: sobre ATH $${_ath.toFixed(2)}</div>`;
+      }
+    }
+
     html+=`<div class="sig-card" style="margin-bottom:12px;${fullSignal?`box-shadow:0 0 0 2px ${accentCol};`:''}">
       <div class="sig-hdr ${hdr}" style="padding:12px 14px;">
         <div style="flex:1;min-width:0;">
@@ -1646,6 +1683,7 @@ async function buildSignals(){
             $${s.price.toFixed(2)} <span style="color:${s.pct>=0?'rgba(0,209,122,.9)':'rgba(255,77,109,.9)'}">(${s.pct>=0?'+':''}${s.pct.toFixed(2)}%)</span> · ${s.dataLabel}
             ${s._timeET?`<span style="color:rgba(255,194,52,.8);margin-left:4px;">· ${s._timeET} ET</span>`:''}
           </div>
+          ${athWarn}
         </div>
         <div style="text-align:right;flex-shrink:0;margin-left:10px;">
           <div style="font-family:var(--mono);font-size:28px;font-weight:700;color:${col};line-height:1;">${disp}%</div>
@@ -1971,6 +2009,25 @@ function updateFinnhubBtn(active){
   }
 }
 function saveGainPct(){try{localStorage.setItem('gainPct',document.getElementById('gainPct').value);}catch(e){}}
+// ATH manual por ticker
+function saveATH(sym){
+  try{
+    const v=document.getElementById('ath-'+sym).value;
+    if(v&&parseFloat(v)>0)localStorage.setItem('ath_'+sym,v);
+    else localStorage.removeItem('ath_'+sym);
+  }catch(e){}
+}
+function getATH(sym){
+  const v=parseFloat(localStorage.getItem('ath_'+sym));
+  return isFinite(v)&&v>0?v:null;
+}
+function loadATH(){
+  ['TSLA','GOOG','SPY'].forEach(sym=>{
+    const el=document.getElementById('ath-'+sym);
+    const v=getATH(sym);
+    if(el&&v)el.value=v;
+  });
+}
 
 // ═══════════════════════════════════════════════════════════════
 // BALANCE PAPER TRADING
@@ -3799,6 +3856,7 @@ async function init(){
   const gp=localStorage.getItem('gainPct');
   const gpEl=document.getElementById('gainPct');
   if(gpEl)gpEl.value=(gp&&parseFloat(gp)>=5)?parseFloat(gp):35;
+  loadATH(); // restaurar ATH guardados
 
   // Restore card averages
   updateCardAverages();

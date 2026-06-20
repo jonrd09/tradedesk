@@ -269,31 +269,6 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
       </div>
     </div>
 
-    <!-- ATH manual por ticker (aviso "cerca de máximo histórico" en señales) -->
-    <div style="background:var(--bg3);border-radius:var(--r);padding:10px;margin-bottom:10px;">
-      <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">Máximo histórico (ATH) — aviso a 3%</div>
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;">
-        <div style="display:flex;flex-direction:column;gap:3px;">
-          <label style="font-size:10px;color:#cc0000;font-weight:700;font-family:var(--mono);text-align:center;">TSLA</label>
-          <input type="number" id="ath-TSLA" placeholder="ATH" step="0.01"
-            style="background:var(--bg4);border:1px solid var(--border);border-radius:var(--r);color:var(--text);padding:5px 6px;font-size:13px;font-family:var(--mono);width:100%;outline:none;text-align:center;"
-            oninput="saveATH('TSLA')">
-        </div>
-        <div style="display:flex;flex-direction:column;gap:3px;">
-          <label style="font-size:10px;color:#4285f4;font-weight:700;font-family:var(--mono);text-align:center;">GOOG</label>
-          <input type="number" id="ath-GOOG" placeholder="ATH" step="0.01"
-            style="background:var(--bg4);border:1px solid var(--border);border-radius:var(--r);color:var(--text);padding:5px 6px;font-size:13px;font-family:var(--mono);width:100%;outline:none;text-align:center;"
-            oninput="saveATH('GOOG')">
-        </div>
-        <div style="display:flex;flex-direction:column;gap:3px;">
-          <label style="font-size:10px;color:#00a651;font-weight:700;font-family:var(--mono);text-align:center;">SPY</label>
-          <input type="number" id="ath-SPY" placeholder="ATH" step="0.01"
-            style="background:var(--bg4);border:1px solid var(--border);border-radius:var(--r);color:var(--text);padding:5px 6px;font-size:13px;font-family:var(--mono);width:100%;outline:none;text-align:center;"
-            oninput="saveATH('SPY')">
-        </div>
-      </div>
-    </div>
-
     <!-- Calc inputs -->
     <div class="inp-row" style="margin-bottom:8px;">
       <div class="ig"><label class="ilbl">Precio Comprado ($)</label><input class="inp" type="number" id="cBought" placeholder="ej. 1.45" step="0.01" oninput="calcLimit()"></div>
@@ -1658,18 +1633,6 @@ async function buildSignals(){
       ?`<span style="background:rgba(0,209,122,.35);color:#00d17a;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;">✅ COMPLETA</span>`
       :`<span style="background:rgba(255,194,52,.25);color:#ffc234;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;">★ ${pctLabel}% — EN FORMACIÓN</span>`;
 
-    // Aviso de ATH: si el precio está dentro del 3% del máximo histórico (manual)
-    const _ath=getATH(s.sym);
-    let athWarn='';
-    if(_ath&&s.price){
-      const distPct=(_ath-s.price)/_ath*100;
-      if(distPct>=0&&distPct<=3){
-        athWarn=`<div style="font-size:11px;color:#ffc234;font-weight:700;margin-top:3px;background:rgba(255,194,52,.12);border:1px solid rgba(255,194,52,.3);border-radius:6px;padding:3px 8px;display:inline-block;">⚠️ OJO: cerca de ATH $${_ath.toFixed(2)} (a ${distPct.toFixed(1)}%)</div>`;
-      } else if(distPct<0){
-        athWarn=`<div style="font-size:11px;color:#ff6b9d;font-weight:700;margin-top:3px;background:rgba(255,77,109,.12);border:1px solid rgba(255,77,109,.3);border-radius:6px;padding:3px 8px;display:inline-block;">🚀 Nuevo máximo: sobre ATH $${_ath.toFixed(2)}</div>`;
-      }
-    }
-
     html+=`<div class="sig-card" style="margin-bottom:12px;${fullSignal?`box-shadow:0 0 0 2px ${accentCol};`:''}">
       <div class="sig-hdr ${hdr}" style="padding:12px 14px;">
         <div style="flex:1;min-width:0;">
@@ -1683,7 +1646,6 @@ async function buildSignals(){
             $${s.price.toFixed(2)} <span style="color:${s.pct>=0?'rgba(0,209,122,.9)':'rgba(255,77,109,.9)'}">(${s.pct>=0?'+':''}${s.pct.toFixed(2)}%)</span> · ${s.dataLabel}
             ${s._timeET?`<span style="color:rgba(255,194,52,.8);margin-left:4px;">· ${s._timeET} ET</span>`:''}
           </div>
-          ${athWarn}
         </div>
         <div style="text-align:right;flex-shrink:0;margin-left:10px;">
           <div style="font-family:var(--mono);font-size:28px;font-weight:700;color:${col};line-height:1;">${disp}%</div>
@@ -2009,24 +1971,28 @@ function updateFinnhubBtn(active){
   }
 }
 function saveGainPct(){try{localStorage.setItem('gainPct',document.getElementById('gainPct').value);}catch(e){}}
-// ATH manual por ticker
-function saveATH(sym){
+// Niveles técnicos por ticker: ATH, LAST HIGH, LAST LOW (avisan en Telegram a 2%)
+function saveStrikeLevels(){
+  if(!_strikeTicker)return;
+  const ath=document.getElementById('lvlATH')?.value||'';
+  const hi=document.getElementById('lvlLastHigh')?.value||'';
+  const lo=document.getElementById('lvlLastLow')?.value||'';
+  try{localStorage.setItem('levels_'+_strikeTicker,JSON.stringify({ath,hi,lo}));}catch(e){}
+}
+function loadStrikeLevels(ticker){
   try{
-    const v=document.getElementById('ath-'+sym).value;
-    if(v&&parseFloat(v)>0)localStorage.setItem('ath_'+sym,v);
-    else localStorage.removeItem('ath_'+sym);
+    const s=JSON.parse(localStorage.getItem('levels_'+ticker)||'{}');
+    const a=document.getElementById('lvlATH'),h=document.getElementById('lvlLastHigh'),l=document.getElementById('lvlLastLow');
+    if(a)a.value=s.ath||'';if(h)h.value=s.hi||'';if(l)l.value=s.lo||'';
   }catch(e){}
 }
-function getATH(sym){
-  const v=parseFloat(localStorage.getItem('ath_'+sym));
-  return isFinite(v)&&v>0?v:null;
-}
-function loadATH(){
-  ['TSLA','GOOG','SPY'].forEach(sym=>{
-    const el=document.getElementById('ath-'+sym);
-    const v=getATH(sym);
-    if(el&&v)el.value=v;
-  });
+// Devuelve {ath,hi,lo} numéricos (o null) para un ticker — usado por las señales
+function getLevels(sym){
+  try{
+    const s=JSON.parse(localStorage.getItem('levels_'+sym)||'{}');
+    const num=v=>{const n=parseFloat(v);return isFinite(n)&&n>0?n:null;};
+    return{ath:num(s.ath),hi:num(s.hi),lo:num(s.lo)};
+  }catch(e){return{ath:null,hi:null,lo:null};}
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -2117,6 +2083,7 @@ function openStrikeLog(ticker,color){
   if(maxEl)maxEl.value=range.max||'';
   // Render log
   try{loadStrikeFundamentals(ticker);}catch(e){}
+  try{loadStrikeLevels(ticker);}catch(e){}
   renderStrikeLog();
   setTimeout(()=>{const d=document.getElementById('strikeDist');if(d)d.focus();},150);
 }
@@ -2851,6 +2818,18 @@ async function notifySignal(sym, code, name, type, pct, price, pctChange){
   const emoji=type==='call'?'🚀':'🔻';
   const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
   const time=et.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true});
+  // Aviso de nivel técnico (a 2%): CALL mira techos (LAST HIGH/ATH), PUT mira piso (LAST LOW)
+  let levelWarn='';
+  const lv=getLevels(sym);
+  if(price&&lv){
+    const within=(t)=>t&&Math.abs(t-price)/t*100<=2;
+    if(type==='call'){
+      if(within(lv.hi)) levelWarn+='\n⬆️ *LAST HIGH POSIBLE* ($'+lv.hi.toFixed(2)+')';
+      if(within(lv.ath))levelWarn+='\n⬆️ *ATH POSIBLE* ($'+lv.ath.toFixed(2)+')';
+    }else{
+      if(within(lv.lo)) levelWarn+='\n⬇️ *LAST LOW POSIBLE* ($'+lv.lo.toFixed(2)+')';
+    }
+  }
   const msg=`${emoji} *SEÑAL ${dir} — ${sym}*
 
 `+
@@ -2860,7 +2839,7 @@ async function notifySignal(sym, code, name, type, pct, price, pctChange){
 `+
     `🎯 Confianza: *${pct}%*
 `+
-    `🕐 ${time} ET
+    `🕐 ${time} ET`+levelWarn+`
 
 `+
     `_TradeDesk Pro — jonrd09.github.io/tradedesk/_`;
@@ -3855,7 +3834,6 @@ async function init(){
   const gp=localStorage.getItem('gainPct');
   const gpEl=document.getElementById('gainPct');
   if(gpEl)gpEl.value=(gp&&parseFloat(gp)>=5)?parseFloat(gp):35;
-  loadATH(); // restaurar ATH guardados
 
   // Restore card averages
   updateCardAverages();
@@ -4104,7 +4082,7 @@ init();
       </div>
       <button onclick="closeStrikeModal()" style="background:none;border:none;color:var(--text2);font-size:20px;cursor:pointer;padding:0 4px;line-height:1;">×</button>
     </div>
-    <!-- Range + fundamentals -->
+    <!-- Range + niveles -->
     <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
       <div style="font-size:11px;color:var(--text3);">Distancia Spot → Strike · <span style="color:var(--text2)">Costo $ · Lugares · Spread</span></div>
       <div style="display:flex;align-items:center;gap:4px;margin-left:auto;">
@@ -4116,6 +4094,28 @@ init();
         <input type="number" id="strikeRangeMax" placeholder="Max" step="1"
           style="width:52px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--green);padding:3px 6px;font-size:12px;font-family:var(--mono);outline:none;text-align:center;"
           oninput="saveStrikeRange()">
+      </div>
+    </div>
+    <!-- Niveles técnicos: ATH / LAST HIGH / LAST LOW (avisan en Telegram a 2%) -->
+    <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+      <span style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;">Niveles:</span>
+      <div style="display:flex;align-items:center;gap:5px;">
+        <label style="font-size:11px;color:var(--text2);font-weight:700;">ATH</label>
+        <input type="number" id="lvlATH" placeholder="0.00" step="0.01"
+          style="width:80px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--purple);padding:4px 8px;font-size:12px;font-family:var(--mono);outline:none;text-align:center;"
+          oninput="saveStrikeLevels()">
+      </div>
+      <div style="display:flex;align-items:center;gap:5px;">
+        <label style="font-size:11px;color:var(--green);font-weight:700;">LAST HIGH</label>
+        <input type="number" id="lvlLastHigh" placeholder="0.00" step="0.01"
+          style="width:80px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--green);padding:4px 8px;font-size:12px;font-family:var(--mono);outline:none;text-align:center;"
+          oninput="saveStrikeLevels()">
+      </div>
+      <div style="display:flex;align-items:center;gap:5px;">
+        <label style="font-size:11px;color:var(--red);font-weight:700;">LAST LOW</label>
+        <input type="number" id="lvlLastLow" placeholder="0.00" step="0.01"
+          style="width:80px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--red);padding:4px 8px;font-size:12px;font-family:var(--mono);outline:none;text-align:center;"
+          oninput="saveStrikeLevels()">
       </div>
     </div>
     <!-- Add entry row -->

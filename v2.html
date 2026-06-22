@@ -663,6 +663,15 @@ async function fetchSchwabCandles(sym,freqType,freq,bars=50){
       const d=await r.json();
       if(!d.candles||!d.candles.length){continue;}
       let candles=d.candles;
+      // Filtrar velas anteriores a las 8:00 AM ET
+      // Movimiento institucional de madrugada (4-8am) no es relevante para señales retail.
+      // Schwab devuelve datetime en milisegundos UTC.
+      candles=candles.filter(c=>{
+        if(!c.datetime)return true; // sin timestamp → conservar
+        const et=new Date(new Date(c.datetime).toLocaleString('en-US',{timeZone:'America/New_York'}));
+        const mins=et.getHours()*60+et.getMinutes();
+        return mins>=480; // 8:00 AM ET = 480 minutos
+      });
       // Merge 30min pairs into 1H candles if needed
       if(cfg._merge1h&&cfg.frequency===30){
         const merged=[];
@@ -1290,8 +1299,15 @@ async function buildSignals(){
     // Pesos: Bollinger 60 · Medias H/D 25 · Volumen 5 · Estocástico 5 · HLines 5 (manual)
     // ════════════════════════════════════════════════════════════════════════
     const candleBody15=Math.abs(lP15-lO15)/lP15*100; // tamaño del cuerpo en %
-    const bigBodyCall=lP15>lO15&&candleBody15>=0.3;   // vela verde con cuerpo >= 0.3%
-    const bigBodyPut =lP15<lO15&&candleBody15>=0.3;   // vela roja  con cuerpo >= 0.3%
+    // Umbral de cuerpo DINÁMICO: 25% del rango promedio de las últimas 10 velas.
+    // Así TSLA (mueve ~1.2%/vela) pide más cuerpo que SPY (mueve ~0.23%/vela).
+    // Mínimo absoluto 0.1% para evitar señales en velas casi planas.
+    const _ranges10=h15.slice(-10).map((h,i)=>h-l15[l15.length-10+i]).filter(v=>v>0);
+    const _avgRange=_ranges10.length?_ranges10.reduce((a,b)=>a+b,0)/_ranges10.length:0;
+    const _avgRangePct=lP15>0?_avgRange/lP15*100:0;
+    const _bodyThresh=Math.max(0.1, _avgRangePct*0.25); // 25% del rango típico, mín 0.1%
+    const bigBodyCall=lP15>lO15&&candleBody15>=_bodyThresh;
+    const bigBodyPut =lP15<lO15&&candleBody15>=_bodyThresh;
     // Pendiente PURA de la media de Bollinger (línea amarilla) — últimas 4 velas.
     const _ma4=ma20_15.filter(v=>v!=null).slice(-4)[0];
     const mediaUp=_ma4!=null&&lMA20_15>_ma4; // media subiendo
@@ -1359,29 +1375,32 @@ async function buildSignals(){
     // Patrón C: PUT de regreso — EFECTO IMÁN: vela completa SOBRE la banda superior
     // Tesis: SIN volatilidad previa (BB comprimido) el precio se dispara expuesto
     // y es "succionado" de vuelta al disipador (la media). Por eso pedimos BBW BAJO.
+    // EFECTO IMÁN — solo en ventana de apertura 9:30–10:00 AM ET
+    // El imán es más poderoso en apertura: bandas comprimidas por la noche,
+    // precio se dispara en el primer impulso y es succionado de vuelta.
+    const _imanWindow=_mNow>=570&&_mNow<600; // 9:30–10:00 AM ET (570=570min, 600=10:00)
     const bbCompressed15=lBBW15<1.5; // comprimido = sin volatilidad acumulada
     // Worden en el GATILLO: la sobrecompra valida que el precio regrese (efecto imán)
     const pC_above=lL15>lUp15&&bbCompressed15&&lK15>75, pC_ret=lP15<lO15;
-    if(pC_above){
+    if(pC_above&&(_imanWindow||_testMode||_debugMode)){
       all.push({...meta,code:'BB-C',name:'BB Efecto Imán Alza — PUT',type:'put',reqs:[
-        {ok:lL15>lUp15,tf:'15m',text:`Vela COMPLETA sobre BB: low $${lL15.toFixed(2)} > $${lUp15.toFixed(2)}`},
-        {ok:pC_ret,  tf:'15m',text:`Primera vela bajista de regreso ($${lP15.toFixed(2)} < $${lO15.toFixed(2)})`},
-        {ok:lK15>75, tf:'15m',text:`Worden sobrecomprado: %K ${lK15.toFixed(0)} > 75`},
-        {ok:volActive15,tf:'15m',text:`Volumen activo${volLabel}`},
+        {ok:lL15>lUp15,   tf:'15m',text:`Vela COMPLETA sobre BB: low $${lL15.toFixed(2)} > $${lUp15.toFixed(2)}`},
+        {ok:pC_ret,       tf:'15m',text:`Primera vela bajista de regreso ($${lP15.toFixed(2)} < $${lO15.toFixed(2)})`},
+        {ok:lK15>75,      tf:'15m',text:`Worden sobrecomprado: %K ${lK15.toFixed(0)} > 75`},
+        {ok:volActive15,  tf:'15m',text:`Volumen activo${volLabel}`},
         {ok:bbCompressed15,tf:'15m',text:`BB comprimido sin volatilidad (BBW ${lBBW15.toFixed(1)}% < 1.5%)`},
+        {ok:_imanWindow,  tf:'15m',text:`Ventana apertura 9:30–10:00 AM ET`},
       ]});
     }
-    // Patrón D: CALL de rebote — EFECTO IMÁN: vela completa BAJO la banda inferior
-    // Mismo principio invertido: BB comprimido, vela expuesta abajo, regreso al alza.
-    // Worden en el GATILLO: la sobreventa valida el rebote.
     const pD_below=lH15<lLow15&&bbCompressed15&&lK15<25, pD_ret=lP15>lO15;
-    if(pD_below){
+    if(pD_below&&(_imanWindow||_testMode||_debugMode)){
       all.push({...meta,code:'BB-D',name:'BB Efecto Imán Baja — CALL',type:'call',reqs:[
-        {ok:lH15<lLow15,tf:'15m',text:`Vela COMPLETA bajo BB: high $${lH15.toFixed(2)} < $${lLow15.toFixed(2)}`},
-        {ok:pD_ret,  tf:'15m',text:`Primera vela alcista de rebote ($${lP15.toFixed(2)} > $${lO15.toFixed(2)})`},
-        {ok:lK15<25, tf:'15m',text:`Worden sobrevendido: %K ${lK15.toFixed(0)} < 25`},
-        {ok:volActive15,tf:'15m',text:`Volumen activo${volLabel}`},
+        {ok:lH15<lLow15,  tf:'15m',text:`Vela COMPLETA bajo BB: high $${lH15.toFixed(2)} < $${lLow15.toFixed(2)}`},
+        {ok:pD_ret,       tf:'15m',text:`Primera vela alcista de rebote ($${lP15.toFixed(2)} > $${lO15.toFixed(2)})`},
+        {ok:lK15<25,      tf:'15m',text:`Worden sobrevendido: %K ${lK15.toFixed(0)} < 25`},
+        {ok:volActive15,  tf:'15m',text:`Volumen activo${volLabel}`},
         {ok:bbCompressed15,tf:'15m',text:`BB comprimido sin volatilidad (BBW ${lBBW15.toFixed(1)}% < 1.5%)`},
+        {ok:_imanWindow,  tf:'15m',text:`Ventana apertura 9:30–10:00 AM ET`},
       ]});
     }
 
@@ -1398,22 +1417,32 @@ async function buildSignals(){
     const ma20BouncePut  = ma20Touch && lP15<lO15 && ma20Bear && lH15>=lMA20_15*0.998 && align1hBear;
 
     if(ma20BounceCall){
-      all.push({...meta,code:'MA20-R',name:'Rebote MA20 — CALL',type:'call',reqs:[
-        {ok:ma20Touch,     tf:'15m',text:`Precio tocó MA20 ($${lMA20_15.toFixed(2)}) — low $${lL15.toFixed(2)}`},
-        {ok:lP15>lO15,     tf:'15m',text:`Vela alcista: cierre $${lP15.toFixed(2)} > apertura $${lO15.toFixed(2)}`},
-        {ok:ma20Bull,      tf:'15m',text:`Precio sobre MA20 — soporte confirmado`},
-        {ok:stochA,        tf:'15m',text:`Worden: %K (${lK15.toFixed(0)}) > %D (${lD15.toFixed(0)})`},
-        {ok:volActive15,   tf:'15m',text:`Volumen activo${volLabel}`},
-      ]});
+      // Solo el primer rebote alcista del día por ticker
+      const _ma20Key=`ma20r_call_${sym}_${new Date().toLocaleDateString('es-PR')}`;
+      if(!sessionStorage.getItem(_ma20Key)){
+        sessionStorage.setItem(_ma20Key,'1');
+        all.push({...meta,code:'MA20-R',name:'Rebote MA20 — CALL',type:'call',reqs:[
+          {ok:ma20Touch,     tf:'15m',text:`Precio tocó MA20 ($${lMA20_15.toFixed(2)}) — low $${lL15.toFixed(2)}`},
+          {ok:lP15>lO15,     tf:'15m',text:`Vela alcista: cierre $${lP15.toFixed(2)} > apertura $${lO15.toFixed(2)}`},
+          {ok:ma20Bull,      tf:'15m',text:`Precio sobre MA20 — soporte confirmado`},
+          {ok:stochA,        tf:'15m',text:`Worden: %K (${lK15.toFixed(0)}) > %D (${lD15.toFixed(0)})`},
+          {ok:volActive15,   tf:'15m',text:`Volumen activo${volLabel}`},
+        ]});
+      }
     }
     if(ma20BouncePut){
-      all.push({...meta,code:'MA20-R',name:'Rebote MA20 — PUT',type:'put',reqs:[
-        {ok:ma20Touch,     tf:'15m',text:`Precio tocó MA20 ($${lMA20_15.toFixed(2)}) — high $${lH15.toFixed(2)}`},
-        {ok:lP15<lO15,     tf:'15m',text:`Vela bajista: cierre $${lP15.toFixed(2)} < apertura $${lO15.toFixed(2)}`},
-        {ok:ma20Bear,      tf:'15m',text:`Precio bajo MA20 — resistencia confirmada`},
-        {ok:stochB,        tf:'15m',text:`Worden: %K (${lK15.toFixed(0)}) < %D (${lD15.toFixed(0)})`},
-        {ok:volActive15,   tf:'15m',text:`Volumen activo${volLabel}`},
-      ]});
+      // Solo el primer rebote bajista del día por ticker
+      const _ma20Key=`ma20r_put_${sym}_${new Date().toLocaleDateString('es-PR')}`;
+      if(!sessionStorage.getItem(_ma20Key)){
+        sessionStorage.setItem(_ma20Key,'1');
+        all.push({...meta,code:'MA20-R',name:'Rebote MA20 — PUT',type:'put',reqs:[
+          {ok:ma20Touch,     tf:'15m',text:`Precio tocó MA20 ($${lMA20_15.toFixed(2)}) — high $${lH15.toFixed(2)}`},
+          {ok:lP15<lO15,     tf:'15m',text:`Vela bajista: cierre $${lP15.toFixed(2)} < apertura $${lO15.toFixed(2)}`},
+          {ok:ma20Bear,      tf:'15m',text:`Precio bajo MA20 — resistencia confirmada`},
+          {ok:stochB,        tf:'15m',text:`Worden: %K (${lK15.toFixed(0)}) < %D (${lD15.toFixed(0)})`},
+          {ok:volActive15,   tf:'15m',text:`Volumen activo${volLabel}`},
+        ]});
+      }
     }
 
     // ════════════════════════════════════════════════════════════════════════

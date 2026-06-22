@@ -2230,9 +2230,11 @@ function renderMainTickerCards(){
   if(!container)return;
   container.innerHTML=_mainTickers.map(sym=>{
     const col=getTickerColor(sym);
-    // Load saved range
+    // Load saved range, fall back to known defaults
+    const RANGE_DEFAULTS={TSLA:{min:100,max:250},GOOG:{min:60,max:170},SPY:{min:30,max:45}};
     let range={min:'',max:''};
     try{const s=localStorage.getItem('strike_range_'+sym);if(s)range=JSON.parse(s);}catch(e){}
+    if(!range.min||!range.max) range=RANGE_DEFAULTS[sym]||{min:'',max:''};
     const rangeStr=range.min&&range.max?`$${range.min}–$${range.max}`:'—';
     return`<div onclick="openStrikeLog('${sym}','${col}')"
       style="background:var(--bg3);border-radius:var(--r);padding:10px 8px;border-left:2px solid ${col};text-align:center;cursor:pointer;"

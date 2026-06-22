@@ -663,15 +663,22 @@ async function fetchSchwabCandles(sym,freqType,freq,bars=50){
       const d=await r.json();
       if(!d.candles||!d.candles.length){continue;}
       let candles=d.candles;
-      // Filtrar velas anteriores a las 8:00 AM ET
-      // Movimiento institucional de madrugada (4-8am) no es relevante para señales retail.
-      // Schwab devuelve datetime en milisegundos UTC.
-      candles=candles.filter(c=>{
-        if(!c.datetime)return true; // sin timestamp → conservar
-        const et=new Date(new Date(c.datetime).toLocaleString('en-US',{timeZone:'America/New_York'}));
-        const mins=et.getHours()*60+et.getMinutes();
-        return mins>=480; // 8:00 AM ET = 480 minutos
-      });
+      // Filtrar velas anteriores a las 8:00 AM ET — solo durante horario activo.
+      // En debug o fuera de horario se usan todas las velas disponibles.
+      if(!_debugMode){
+        const _now=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+        const _nowMins=_now.getHours()*60+_now.getMinutes();
+        const _nowDay=_now.getDay();
+        const _activeHours=_nowDay>=1&&_nowDay<=5&&!isMarketHoliday(_now)&&_nowMins>=480&&_nowMins<1200;
+        if(_activeHours){
+          candles=candles.filter(c=>{
+            if(!c.datetime)return true;
+            const et=new Date(new Date(c.datetime).toLocaleString('en-US',{timeZone:'America/New_York'}));
+            const mins=et.getHours()*60+et.getMinutes();
+            return mins>=480; // 8:00 AM ET
+          });
+        }
+      }
       // Merge 30min pairs into 1H candles if needed
       if(cfg._merge1h&&cfg.frequency===30){
         const merged=[];

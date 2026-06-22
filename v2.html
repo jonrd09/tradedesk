@@ -1427,31 +1427,46 @@ async function buildSignals(){
     const tlBullVal=tlBull?tlBull.slope*(n1h-1)+tlBull.intercept:null;
 
     // Break above bearish trendline → CALL
-    const breakBull=tlBearVal!==null&&c1h[n1h-1]>tlBearVal*1.001&&c1h[n1h-2]<=tlBearVal*1.003;
-    // Break below bullish trendline → PUT
-    const breakBear=tlBullVal!==null&&c1h[n1h-1]<tlBullVal*0.999&&c1h[n1h-2]>=tlBullVal*0.997;
+    // Condición de recencia: la ruptura debe ser fresca — la vela anterior (n-2) debe estar
+    // dentro del 0.5% de la trendline para que sea un rompimiento reciente, no uno viejo.
+    const breakBull=tlBearVal!==null
+      &&c1h[n1h-1]>tlBearVal*1.001
+      &&c1h[n1h-2]<=tlBearVal*1.005; // máximo 0.5% sobre la trendline en la vela anterior
+    // Break below bullish trendline → PUT (misma lógica invertida)
+    const breakBear=tlBullVal!==null
+      &&c1h[n1h-1]<tlBullVal*0.999
+      &&c1h[n1h-2]>=tlBullVal*0.995;
 
     // 15min confirmation: 2 closes in direction of break
     const conf15Bull=c15[n15-1]>c15[n15-2]&&c15[n15-2]>c15[n15-3];
     const conf15Bear=c15[n15-1]<c15[n15-2]&&c15[n15-2]<c15[n15-3];
 
     if(breakBull){
-      all.push({...meta,code:'CT-1H',name:'Cambio de Tendencia 1H — CALL',type:'call',reqs:[
-        {ok:breakBull,     tf:'1H', text:`Precio rompe trendline bajista: $${c1h[n1h-1].toFixed(2)} > $${tlBearVal.toFixed(2)} (${tlBear.pivotCount} pivots)`},
-        {ok:conf15Bull,    tf:'15m',text:`2 velas verdes confirmando el rompimiento`},
-        {ok:lP1h>lMA20_1h, tf:'1H', text:`Precio sobre MA20 1H ($${lMA20_1h.toFixed(2)})`},
-        {ok:stochA,        tf:'15m',text:`Worden: %K (${lK15.toFixed(0)}) > %D (${lD15.toFixed(0)})`},
-        {ok:volActive15,   tf:'15m',text:`Volumen activo${volLabel}`},
-      ]});
+      // Bloquear si ya se disparó este rompimiento hoy — evita que persista toda la sesión
+      const _ctKey=`ct1h_bull_${sym}_${new Date().toLocaleDateString('es-PR')}`;
+      if(!sessionStorage.getItem(_ctKey)){
+        sessionStorage.setItem(_ctKey,'1');
+        all.push({...meta,code:'CT-1H',name:'Cambio de Tendencia 1H — CALL',type:'call',reqs:[
+          {ok:breakBull,     tf:'1H', text:`Precio rompe trendline bajista: $${c1h[n1h-1].toFixed(2)} > $${tlBearVal.toFixed(2)} (${tlBear.pivotCount} pivots)`},
+          {ok:conf15Bull,    tf:'15m',text:`2 velas verdes confirmando el rompimiento`},
+          {ok:lP1h>lMA20_1h, tf:'1H', text:`Precio sobre MA20 1H ($${lMA20_1h.toFixed(2)})`},
+          {ok:stochA,        tf:'15m',text:`Worden: %K (${lK15.toFixed(0)}) > %D (${lD15.toFixed(0)})`},
+          {ok:volActive15,   tf:'15m',text:`Volumen activo${volLabel}`},
+        ]});
+      }
     }
     if(breakBear){
-      all.push({...meta,code:'CT-1H',name:'Cambio de Tendencia 1H — PUT',type:'put',reqs:[
-        {ok:breakBear,     tf:'1H', text:`Precio rompe trendline alcista: $${c1h[n1h-1].toFixed(2)} < $${tlBullVal.toFixed(2)} (${tlBull.pivotCount} pivots)`},
-        {ok:conf15Bear,    tf:'15m',text:`2 velas rojas confirmando el rompimiento`},
-        {ok:lP1h<lMA20_1h, tf:'1H', text:`Precio bajo MA20 1H ($${lMA20_1h.toFixed(2)})`},
-        {ok:stochB,        tf:'15m',text:`Worden: %K (${lK15.toFixed(0)}) < %D (${lD15.toFixed(0)})`},
-        {ok:volActive15,   tf:'15m',text:`Volumen activo${volLabel}`},
-      ]});
+      const _ctKey=`ct1h_bear_${sym}_${new Date().toLocaleDateString('es-PR')}`;
+      if(!sessionStorage.getItem(_ctKey)){
+        sessionStorage.setItem(_ctKey,'1');
+        all.push({...meta,code:'CT-1H',name:'Cambio de Tendencia 1H — PUT',type:'put',reqs:[
+          {ok:breakBear,     tf:'1H', text:`Precio rompe trendline alcista: $${c1h[n1h-1].toFixed(2)} < $${tlBullVal.toFixed(2)} (${tlBull.pivotCount} pivots)`},
+          {ok:conf15Bear,    tf:'15m',text:`2 velas rojas confirmando el rompimiento`},
+          {ok:lP1h<lMA20_1h, tf:'1H', text:`Precio bajo MA20 1H ($${lMA20_1h.toFixed(2)})`},
+          {ok:stochB,        tf:'15m',text:`Worden: %K (${lK15.toFixed(0)}) < %D (${lD15.toFixed(0)})`},
+          {ok:volActive15,   tf:'15m',text:`Volumen activo${volLabel}`},
+        ]});
+      }
     }
 
     // ════════════════════════════════════════════════════════════════════════

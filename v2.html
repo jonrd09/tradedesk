@@ -666,16 +666,16 @@ async function fetchSchwabCandles(sym,freqType,freq,bars=50){
       // Filtrar velas anteriores a las 8:00 AM ET — solo durante horario activo.
       // En debug o fuera de horario se usan todas las velas disponibles.
       if(!_debugMode){
-        const _now=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
-        const _nowMins=_now.getHours()*60+_now.getMinutes();
-        const _nowDay=_now.getDay();
-        const _activeHours=_nowDay>=1&&_nowDay<=5&&!isMarketHoliday(_now)&&_nowMins>=480&&_nowMins<1200;
+        const _fNow=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+        const _fMins=_fNow.getHours()*60+_fNow.getMinutes();
+        const _fDay=_fNow.getDay();
+        const _activeHours=_fDay>=1&&_fDay<=5&&!isMarketHoliday(_fNow)&&_fMins>=480&&_fMins<1200;
         if(_activeHours){
           candles=candles.filter(c=>{
             if(!c.datetime)return true;
             const et=new Date(new Date(c.datetime).toLocaleString('en-US',{timeZone:'America/New_York'}));
             const mins=et.getHours()*60+et.getMinutes();
-            return mins>=480; // 8:00 AM ET
+            return mins>=480;
           });
         }
       }
@@ -1202,6 +1202,10 @@ async function buildSignals(){
     const o15_arr=opens(ohlc15);
     const greenCandles15=c15.slice(-4).filter((v,i)=>i>0&&v>o15_arr[n15-4+i]).length;
     const redCandles15  =c15.slice(-4).filter((v,i)=>i>0&&v<o15_arr[n15-4+i]).length;
+    // Hora actual ET — usada por múltiples estrategias para ventanas horarias
+    const _etNow15=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+    const _mNow=_etNow15.getHours()*60+_etNow15.getMinutes();
+    const _isOpen15=_mNow>=570&&_mNow<=580; // 9:30–9:40 AM ET only
     // Stochastics 15min
     const stoch15=stochastic(h15,l15,c15,12,3);
     const lK15=stoch15.k.slice(-1)[0]||50;
@@ -1506,9 +1510,6 @@ async function buildSignals(){
     // ESTRATEGIA 4 — EFECTO IMÁN 15MIN (solo apertura 9:30–9:40 AM ET)
     // Precio abre alejado de MA20 ≥1.5% → regresa hacia ella
     // ════════════════════════════════════════════════════════════════════════
-    const _etNow15=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
-    const _mNow=_etNow15.getHours()*60+_etNow15.getMinutes();
-    const _isOpen15=_mNow>=570&&_mNow<=580; // 9:30–9:40 AM ET only
     const distFromMA20_15=lMA20_15>0?(lP15-lMA20_15)/lMA20_15*100:0;
     const gapUp15=distFromMA20_15>=1.5;    // precio 1.5%+ sobre MA20 → PUT (imán hacia abajo)
     const gapDown15=distFromMA20_15<=-1.5; // precio 1.5%+ bajo MA20 → CALL (imán hacia arriba)

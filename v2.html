@@ -663,21 +663,20 @@ async function fetchSchwabCandles(sym,freqType,freq,bars=50){
       const d=await r.json();
       if(!d.candles||!d.candles.length){continue;}
       let candles=d.candles;
-      // Filtrar velas anteriores a las 8:00 AM ET — solo durante horario activo.
-      // En debug o fuera de horario se usan todas las velas disponibles.
-      if(!_debugMode){
-        const _fNow=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
-        const _fMins=_fNow.getHours()*60+_fNow.getMinutes();
-        const _fDay=_fNow.getDay();
-        const _activeHours=_fDay>=1&&_fDay<=5&&!isMarketHoliday(_fNow)&&_fMins>=480&&_fMins<1200;
-        if(_activeHours){
-          candles=candles.filter(c=>{
-            if(!c.datetime)return true;
-            const et=new Date(new Date(c.datetime).toLocaleString('en-US',{timeZone:'America/New_York'}));
-            const mins=et.getHours()*60+et.getMinutes();
-            return mins>=480;
-          });
-        }
+      // Filtrar velas anteriores a las 8:00 AM ET durante horario activo.
+      // El filtro corre siempre que sea día hábil entre 8AM-8PM ET.
+      // Debug salta el guard de "mercado cerrado" pero NO este filtro de calidad.
+      const _fNow=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+      const _fMins=_fNow.getHours()*60+_fNow.getMinutes();
+      const _fDay=_fNow.getDay();
+      const _activeHours=_fDay>=1&&_fDay<=5&&!isMarketHoliday(_fNow)&&_fMins>=480&&_fMins<1200;
+      if(_activeHours){
+        candles=candles.filter(c=>{
+          if(!c.datetime)return true;
+          const et=new Date(new Date(c.datetime).toLocaleString('en-US',{timeZone:'America/New_York'}));
+          const mins=et.getHours()*60+et.getMinutes();
+          return mins>=480; // 8:00 AM ET
+        });
       }
       // Merge 30min pairs into 1H candles if needed
       if(cfg._merge1h&&cfg.frequency===30){
@@ -696,6 +695,12 @@ async function fetchSchwabCandles(sym,freqType,freq,bars=50){
       }
       const sl=candles.slice(-bars);
       if(sl.length<5)continue;
+      // Log diagnóstico: mostrar fecha de la última vela para detectar datos viejos
+      if(sl[sl.length-1]&&sl[sl.length-1].datetime){
+        const lastDt=new Date(sl[sl.length-1].datetime);
+        const lastEt=new Date(lastDt.toLocaleString('en-US',{timeZone:'America/New_York'}));
+        addLog('info','Schwab',`${sym} ${cfg.frequency}min → última vela: ${lastEt.toLocaleDateString()} ${lastEt.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})} ET · ${sl.length} velas`);
+      }
       return{c:sl.map(v=>v.close),h:sl.map(v=>v.high),l:sl.map(v=>v.low),o:sl.map(v=>v.open),v:sl.map(v=>v.volume||0)};
     }catch(e){continue;}
   }

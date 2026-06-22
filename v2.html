@@ -145,10 +145,10 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
   <span id="mktStatus" class="mkt-closed">● —</span>
   <span class="clock" id="clockEl">—</span>
 
-  <!-- Premarket button -->
-  <button id="premarketBtn" onclick="openPremarketModal()"
-    style="background:rgba(255,194,52,.12);border:1px solid rgba(255,194,52,.4);border-radius:20px;color:var(--yellow);padding:4px 14px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--sans);white-space:nowrap;">
-    📰 Premarket
+  <!-- Log button — solo visible en Debug ON -->
+  <button id="logBtn" onclick="openLogPanel()"
+    style="display:none;background:rgba(59,169,255,.15);border:1px solid rgba(59,169,255,.4);border-radius:20px;color:var(--blue);padding:4px 14px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--sans);white-space:nowrap;">
+    📋 Logs
   </button>
 
   <!-- Telegram button — movido a Configuración -->
@@ -2310,6 +2310,81 @@ function renderNewsTickerButtons(){
   `<button onclick="loadNews('ALL')" class="news-ticker-btn" id="nbtn-ALL" style="color:var(--yellow);">ALL</button>`;
 }
 
+// ═══════════════════════════════════════════════════════════════
+// LOG PANEL
+// ═══════════════════════════════════════════════════════════════
+let _logPanelFilter='all';
+function openLogPanel(){
+  document.getElementById('logModal').style.display='flex';
+  renderLogPanel();
+}
+function filterLogs(f){
+  _logPanelFilter=f;
+  ['all','error','warn','info','schwab'].forEach(k=>{
+    const el=document.getElementById('lf-'+k);
+    if(el)el.classList.toggle('active',k===f);
+  });
+  renderLogPanel();
+}
+function renderLogPanel(){
+  const list=document.getElementById('logList');
+  const count=document.getElementById('logCount');
+  if(!list)return;
+  const logs=(_logs||[]).slice().reverse(); // newest first
+  const filtered=logs.filter(l=>{
+    if(_logPanelFilter==='all')return true;
+    if(_logPanelFilter==='schwab')return(l.category||'').toLowerCase().includes('schwab');
+    return l.level===_logPanelFilter;
+  });
+  if(count)count.textContent=filtered.length;
+  if(!filtered.length){
+    list.innerHTML='<div style="text-align:center;padding:20px;color:var(--text3);">Sin logs para mostrar</div>';
+    return;
+  }
+  const colMap={error:'var(--red)',warn:'var(--yellow)',info:'var(--text2)',debug:'var(--blue)'};
+  list.innerHTML=filtered.map(l=>{
+    const col=colMap[l.level]||'var(--text3)';
+    const time=l.time||'';
+    const detail=l.detail?`<div style="color:var(--text3);padding-left:12px;margin-top:1px;">${l.detail}</div>`:'';
+    return`<div style="border-bottom:1px solid var(--border);padding:6px 0;">
+      <div style="display:flex;gap:8px;align-items:baseline;">
+        <span style="color:${col};font-weight:700;min-width:44px;">[${(l.level||'').toUpperCase()}]</span>
+        <span style="color:var(--text3);min-width:70px;">${time}</span>
+        <span style="color:var(--blue);min-width:80px;">${l.category||''}</span>
+        <span style="color:var(--text);">${l.message||''}</span>
+      </div>
+      ${detail}
+    </div>`;
+  }).join('');
+}
+function exportLogs(){
+  // Export all logs as plain text — easy to paste to Claude
+  const logs=(_logs||[]).slice().reverse();
+  const txt=logs.map(l=>`[${(l.level||'').toUpperCase()}] ${l.date||''} ${l.time||''} | ${l.category||''} | ${l.message||''}${l.detail?' | '+l.detail:''}`).join('\n');
+  const header=`TradeDesk Pro — Log Export\nFecha: ${new Date().toLocaleString('es-PR')}\nTotal: ${logs.length} entradas\n${'─'.repeat(60)}\n\n`;
+  const blob=new Blob([header+txt],{type:'text/plain'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=`tdp_logs_${new Date().toISOString().slice(0,10)}.txt`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+function clearLogs(){
+  if(!confirm('¿Borrar todos los logs?'))return;
+  _logs=[];
+  try{localStorage.removeItem('tdp_logs');}catch(e){}
+  renderLogPanel();
+}
+
+// Actualizar log panel si está abierto
+const _origAddLog=addLog;
+// Patch addLog to refresh panel if open
+function addLog(level,category,message,detail){
+  if(typeof _origAddLog==='function')_origAddLog(level,category,message,detail);
+  const modal=document.getElementById('logModal');
+  if(modal&&modal.style.display!=='none')renderLogPanel();
+}
+
 function saveGainPct(){try{localStorage.setItem('gainPct',document.getElementById('gainPct').value);}catch(e){}}
 // Niveles técnicos por ticker: ATH, LAST HIGH, LAST LOW (avisan en Telegram a 2%)
 function saveStrikeLevels(){
@@ -2732,16 +2807,15 @@ function renderInsiderTable(data){
 // ═══════════════════════════════════════════════════════════════
 async function runDebugMode(){
   const btn=document.getElementById('testBtn');
-  // Toggle debug mode
+  const logBtn=document.getElementById('logBtn');
   _debugMode=!_debugMode;
   if(_debugMode){
     btn.textContent='🔍 Debug ON';
     btn.style.background='rgba(255,194,52,.25)';
     btn.style.borderColor='rgba(255,194,52,.8)';
     btn.style.color='#ffc234';
-    // Run buildSignals with real data but show ALL signals (even 1/7)
+    if(logBtn)logBtn.style.display='inline-block';
     await buildSignals();
-    // Add debug banner
     const area=document.getElementById('signalArea');
     area.innerHTML='<div style="text-align:center;padding:6px 12px;color:#ffc234;font-size:11px;font-weight:700;border:1px solid rgba(255,194,52,.3);border-radius:8px;margin-bottom:10px;background:rgba(255,194,52,.08);">🔍 MODO DEBUG — Mostrando TODAS las señales con datos reales (sin filtro de 75%)</div>'+area.innerHTML;
   }else{
@@ -2749,7 +2823,7 @@ async function runDebugMode(){
     btn.style.background='rgba(167,139,250,.15)';
     btn.style.borderColor='rgba(167,139,250,.5)';
     btn.style.color='var(--purple)';
-    // Rebuild with normal 75% filter
+    if(logBtn)logBtn.style.display='none';
     await buildSignals();
   }
 }
@@ -4708,6 +4782,42 @@ init();
       </div>
 
     </div><!-- /body -->
+  </div>
+</div>
+
+<!-- ══ LOG PANEL MODAL ════════════════════════════════════════ -->
+<div id="logModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:2600;align-items:center;justify-content:center;padding:16px;">
+  <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:var(--rl);width:100%;max-width:700px;max-height:90vh;display:flex;flex-direction:column;">
+    <!-- Header -->
+    <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span style="color:var(--blue);font-size:16px;">📋</span>
+        <span style="font-size:15px;font-weight:700;color:#fff;">Logs del sistema</span>
+        <span id="logCount" style="background:rgba(59,169,255,.2);color:var(--blue);font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px;">0</span>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <button onclick="exportLogs()"
+          style="background:var(--green);color:#001a0e;border:none;border-radius:var(--r);padding:6px 14px;font-size:12px;font-weight:700;cursor:pointer;">
+          ⬇ Exportar para Claude
+        </button>
+        <button onclick="clearLogs()"
+          style="background:none;border:1px solid var(--border2);border-radius:var(--r);color:var(--text3);padding:6px 12px;font-size:12px;cursor:pointer;">
+          🗑 Limpiar
+        </button>
+        <button onclick="document.getElementById('logModal').style.display='none'"
+          style="background:none;border:none;color:var(--text2);font-size:20px;cursor:pointer;padding:0 4px;">×</button>
+      </div>
+    </div>
+    <!-- Filter tabs -->
+    <div style="padding:8px 18px;border-bottom:1px solid var(--border);display:flex;gap:6px;flex-shrink:0;">
+      <button class="cfg-tab active" id="lf-all"   onclick="filterLogs('all')"  >Todos</button>
+      <button class="cfg-tab"        id="lf-error" onclick="filterLogs('error')" style="color:var(--red);">❌ Errores</button>
+      <button class="cfg-tab"        id="lf-warn"  onclick="filterLogs('warn')"  style="color:var(--yellow);">⚠ Avisos</button>
+      <button class="cfg-tab"        id="lf-info"  onclick="filterLogs('info')"  >ℹ Info</button>
+      <button class="cfg-tab"        id="lf-schwab" onclick="filterLogs('schwab')">📡 Schwab</button>
+    </div>
+    <!-- Log list -->
+    <div id="logList" style="flex:1;overflow-y:auto;padding:10px 18px;font-family:var(--mono);font-size:11px;line-height:1.6;"></div>
   </div>
 </div>
 

@@ -233,9 +233,9 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
 
   <!-- Calculadora -->
   <div class="rsec">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;gap:8px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;gap:8px;position:relative;">
       <div id="todayRulePill" style="background:rgba(255,194,52,.15);border:1px solid rgba(255,194,52,.4);border-radius:20px;padding:4px 12px;font-size:11px;font-weight:700;color:var(--yellow);white-space:nowrap;min-width:150px;text-align:center;">📅 —</div>
-      <div style="font-size:18px;font-weight:700;color:#fff;">Calculadora</div>
+      <div style="position:absolute;left:50%;transform:translateX(-50%);font-size:18px;font-weight:700;color:#fff;pointer-events:none;">Calculadora</div>
       <div style="display:flex;flex-direction:column;align-items:center;gap:2px;">
         <span style="font-size:10px;color:var(--text3);text-transform:uppercase;">% Ganancia</span>
         <div style="display:flex;align-items:center;gap:3px;">

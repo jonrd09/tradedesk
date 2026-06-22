@@ -2810,6 +2810,9 @@ async function runDebugMode(){
   const logBtn=document.getElementById('logBtn');
   _debugMode=!_debugMode;
   if(_debugMode){
+    // Limpiar logs viejos al entrar en Debug — solo ver logs frescos de esta sesión
+    _logs=[];
+    try{localStorage.removeItem('tdp_logs');}catch(e){}
     btn.textContent='🔍 Debug ON';
     btn.style.background='rgba(255,194,52,.25)';
     btn.style.borderColor='rgba(255,194,52,.8)';

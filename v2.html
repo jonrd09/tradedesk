@@ -4226,7 +4226,7 @@ async function init(){
   window._tokenInterval=setInterval(async()=>{
     const tok=localStorage.getItem('schwab_access_token');
     const exp=parseInt(localStorage.getItem('schwab_token_expiry')||'0');
-    if(tok&&exp&&Date.now()>exp-600000) await getSchwabToken();
+    if(tok&&exp&&Date.now()>exp-900000) await getSchwabToken(); // renovar si faltan <15min
 
     // Check refresh token expiry — warn via Telegram 12h before it expires
     const refreshExp=parseInt(localStorage.getItem('schwab_refresh_expiry')||'0');

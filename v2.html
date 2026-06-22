@@ -681,11 +681,14 @@ async function fetchSchwabCandles(sym,freqType,freq,bars=50){
       const sl=candles.slice(-bars);
       if(sl.length<5)continue;
       // Log diagnóstico: mostrar fecha de la última vela para detectar datos viejos
-      if(sl[sl.length-1]&&sl[sl.length-1].datetime){
-        const lastDt=new Date(sl[sl.length-1].datetime);
+      const _tfLabel=cfg._merge1h?'1H':cfg.frequencyType==='daily'?'D':(cfg.frequency+'min');
+      const _lastC=sl[sl.length-1];
+      if(_lastC&&_lastC.datetime){
+        const lastDt=new Date(_lastC.datetime);
         const lastEt=new Date(lastDt.toLocaleString('en-US',{timeZone:'America/New_York'}));
-        const _tfLabel=cfg._merge1h?'1H':(cfg.frequency+'min');
         addLog('debug','Schwab',`${sym} ${_tfLabel} → última vela: ${lastEt.toLocaleDateString()} ${lastEt.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})} ET · ${sl.length} velas`);
+      }else{
+        addLog('debug','Schwab',`${sym} ${_tfLabel} → ${sl.length} velas (sin datetime)`);
       }
       return{c:sl.map(v=>v.close),h:sl.map(v=>v.high),l:sl.map(v=>v.low),o:sl.map(v=>v.open),v:sl.map(v=>v.volume||0)};
     }catch(e){continue;}
@@ -1144,6 +1147,7 @@ async function buildSignals(){
     if(!ohlc1h||!ohlc15||!ohlcD){
       const missing=[!ohlc1h?'1H':null,!ohlc15?'15m':null,!ohlcD?'D':null].filter(Boolean).join(', ');
       if(!_testMode)addLog('warn','Señales',`${sym} → Sin datos (${missing})`);
+      addLog('debug','Señales',`${sym} → 1H:${ohlc1h?closes(ohlc1h).length+'v':'❌'} 15m:${ohlc15?closes(ohlc15).length+'v':'❌'} D:${ohlcD?closes(ohlcD).length+'v':'❌'}`);
       continue;
     }
 

@@ -9,7 +9,7 @@
 :root{
   --bg:#0a0e1a;--bg2:#111827;--bg3:#1a2235;--bg4:#1e2d42;
   --border:rgba(255,255,255,.07);--border2:rgba(255,255,255,.13);
-  --text:#e8edf5;--text2:#8899b4;--text3:#7a90aa;
+  --text:#e8edf5;--text2:#c8d4e8;--text3:#b0bfd4;
   --green:#00d17a;--green-bg:rgba(0,209,122,.1);
   --red:#ff4d6d;--red-bg:rgba(255,77,109,.1);
   --blue:#3d8bff;--blue-bg:rgba(61,139,255,.1);
@@ -199,7 +199,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
   <div class="card">
     <div style="text-align:center;margin-bottom:10px;">
       <div style="font-size:18px;font-weight:700;color:#fff;">Señales Activas</div>
-      <div style="font-size:11px;color:var(--text2);margin-top:3px;">BB Entrada Temprana · Rebote MA20 · Cambio Tendencia 1H · Efecto Imán · GOOG · TSLA · SPY · QQQ · AAPL · PLTR</div>
+      <div style="font-size:13px;color:var(--text2);margin-top:3px;">BB Entrada Temprana · Rebote MA20 · Cambio Tendencia 1H · Efecto Imán · GOOG · TSLA · SPY · QQQ · AAPL · PLTR</div>
     </div>
     <div id="signalArea">
       <div style="text-align:center;padding:20px;color:var(--text2);font-size:13px;">⟳ Calculando señales…</div>
@@ -1541,7 +1541,7 @@ async function buildSignals(){
   else{dir=`⚡ MIXTO — ${calls} CALL · ${puts} PUT`;dirCol='var(--yellow)';}
 
   let html=`<div style="text-align:center;padding:10px 0;border-bottom:1px solid var(--border);margin-bottom:12px;">
-    <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:4px;">SEÑALES ACTIVAS — BB BREAKOUT 15MIN</div>
+    <div style="font-size:12px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:4px;">SEÑALES ACTIVAS — BB BREAKOUT 15MIN</div>
     <div style="font-family:var(--mono);font-size:32px;font-weight:700;color:#fff;">${active.length}</div>
     <div style="font-size:12px;color:${dirCol};margin-top:4px;">${dir}</div>
   </div>`;

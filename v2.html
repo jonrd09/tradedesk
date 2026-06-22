@@ -651,7 +651,7 @@ async function fetchSchwabCandles(sym,freqType,freq,bars=50){
     try{
       const fetchBars=cfg._merge1h?bars*2:bars;
       const url=`${SCHWAB_API_BASE}/pricehistory?symbol=${sym}&periodType=${cfg.periodType}&period=${cfg.period}&frequencyType=${cfg.frequencyType}&frequency=${cfg.frequency}&needExtendedHoursData=true`;
-      const r=await fetch(url,{headers:{'Authorization':'Bearer '+token},signal:AbortSignal.timeout(18000)});
+      const r=await fetch(url,{headers:{'Authorization':'Bearer '+token},signal:AbortSignal.timeout(7000)});
       if(!r.ok){
         // Only log if this is the LAST config (no more fallbacks)
         if(cfg===configs[configs.length-1]){
@@ -699,7 +699,7 @@ async function fetchSchwabCandles(sym,freqType,freq,bars=50){
       if(sl[sl.length-1]&&sl[sl.length-1].datetime){
         const lastDt=new Date(sl[sl.length-1].datetime);
         const lastEt=new Date(lastDt.toLocaleString('en-US',{timeZone:'America/New_York'}));
-        addLog('info','Schwab',`${sym} ${cfg.frequency}min → última vela: ${lastEt.toLocaleDateString()} ${lastEt.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})} ET · ${sl.length} velas`);
+        addLog('debug','Schwab',`${sym} ${cfg.frequency}min → última vela: ${lastEt.toLocaleDateString()} ${lastEt.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})} ET · ${sl.length} velas`);
       }
       return{c:sl.map(v=>v.close),h:sl.map(v=>v.high),l:sl.map(v=>v.low),o:sl.map(v=>v.open),v:sl.map(v=>v.volume||0)};
     }catch(e){continue;}
@@ -735,8 +735,9 @@ function _saveLogs(){try{localStorage.setItem('tdp_logs',JSON.stringify(_logs.sl
 let _logFilter = 'all';
 
 function addLog(level, category, message, detail='') {
-  // Solo registrar problemas — nunca operación normal
+  // Filtrar niveles muy verbosos — info se descarta, debug se guarda solo en debugMode
   if(level === 'info') return;
+  if(level === 'debug' && !_debugMode) return;
 
   const et = new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
   const time = et.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:true});
@@ -1120,7 +1121,7 @@ async function buildSignals(){
   const _sigTimeout=setTimeout(()=>{
     if(area.innerHTML.includes('⟳'))
       area.innerHTML='<div style="text-align:center;padding:30px;color:var(--text2);font-size:13px;"><div style="font-size:28px;margin-bottom:10px">⏱</div><div style="font-weight:600;color:var(--yellow);">Tiempo agotado</div><div style="font-size:12px;margin-top:8px;color:var(--text3);">Schwab tardó demasiado. Revisa tu conexión o intenta en unos minutos.</div></div>';
-  },90000);
+  },60000);
   try{
 
   for(const sym of _signalTickers){
@@ -1142,13 +1143,13 @@ async function buildSignals(){
       if(schwabToken){
         try{
           // Sequential fetches — menos carga en Schwab, menos timeouts
-          const r1=await Promise.race([fetchSchwabCandles(sym,'minute',60,100),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),20000))]).catch(()=>null);
+          const r1=await Promise.race([fetchSchwabCandles(sym,'minute',60,100),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),8000))]).catch(()=>null);
           if(r1&&closes(r1).length>=10){ohlc1h=r1;dataLabel='📡 Schwab';}
-          await new Promise(r=>setTimeout(r,400));
-          const r2=await Promise.race([fetchSchwabCandles(sym,'minute',15,60),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),20000))]).catch(()=>null);
+          await new Promise(r=>setTimeout(r,200));
+          const r2=await Promise.race([fetchSchwabCandles(sym,'minute',15,60),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),8000))]).catch(()=>null);
           if(r2&&closes(r2).length>=5) ohlc15=r2;
-          await new Promise(r=>setTimeout(r,400));
-          const r3=await Promise.race([fetchSchwabCandles(sym,'D',1,90),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),20000))]).catch(()=>null);
+          await new Promise(r=>setTimeout(r,200));
+          const r3=await Promise.race([fetchSchwabCandles(sym,'D',1,90),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),8000))]).catch(()=>null);
           if(r3&&closes(r3).length>=10) ohlcD=r3;
         }catch(e){addLog('warn','Schwab',`${sym} señales error`,e.message);}
       }
@@ -2318,9 +2319,9 @@ function openLogPanel(){
   document.getElementById('logModal').style.display='flex';
   renderLogPanel();
 }
-function filterLogs(f){
+function filterLogsPanel(f){
   _logPanelFilter=f;
-  ['all','error','warn','info','schwab'].forEach(k=>{
+  ['all','error','warn','debug','schwab'].forEach(k=>{
     const el=document.getElementById('lf-'+k);
     if(el)el.classList.toggle('active',k===f);
   });
@@ -2334,6 +2335,7 @@ function renderLogPanel(){
   const filtered=logs.filter(l=>{
     if(_logPanelFilter==='all')return true;
     if(_logPanelFilter==='schwab')return(l.category||'').toLowerCase().includes('schwab');
+    if(_logPanelFilter==='debug')return l.level==='debug';
     return l.level===_logPanelFilter;
   });
   if(count)count.textContent=filtered.length;
@@ -2374,15 +2376,6 @@ function clearLogs(){
   _logs=[];
   try{localStorage.removeItem('tdp_logs');}catch(e){}
   renderLogPanel();
-}
-
-// Actualizar log panel si está abierto
-const _origAddLog=addLog;
-// Patch addLog to refresh panel if open
-function addLog(level,category,message,detail){
-  if(typeof _origAddLog==='function')_origAddLog(level,category,message,detail);
-  const modal=document.getElementById('logModal');
-  if(modal&&modal.style.display!=='none')renderLogPanel();
 }
 
 function saveGainPct(){try{localStorage.setItem('gainPct',document.getElementById('gainPct').value);}catch(e){}}
@@ -4813,11 +4806,11 @@ init();
     </div>
     <!-- Filter tabs -->
     <div style="padding:8px 18px;border-bottom:1px solid var(--border);display:flex;gap:6px;flex-shrink:0;">
-      <button class="cfg-tab active" id="lf-all"   onclick="filterLogs('all')"  >Todos</button>
-      <button class="cfg-tab"        id="lf-error" onclick="filterLogs('error')" style="color:var(--red);">❌ Errores</button>
-      <button class="cfg-tab"        id="lf-warn"  onclick="filterLogs('warn')"  style="color:var(--yellow);">⚠ Avisos</button>
-      <button class="cfg-tab"        id="lf-info"  onclick="filterLogs('info')"  >ℹ Info</button>
-      <button class="cfg-tab"        id="lf-schwab" onclick="filterLogs('schwab')">📡 Schwab</button>
+      <button class="cfg-tab active" id="lf-all"   onclick="filterLogsPanel('all')"  >Todos</button>
+      <button class="cfg-tab"        id="lf-error" onclick="filterLogsPanel('error')" style="color:var(--red);">❌ Errores</button>
+      <button class="cfg-tab"        id="lf-warn"  onclick="filterLogsPanel('warn')"  style="color:var(--yellow);">⚠ Avisos</button>
+      <button class="cfg-tab"        id="lf-debug" onclick="filterLogsPanel('debug')" style="color:var(--blue);">🔍 Debug</button>
+      <button class="cfg-tab"        id="lf-schwab" onclick="filterLogsPanel('schwab')">📡 Schwab</button>
     </div>
     <!-- Log list -->
     <div id="logList" style="flex:1;overflow-y:auto;padding:10px 18px;font-family:var(--mono);font-size:11px;line-height:1.6;"></div>

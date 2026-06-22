@@ -663,14 +663,14 @@ async function fetchSchwabCandles(sym,freqType,freq,bars=50){
       const d=await r.json();
       if(!d.candles||!d.candles.length){continue;}
       let candles=d.candles;
-      // Filtrar velas anteriores a las 8:00 AM ET durante horario activo.
-      // El filtro corre siempre que sea día hábil entre 8AM-8PM ET.
-      // Debug salta el guard de "mercado cerrado" pero NO este filtro de calidad.
+      // Filtrar velas anteriores a las 8:00 AM ET — SOLO para velas intraday (minutos).
+      // Las velas Daily tienen timestamp a medianoche y no deben filtrarse.
       const _fNow=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
       const _fMins=_fNow.getHours()*60+_fNow.getMinutes();
       const _fDay=_fNow.getDay();
       const _activeHours=_fDay>=1&&_fDay<=5&&!isMarketHoliday(_fNow)&&_fMins>=480&&_fMins<1200;
-      if(_activeHours){
+      const _isIntraday=cfg.frequencyType==='minute';
+      if(_activeHours&&_isIntraday){
         candles=candles.filter(c=>{
           if(!c.datetime)return true;
           const et=new Date(new Date(c.datetime).toLocaleString('en-US',{timeZone:'America/New_York'}));

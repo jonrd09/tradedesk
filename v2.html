@@ -177,13 +177,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
     <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
       <div style="font-size:14px;font-weight:700;color:#fff;">📰 Noticias</div>
       <div style="display:flex;gap:4px;flex-wrap:wrap;" id="newsTickerBtns">
-        <button onclick="loadNews('TSLA')" class="news-ticker-btn" id="nbtn-TSLA">TSLA</button>
-        <button onclick="loadNews('GOOG')" class="news-ticker-btn" id="nbtn-GOOG">GOOG</button>
-        <button onclick="loadNews('SPY')"  class="news-ticker-btn" id="nbtn-SPY">SPY</button>
-        <button onclick="loadNews('QQQ')"  class="news-ticker-btn" id="nbtn-QQQ">QQQ</button>
-        <button onclick="loadNews('AAPL')" class="news-ticker-btn" id="nbtn-AAPL">AAPL</button>
-        <button onclick="loadNews('PLTR')" class="news-ticker-btn" id="nbtn-PLTR">PLTR</button>
-        <button onclick="loadNews('ALL')"  class="news-ticker-btn" id="nbtn-ALL" style="color:var(--yellow);">ALL</button>
+        <!-- populated by renderNewsTickerButtons() -->
       </div>
     </div>
   </div>
@@ -253,24 +247,8 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
       </div>
     </div>
 
-    <!-- Range cards -->
-    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px;">
-      <div onclick="openStrikeLog('TSLA','#cc0000')" style="background:var(--bg3);border-radius:var(--r);padding:10px 8px;border-left:2px solid #cc0000;text-align:center;cursor:pointer;" onmouseover="this.style.background='var(--bg4)'" onmouseout="this.style.background='var(--bg3)'">
-        <div style="font-size:12px;font-weight:700;color:#cc0000;font-family:var(--mono);margin-bottom:4px;">TSLA</div>
-        <div id="range-TSLA" style="font-size:15px;font-weight:700;color:var(--text);font-family:var(--mono);">$100–$250</div>
-        <div id="avg-TSLA" style="font-size:15px;font-weight:700;font-family:var(--mono);color:#fff;margin-top:4px;">—</div>
-      </div>
-      <div onclick="openStrikeLog('GOOG','#4285f4')" style="background:var(--bg3);border-radius:var(--r);padding:10px 8px;border-left:2px solid #4285f4;text-align:center;cursor:pointer;" onmouseover="this.style.background='var(--bg4)'" onmouseout="this.style.background='var(--bg3)'">
-        <div style="font-size:12px;font-weight:700;color:#4285f4;font-family:var(--mono);margin-bottom:4px;">GOOG</div>
-        <div id="range-GOOG" style="font-size:15px;font-weight:700;color:var(--text);font-family:var(--mono);">$60–$170</div>
-        <div id="avg-GOOG" style="font-size:15px;font-weight:700;font-family:var(--mono);color:#fff;margin-top:4px;">—</div>
-      </div>
-      <div onclick="openStrikeLog('SPY','#00a651')" style="background:var(--bg3);border-radius:var(--r);padding:10px 8px;border-left:2px solid #00a651;text-align:center;cursor:pointer;" onmouseover="this.style.background='var(--bg4)'" onmouseout="this.style.background='var(--bg3)'">
-        <div style="font-size:12px;font-weight:700;color:#00a651;font-family:var(--mono);margin-bottom:4px;">SPY</div>
-        <div id="range-SPY" style="font-size:15px;font-weight:700;color:var(--text);font-family:var(--mono);">$30–$45</div>
-        <div id="avg-SPY" style="font-size:15px;font-weight:700;font-family:var(--mono);color:#fff;margin-top:4px;">—</div>
-      </div>
-    </div>
+    <!-- Range cards — rendered dynamically by renderMainTickerCards() -->
+    <div id="mainTickerCards" style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px;"></div>
 
     <!-- Calc inputs -->
     <div class="inp-row" style="margin-bottom:8px;">
@@ -325,6 +303,48 @@ const _sigDetectedAt={};
 let currentTicker='GOOG';
 let _insiderData=[];
 let _insiderSort={col:'shares',dir:-1};
+// ═══════════════════════════════════════════════════════════════
+// TICKER CONFIGURATION — central source of truth
+// ═══════════════════════════════════════════════════════════════
+// Color palette for any ticker
+const TICKER_COLORS={
+  TSLA:'#cc0000',GOOG:'#4285f4',SPY:'#00a651',QQQ:'#ffc234',
+  AAPL:'#888888',PLTR:'#7e6bff',MSFT:'#00a4ef',NVDA:'#76b900',
+  AMD:'#ed1c24',AMZN:'#ff9900',META:'#1877f2',NFLX:'#e50914',
+  COIN:'#0052ff',AVGO:'#cc0000',MU:'#e60012',QCOM:'#3253dc',
+  UBER:'#555555',PYPL:'#003087',CRM:'#00a1e0',HOOD:'#00c805',
+  UNH:'#002677',OKLO:'#00d17a',URA:'#ffc234',ORCL:'#c74634',
+};
+function getTickerColor(sym){return TICKER_COLORS[sym]||'#3ba9ff';}
+
+// Default configs
+const TICKER_DEFAULTS={
+  main:['TSLA','GOOG','SPY'],
+  signal:['TSLA','GOOG','SPY','QQQ','AAPL','PLTR'],
+};
+
+// Load from localStorage or use defaults
+function loadTickerConfig(){
+  try{
+    const m=JSON.parse(localStorage.getItem('cfg_main_tickers')||'null');
+    const s=JSON.parse(localStorage.getItem('cfg_signal_tickers')||'null');
+    _mainTickers=Array.isArray(m)&&m.length===3?m:[...TICKER_DEFAULTS.main];
+    _signalTickers=Array.isArray(s)&&s.length>=3&&s.length<=6?s:[...TICKER_DEFAULTS.signal];
+  }catch(e){
+    _mainTickers=[...TICKER_DEFAULTS.main];
+    _signalTickers=[...TICKER_DEFAULTS.signal];
+  }
+}
+function saveTickerConfig(){
+  try{
+    localStorage.setItem('cfg_main_tickers',JSON.stringify(_mainTickers));
+    localStorage.setItem('cfg_signal_tickers',JSON.stringify(_signalTickers));
+  }catch(e){}
+}
+
+let _mainTickers=[...TICKER_DEFAULTS.main];
+let _signalTickers=[...TICKER_DEFAULTS.signal];
+
 let _strikeTicker='GOOG',_strikeColor='#4285f4';
 let _rulesTimer=null;
 
@@ -417,7 +437,7 @@ function saveStrikeRange(){
 }
 
 function loadStrikeRanges(){
-  ['TSLA','GOOG','SPY','QQQ','AAPL','PLTR'].forEach(ticker=>{
+  _signalTickers.forEach(ticker=>{
     const key=`strike_range_${ticker}`;
     const saved=localStorage.getItem(key);
     if(saved){
@@ -1082,7 +1102,7 @@ async function buildSignals(){
   },90000);
   try{
 
-  for(const sym of['GOOG','TSLA','SPY','QQQ','AAPL','PLTR']){
+  for(const sym of _signalTickers){
     let ohlc1h=null,ohlc15=null,ohlcD=null;
     let dataLabel='📡 Sin fuente';
 
@@ -1987,11 +2007,12 @@ function closeConfigModal(){
   document.getElementById('configModal').style.display='none';
 }
 function switchCfgTab(tab){
-  ['apis','telegram','historial','pin'].forEach(t=>{
+  ['apis','telegram','historial','pin','tickers'].forEach(t=>{
     document.getElementById('cfgTab-'+t).classList.toggle('active',t===tab);
     document.getElementById('cfgPanel-'+t).style.display=t===tab?'block':'none';
   });
   if(tab==='historial')_renderCfgHistorial();
+  if(tab==='tickers')_renderCfgTickers();
 }
 function _loadCfgFields(){
   // APIs
@@ -2104,11 +2125,133 @@ function changeCfgPin(){
   setTimeout(()=>{if(r)r.textContent='';},3000);
 }
 
+// ── Tickers (Configuración) ───────────────────────────────────
+const POPULAR_TICKERS=['TSLA','GOOG','SPY','QQQ','AAPL','PLTR','MSFT','NVDA','AMD','AMZN','META','NFLX','COIN'];
+
+function _renderCfgTickers(){
+  // Main tickers (3 dropdowns)
+  const mc=document.getElementById('cfg-mainTickers');
+  if(mc) mc.innerHTML=_mainTickers.map((sym,i)=>`
+    <div style="display:flex;align-items:center;gap:8px;">
+      <span style="font-size:11px;color:var(--text3);width:48px;">Slot ${i+1}</span>
+      <select id="cfg-main-${i}" onchange="cfgChangeMainTicker(${i},this.value)"
+        style="flex:1;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:${getTickerColor(sym)};padding:6px 10px;font-size:13px;font-weight:700;font-family:var(--mono);outline:none;">
+        ${POPULAR_TICKERS.map(t=>`<option value="${t}" ${t===sym?'selected':''} style="color:${getTickerColor(t)}">${t}</option>`).join('')}
+      </select>
+      <div style="width:10px;height:10px;border-radius:50%;background:${getTickerColor(sym)};flex-shrink:0;"></div>
+    </div>`).join('');
+
+  // Extra signal tickers
+  const extras=_signalTickers.filter(s=>!_mainTickers.includes(s));
+  const ec=document.getElementById('cfg-extraTickers');
+  if(ec) ec.innerHTML=extras.length?extras.map((sym,i)=>`
+    <div style="display:flex;align-items:center;gap:8px;" id="cfg-extra-row-${i}">
+      <select id="cfg-extra-${i}" onchange="cfgChangeExtraTicker(${i},this.value)"
+        style="flex:1;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:${getTickerColor(sym)};padding:6px 10px;font-size:13px;font-weight:700;font-family:var(--mono);outline:none;">
+        ${POPULAR_TICKERS.map(t=>`<option value="${t}" ${t===sym?'selected':''} style="color:${getTickerColor(t)}">${t}</option>`).join('')}
+      </select>
+      <button onclick="cfgRemoveExtraTicker(${i})"
+        style="background:none;border:1px solid var(--border2);border-radius:var(--r);color:var(--red);padding:5px 10px;font-size:12px;cursor:pointer;">✕</button>
+    </div>`).join('')
+    :'<div style="font-size:12px;color:var(--text3);">Sin tickers adicionales</div>';
+
+  // Hide add button if already at max
+  const addBtn=document.getElementById('cfg-addExtraBtn');
+  if(addBtn) addBtn.style.display=extras.length>=3?'none':'block';
+}
+
+function cfgChangeMainTicker(idx, newSym){
+  const old=_mainTickers[idx];
+  if(_mainTickers.includes(newSym)&&newSym!==old){
+    _showCfgTickerMsg(`⚠ ${newSym} ya está en el panel principal`,'var(--red)');
+    document.getElementById('cfg-main-'+idx).value=old;return;
+  }
+  if(confirm(`¿Cambiar ${old} → ${newSym}?\n\nLos datos de Strike Log y niveles de ${old} se conservan en memoria.\nPuedes exportar antes si quieres respaldo.`)){
+    // Sync: if old was also in signal tickers, replace it there too
+    const si=_signalTickers.indexOf(old);
+    if(si>=0) _signalTickers[si]=newSym;
+    _mainTickers[idx]=newSym;
+    saveTickerConfig();
+    renderMainTickerCards();
+    renderNewsTickerButtons();
+    updateCardAverages();
+    _renderCfgTickers();
+    _showCfgTickerMsg(`✅ ${old} → ${newSym}. Reinicia el monitoreo para aplicar.`,'var(--green)');
+  }else{
+    document.getElementById('cfg-main-'+idx).value=old;
+  }
+}
+
+function cfgChangeExtraTicker(idx, newSym){
+  const extras=_signalTickers.filter(s=>!_mainTickers.includes(s));
+  const old=extras[idx];
+  if(_signalTickers.includes(newSym)){
+    _showCfgTickerMsg(`⚠ ${newSym} ya está en la lista`,'var(--red)');
+    document.getElementById('cfg-extra-'+idx).value=old;return;
+  }
+  const si=_signalTickers.indexOf(old);
+  if(si>=0) _signalTickers[si]=newSym;
+  saveTickerConfig();renderNewsTickerButtons();_renderCfgTickers();
+  _showCfgTickerMsg(`✅ Cambiado a ${newSym}`,'var(--green)');
+}
+
+function cfgAddExtraTicker(){
+  const extras=_signalTickers.filter(s=>!_mainTickers.includes(s));
+  if(extras.length>=3){_showCfgTickerMsg('⚠ Máximo 3 tickers adicionales','var(--red)');return;}
+  // Pick first available popular ticker not already in signal list
+  const next=POPULAR_TICKERS.find(t=>!_signalTickers.includes(t))||'QQQ';
+  _signalTickers.push(next);
+  saveTickerConfig();renderNewsTickerButtons();_renderCfgTickers();
+}
+
+function cfgRemoveExtraTicker(idx){
+  const extras=_signalTickers.filter(s=>!_mainTickers.includes(s));
+  const sym=extras[idx];
+  _signalTickers=_signalTickers.filter(s=>s!==sym);
+  saveTickerConfig();renderNewsTickerButtons();_renderCfgTickers();
+  _showCfgTickerMsg(`${sym} eliminado`,'var(--text3)');
+}
+
+function _showCfgTickerMsg(msg,color){
+  const r=document.getElementById('cfg-tickerResult');
+  if(r){r.style.color=color;r.textContent=msg;setTimeout(()=>{r.textContent='';},3000);}
+}
+
 // Guardar historial badge count (mantener sincronizado)
 function _syncHistBadge(){
   const entries=JSON.parse(localStorage.getItem('signal_historial')||'[]');
   const b=document.getElementById('histBadge');
   if(b){b.style.display=entries.length?'inline':'none';b.textContent=entries.length;}
+}
+
+// ── Render main ticker cards (calculadora) ────────────────────
+function renderMainTickerCards(){
+  const container=document.getElementById('mainTickerCards');
+  if(!container)return;
+  container.innerHTML=_mainTickers.map(sym=>{
+    const col=getTickerColor(sym);
+    // Load saved range
+    let range={min:'',max:''};
+    try{const s=localStorage.getItem('strike_range_'+sym);if(s)range=JSON.parse(s);}catch(e){}
+    const rangeStr=range.min&&range.max?`$${range.min}–$${range.max}`:'—';
+    return`<div onclick="openStrikeLog('${sym}','${col}')"
+      style="background:var(--bg3);border-radius:var(--r);padding:10px 8px;border-left:2px solid ${col};text-align:center;cursor:pointer;"
+      onmouseover="this.style.background='var(--bg4)'" onmouseout="this.style.background='var(--bg3)'">
+      <div style="font-size:12px;font-weight:700;color:${col};font-family:var(--mono);margin-bottom:4px;">${sym}</div>
+      <div id="range-${sym}" style="font-size:15px;font-weight:700;color:var(--text);font-family:var(--mono);">${rangeStr}</div>
+      <div id="avg-${sym}" style="font-size:15px;font-weight:700;font-family:var(--mono);color:#fff;margin-top:4px;">—</div>
+    </div>`;
+  }).join('');
+}
+// ── Render news ticker buttons ────────────────────────────────
+function renderNewsTickerButtons(){
+  const container=document.getElementById('newsTickerBtns');
+  if(!container)return;
+  const all=_signalTickers.filter((v,i,a)=>a.indexOf(v)===i); // dedupe
+  container.innerHTML=all.map(sym=>
+    `<button onclick="loadNews('${sym}')" class="news-ticker-btn" id="nbtn-${sym}">${sym}</button>`
+  ).join('')+
+  `<button onclick="loadNews('ALL')" class="news-ticker-btn" id="nbtn-ALL" style="color:var(--yellow);">ALL</button>`;
 }
 
 function saveGainPct(){try{localStorage.setItem('gainPct',document.getElementById('gainPct').value);}catch(e){}}
@@ -2340,7 +2483,7 @@ function renderStrikeLog(){
     </div>`;
 }
 function updateCardAverages(){
-  ['TSLA','GOOG','SPY'].forEach(ticker=>{
+  _mainTickers.forEach(ticker=>{
     const el=document.getElementById('avg-'+ticker);if(!el)return;
     let log=[];try{log=JSON.parse(localStorage.getItem('strikelog_'+ticker)||'[]');}catch(e){}
     if(!log.length){el.textContent='—';el.style.color='#fff';return;}
@@ -3870,7 +4013,7 @@ async function loadNews(ticker){
 
   try{
     let items=[];
-    const syms=ticker==='ALL'?['TSLA','GOOG','SPY','QQQ','AAPL','PLTR']:[ticker];
+    const syms=ticker==='ALL'?[..._signalTickers]:[ticker];
 
     for(const sym of syms){
       // Check cache (5min TTL)
@@ -3947,6 +4090,11 @@ async function init(){
   if(!getStoredPin()){
     try{localStorage.setItem('app_pin',_encodePin('2122'));}catch(e){}
   }
+  // Load ticker configuration (must be first — everything else reads from it)
+  loadTickerConfig();
+  renderMainTickerCards();
+  renderNewsTickerButtons();
+  updateCardAverages();
   // Restore Finnhub key
   // (dashboard_pin key deprecated — removed)
   // Clean old Telegram notification keys (keep only today's)
@@ -4346,6 +4494,7 @@ init();
       <button class="cfg-tab"        id="cfgTab-telegram"  onclick="switchCfgTab('telegram')" >✈️ Telegram</button>
       <button class="cfg-tab"        id="cfgTab-historial" onclick="switchCfgTab('historial')">📋 Historial</button>
       <button class="cfg-tab"        id="cfgTab-pin"       onclick="switchCfgTab('pin')"      >🔐 PIN</button>
+      <button class="cfg-tab"        id="cfgTab-tickers"   onclick="switchCfgTab('tickers')"  >🎛️ Tickers</button>
     </div>
 
     <!-- Body (scrollable) -->
@@ -4482,6 +4631,24 @@ init();
             ⚠️ Resetear PIN
           </button>
         </div>
+      </div>
+
+      <!-- ── TAB: Tickers ───────────────────────────────────── -->
+      <div id="cfgPanel-tickers" style="display:none;">
+        <div class="cfg-section-title">Panel principal (3 fijos)</div>
+        <div style="font-size:11px;color:var(--text3);margin-bottom:12px;">Estos 3 aparecen en las cards de la calculadora y Strike Log.</div>
+        <div id="cfg-mainTickers" style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px;"></div>
+
+        <div style="border-top:1px solid var(--border);margin:16px 0;"></div>
+
+        <div class="cfg-section-title">Señales adicionales (hasta 3 más)</div>
+        <div style="font-size:11px;color:var(--text3);margin-bottom:12px;">Se suman a los 3 del panel para el monitoreo de señales y noticias. Máximo 6 en total.</div>
+        <div id="cfg-extraTickers" style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px;"></div>
+        <button id="cfg-addExtraBtn" onclick="cfgAddExtraTicker()"
+          style="background:rgba(61,139,255,.15);border:1px solid rgba(61,139,255,.4);color:var(--blue);border-radius:var(--r);padding:7px 14px;font-size:12px;font-weight:700;cursor:pointer;">
+          + Agregar ticker
+        </button>
+        <div id="cfg-tickerResult" style="font-size:12px;margin-top:10px;min-height:16px;"></div>
       </div>
 
     </div><!-- /body -->

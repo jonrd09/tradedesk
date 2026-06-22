@@ -1156,7 +1156,7 @@ async function buildSignals(){
     const c15=closes(ohlc15),h15=highs(ohlc15),l15=lows(ohlc15);
     const n15=c15.length;
     const ma20_15=sma(c15,Math.min(20,n15-1));
-    const bb15=bollinger(c15);
+    const bb15=bollinger(c15,14); // 14 períodos: menos velas necesarias, reacciona más rápido
     const lP15=c15[n15-1],pP15=c15[n15-2]||c15[n15-1];
     const lMA20_15=ma20_15.filter(v=>v!=null).slice(-1)[0]||lP15;
     const lUp15 =bb15.upper.filter(v=>v!=null).slice(-1)[0]||lP15;
@@ -1213,8 +1213,8 @@ async function buildSignals(){
     // ── Volumen 15min ────────────────────────────────────────────────────────
     const vol15=ohlc15.v||[];
     // BB expandiéndose activamente: BBW subiendo en las últimas 3 velas
-    const bb15_prev1=bollinger(c15.slice(0,-1));
-    const bb15_prev2=bollinger(c15.slice(0,-2));
+    const bb15_prev1=bollinger(c15.slice(0,-1),14);
+    const bb15_prev2=bollinger(c15.slice(0,-2),14);
     const lBBW15_1=bb15_prev1.upper.filter(v=>v!=null).slice(-1)[0]&&bb15_prev1.lower.filter(v=>v!=null).slice(-1)[0]&&bb15_prev1.mid.filter(v=>v!=null).slice(-1)[0]?(bb15_prev1.upper.filter(v=>v!=null).slice(-1)[0]-bb15_prev1.lower.filter(v=>v!=null).slice(-1)[0])/bb15_prev1.mid.filter(v=>v!=null).slice(-1)[0]*100:0;
     const lBBW15_2=bb15_prev2.upper.filter(v=>v!=null).slice(-1)[0]&&bb15_prev2.lower.filter(v=>v!=null).slice(-1)[0]&&bb15_prev2.mid.filter(v=>v!=null).slice(-1)[0]?(bb15_prev2.upper.filter(v=>v!=null).slice(-1)[0]-bb15_prev2.lower.filter(v=>v!=null).slice(-1)[0])/bb15_prev2.mid.filter(v=>v!=null).slice(-1)[0]*100:0;
     const isExpanding15=(lBBW15-lBBW15_1)>0.03; // BB expanding — less strict
@@ -2306,12 +2306,13 @@ function saveStrikeEdit(ticker,idx){
 function renderStrikeLog(){
   const key='strikelog_'+_strikeTicker;let log=[];
   try{log=JSON.parse(localStorage.getItem(key)||'[]');}catch(e){}
-  const listEl=document.getElementById('strikeLogList');
-  const avgBox=document.getElementById('strikeAvgBox');
-  const avgDet=document.getElementById('strikeAvgDetail');
-  const avgGlb=document.getElementById('strikeAvgGlobal');
-  if(!log.length){listEl.innerHTML='<div style="text-align:center;padding:16px;color:var(--text3);font-size:12px;">Sin entradas — agrega tu primer registro</div>';avgBox.style.display='none';return;}
-  listEl.innerHTML=log.map((e,i)=>`<div style="display:flex;align-items:center;gap:6px;padding:7px 0;border-bottom:1px solid var(--border);font-size:13px;flex-wrap:wrap;" id="sentry-${i}">
+  const area=document.getElementById('strikeLogArea');
+  if(!area)return;
+  if(!log.length){
+    area.innerHTML='<div style="text-align:center;padding:16px;color:var(--text3);font-size:12px;">Sin entradas — agrega tu primer registro</div>';
+    return;
+  }
+  const listHTML=log.map((e,i)=>`<div style="display:flex;align-items:center;gap:6px;padding:7px 0;border-bottom:1px solid var(--border);font-size:13px;flex-wrap:wrap;" id="sentry-${i}">
     <span style="min-width:72px;color:var(--text);font-weight:600;">${e.day}</span>
     <span style="font-size:11px;color:var(--text3);min-width:76px;">${e.date||''}</span>
     <span style="font-size:11px;color:var(--blue);min-width:58px;font-family:var(--mono);">${e.time||''}</span>
@@ -2321,16 +2322,22 @@ function renderStrikeLog(){
     <button onclick="editStrikeEntry('${_strikeTicker}',${i})" style="background:none;border:none;color:var(--blue);cursor:pointer;font-size:12px;padding:0 4px;">✏️</button>
     <button onclick="deleteStrikeEntry('${_strikeTicker}',${i})" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:12px;padding:0 4px;">✕</button>
   </div>`).join('');
+  // Promedios por día
   const byDay={};log.forEach(e=>{if(!byDay[e.day])byDay[e.day]=[];byDay[e.day].push(e.dist);});
   const dayOrder=['Lunes','Martes','Miércoles','Jueves','Viernes'];
-  avgDet.innerHTML=dayOrder.filter(d=>byDay[d]).map(d=>{
+  const avgDetHTML=dayOrder.filter(d=>byDay[d]).map(d=>{
     const avg=(byDay[d].reduce((a,b)=>a+b,0)/byDay[d].length).toFixed(1);
     return`<div style="text-align:center;"><div style="font-size:11px;color:var(--text);font-weight:600">${d}</div><div style="font-size:18px;font-weight:700;font-family:var(--mono);color:${_strikeColor}">${avg}</div><div style="font-size:10px;color:var(--text3)">${byDay[d].length} reg.</div></div>`;
   }).join('');
   const all=log.map(e=>e.dist);
   const gAvg=(all.reduce((a,b)=>a+b,0)/all.length).toFixed(1);
-  avgGlb.innerHTML=`<span style="font-size:13px;color:var(--text)">Promedio global: <strong style="font-size:15px;font-family:var(--mono);color:${_strikeColor}">${gAvg>0?'+':''}${gAvg}</strong> · ${log.length} registro${log.length>1?'s':''}</span>`;
-  avgBox.style.display='block';
+  const avgGlbHTML=`<span style="font-size:13px;color:var(--text)">Promedio global: <strong style="font-size:15px;font-family:var(--mono);color:${_strikeColor}">${gAvg>0?'+':''}${gAvg}</strong> · ${log.length} registro${log.length>1?'s':''}</span>`;
+  area.innerHTML=`
+    <div id="strikeLogList" style="padding:0 16px;">${listHTML}</div>
+    <div id="strikeAvgBox" style="padding:12px 16px;border-top:1px solid var(--border);margin-top:4px;">
+      <div id="strikeAvgDetail" style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:8px;">${avgDetHTML}</div>
+      <div id="strikeAvgGlobal">${avgGlbHTML}</div>
+    </div>`;
 }
 function updateCardAverages(){
   ['TSLA','GOOG','SPY'].forEach(ticker=>{

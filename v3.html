@@ -1316,7 +1316,7 @@ async function buildSignals(){
 
     // Para el gráfico miniatura, excluir la última vela si es sintética (evita caída abrupta)
     const _c15chart=c15.length>30?c15.slice(-31,-1):c15.slice(-30);
-    const meta={sym,price:realPrice,pct:realPct,dataLabel:'📡 Schwab',name:DEFAULTS[sym].name,
+    const meta={sym,price:realPrice,pct:realPct,dataLabel:'📡 Schwab',name:(DEFAULTS[sym]&&DEFAULTS[sym].name)||sym,
       _c15:_c15chart,_bb15_up:bb15.upper.filter(v=>v!=null).slice(-30),
       _bb15_lo:bb15.lower.filter(v=>v!=null).slice(-30)
     };
@@ -2594,11 +2594,15 @@ const NEWS_KEYWORDS_SHOW=[
 // Patrones clickbait que OCULTAN la noticia aunque tenga keyword
 const NEWS_KEYWORDS_HIDE=[
   "here's why","top stocks","best stocks","should you buy","is it time",
+  "it's time to buy","it's time to sell","its time to buy","its time to sell",
+  "time to buy","time to sell","too late to buy","too late to sell",
+  "is soaring","is it too late","never too late",
   "analysts say","wall street says","experts say","3 reasons","5 reasons",
   "10 reasons","why i ","the case for","opinion:","commentary:","my top",
   "you need to know","what you need","etf zoo","stocks to watch",
   "don't miss","must read","need to know","trading lower today",
-  "trading higher today","are trading","picks up momentum"
+  "trading higher today","are trading","picks up momentum",
+  "soaring. is it","is it too","should i buy","should i sell"
 ];
 
 function newsPassesFilter(title){

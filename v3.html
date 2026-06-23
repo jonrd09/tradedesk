@@ -664,11 +664,46 @@ async function fetchSchwabCandles(sym,freqType,freq,bars=50){
   for(const cfg of configs){
     try{
       const fetchBars=cfg._merge1h?bars*2:bars;
-      const _startDate=new Date();
-      _startDate.setDate(_startDate.getDate()-10); // últimos 10 días
-      _startDate.setHours(0,0,0,0);
-      const _startMs=_startDate.getTime();
-      const url=`${SCHWAB_API_BASE}/pricehistory?symbol=${sym}&periodType=${cfg.periodType}&period=${cfg.period}&frequencyType=${cfg.frequencyType}&frequency=${cfg.frequency}&needExtendedHoursData=true&startDate=${_startMs}`;
+      // Para intraday: pedir sin startDate fijo (Schwab decide el rango según period)
+      // Para Daily: usar período más largo para tener historia suficiente (min 20 velas para MA20)
+      const url=`${SCHWAB_API_BASE}/pricehistory?symbol=${sym}&periodType=${cfg.periodType}&period=${cfg.period}&frequencyType=${cfg.frequencyType}&frequency=${cfg.frequency}&needExtendedHoursData=true`;
+      // Inyectar vela de hoy si los datos históricos son de ayer o antes (solo para intraday)
+      // Schwab /pricehistory tiene delay en el día actual — usamos /quotes para la vela actual
+      async function _injectTodayCandle(candles){
+        if(cfg.frequencyType!=='minute')return candles;
+        const last=candles[candles.length-1];
+        if(!last)return candles;
+        const lastDt=new Date(last.datetime);
+        const lastEt=new Date(lastDt.toLocaleString('en-US',{timeZone:'America/New_York'}));
+        const nowEt=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+        // Si la última vela es de hoy → no necesita inyección
+        if(lastEt.toDateString()===nowEt.toDateString())return candles;
+        // Mercado debe estar abierto para que tenga sentido inyectar
+        const nowMins=nowEt.getHours()*60+nowEt.getMinutes();
+        if(nowMins<570||nowMins>=960)return candles; // fuera de horario
+        try{
+          const tok=await getSchwabToken();
+          if(!tok)return candles;
+          const qr=await fetch(`${SCHWAB_API_BASE}/quotes?symbols=${sym}&fields=quote`,{
+            headers:{'Authorization':'Bearer '+tok},signal:AbortSignal.timeout(5000)
+          });
+          if(!qr.ok)return candles;
+          const qd=await qr.json();
+          const q=qd[sym]?.quote;
+          if(!q||!q.lastPrice)return candles;
+          // Crear vela sintética con los datos del día actual
+          const todayCandle={
+            datetime:Date.now(),
+            open:q.openPrice||q.lastPrice,
+            high:q.highPrice||q.lastPrice,
+            low:q.lowPrice||q.lastPrice,
+            close:q.lastPrice,
+            volume:q.totalVolume||0
+          };
+          addLog('debug','Schwab',`${sym} vela hoy inyectada: $${q.lastPrice} (O:${q.openPrice} H:${q.highPrice} L:${q.lowPrice})`);
+          return[...candles,todayCandle];
+        }catch(e){return candles;}
+      }
       const r=await fetch(url,{headers:{'Authorization':'Bearer '+token},signal:AbortSignal.timeout(7000)});
       if(!r.ok){
         // Only log if this is the LAST config (no more fallbacks)
@@ -681,6 +716,7 @@ async function fetchSchwabCandles(sym,freqType,freq,bars=50){
       const d=await r.json();
       if(!d.candles||!d.candles.length){continue;}
       let candles=d.candles;
+      candles=await _injectTodayCandle(candles);
       // Merge 30min pairs into 1H candles if needed
       if(cfg._merge1h&&cfg.frequency===30){
         const merged=[];

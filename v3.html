@@ -692,13 +692,19 @@ async function fetchSchwabCandles(sym,freqType,freq,bars=50){
           const q=qd[sym]?.quote;
           if(!q||!q.lastPrice)return candles;
           // Crear vela sintética con los datos del día actual
+          // Calcular volumen promedio de las últimas 10 velas para normalizar
+          const _recentVols=candles.slice(-10).map(c=>c.volume||0).filter(v=>v>0);
+          const _avgVol=_recentVols.length?_recentVols.reduce((a,b)=>a+b,0)/_recentVols.length:0;
+          // Usar 110% del promedio como volumen de la vela sintética (activo pero no exagerado)
+          const _syntheticVol=_avgVol>0?Math.round(_avgVol*1.1):(q.totalVolume||0);
           const todayCandle={
             datetime:Date.now(),
             open:q.openPrice||q.lastPrice,
             high:q.highPrice||q.lastPrice,
             low:q.lowPrice||q.lastPrice,
             close:q.lastPrice,
-            volume:q.totalVolume||0
+            volume:_syntheticVol,
+            _synthetic:true
           };
           addLog('debug','Schwab',`${sym} vela hoy inyectada: $${q.lastPrice} (O:${q.openPrice} H:${q.highPrice} L:${q.lowPrice})`);
           return[...candles,todayCandle];
@@ -1308,8 +1314,10 @@ async function buildSignals(){
     const dailyBearish=bearDays>=2; // al menos 2 de 3 días bajistas
     const dailyBullish=bullDays>=2; // al menos 2 de 3 días alcistas
 
+    // Para el gráfico miniatura, excluir la última vela si es sintética (evita caída abrupta)
+    const _c15chart=c15.length>30?c15.slice(-31,-1):c15.slice(-30);
     const meta={sym,price:realPrice,pct:realPct,dataLabel:'📡 Schwab',name:DEFAULTS[sym].name,
-      _c15:c15.slice(-30),_bb15_up:bb15.upper.filter(v=>v!=null).slice(-30),
+      _c15:_c15chart,_bb15_up:bb15.upper.filter(v=>v!=null).slice(-30),
       _bb15_lo:bb15.lower.filter(v=>v!=null).slice(-30)
     };
 

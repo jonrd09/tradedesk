@@ -1565,7 +1565,7 @@ async function buildSignals(){
         const _ctKey=`ctma20_bull_${sym}_${new Date().toLocaleDateString('es-PR')}`;
         if(_debugMode||!sessionStorage.getItem(_ctKey)){
           if(!_debugMode)sessionStorage.setItem(_ctKey,'1');
-          all.push({...meta,code:'CT-MA20',name:'Cambio Tendencia MA20 — CALL',type:'call',reqs:[
+          all.push({...meta,code:'CT-MA20',name:'Cambio Tendencia MA20 — CALL',type:'call',threshold:60,reqs:[
             {ok:prevBelowMA20_1h, tf:'1H', text:`Vela anterior bajo MA20 1H ($${lMA20_1h.toFixed(2)})`},
             {ok:nowAboveMA20_1h,  tf:'1H', text:`Precio actual sobre MA20 1H: $${lP1h.toFixed(2)}`},
             {ok:confirmCallCandle,tf:'1H', text:`Vela alcista de confirmación`},
@@ -1578,7 +1578,7 @@ async function buildSignals(){
         const _ctKey=`ctma20_bear_${sym}_${new Date().toLocaleDateString('es-PR')}`;
         if(_debugMode||!sessionStorage.getItem(_ctKey)){
           if(!_debugMode)sessionStorage.setItem(_ctKey,'1');
-          all.push({...meta,code:'CT-MA20',name:'Cambio Tendencia MA20 — PUT',type:'put',reqs:[
+          all.push({...meta,code:'CT-MA20',name:'Cambio Tendencia MA20 — PUT',type:'put',threshold:60,reqs:[
             {ok:prevAboveMA20_1h, tf:'1H', text:`Vela anterior sobre MA20 1H ($${lMA20_1h.toFixed(2)})`},
             {ok:nowBelowMA20_1h,  tf:'1H', text:`Precio actual bajo MA20 1H: $${lP1h.toFixed(2)}`},
             {ok:confirmPutCandle, tf:'1H', text:`Vela bajista de confirmación`},
@@ -1682,7 +1682,7 @@ async function buildSignals(){
       if(_debugMode)return true;
       if(s.weighted)return s.pct>=(s.threshold||70); // umbral ponderado
       if(s.isSetup)return s.pct>=60;
-      return s.pct>=75; // estrategias legacy
+      return s.pct>=(s.threshold||75); // usar threshold si está definido
     })
     // Bloquear señales ya expiradas en esta sesión — evita que reaparezcan aunque los datos las regeneren
     .filter(s=>{

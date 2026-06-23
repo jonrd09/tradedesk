@@ -78,6 +78,8 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
 .key-title{font-size:18px;font-weight:700;margin-bottom:6px;}
 .key-sub{font-size:12px;color:var(--text2);margin-bottom:18px;line-height:1.6;}
 .key-row{display:flex;gap:10px;margin-top:14px;}
+@keyframes insiderBlink{0%,100%{opacity:1}50%{opacity:0}}
+.insider-blink{animation:insiderBlink 1s infinite;}
 /* PIN */
 .cfg-tab{background:none;border:none;border-bottom:2px solid transparent;color:var(--text3);padding:10px 16px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;transition:.15s;}
 .cfg-tab:hover{color:var(--text);}
@@ -175,7 +177,17 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
   <!-- Header -->
   <div style="padding:10px 12px;border-bottom:1px solid var(--border);flex-shrink:0;">
     <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
-      <div style="font-size:14px;font-weight:700;color:#fff;">📰 Noticias</div>
+      <div style="display:flex;align-items:center;gap:6px;">
+        <button id="tabNoticias" onclick="switchNewsTab('noticias')"
+          style="font-size:13px;font-weight:700;color:#fff;background:none;border:none;cursor:pointer;padding:2px 6px;border-bottom:2px solid #fff;">
+          📰 Noticias
+        </button>
+        <button id="tabInsiders" onclick="switchNewsTab('insiders')"
+          style="font-size:13px;font-weight:700;color:var(--text3);background:none;border:none;cursor:pointer;padding:2px 6px;border-bottom:2px solid transparent;position:relative;">
+          🔴 Insiders
+          <span id="insiderBadge" style="display:none;position:absolute;top:-4px;right:-4px;width:8px;height:8px;background:var(--red);border-radius:50%;"></span>
+        </button>
+      </div>
       <div style="display:flex;gap:4px;flex-wrap:wrap;" id="newsTickerBtns">
         <!-- populated by renderNewsTickerButtons() -->
       </div>
@@ -187,6 +199,8 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
       Selecciona un ticker para ver noticias
     </div>
   </div>
+  <!-- Insider feed (hidden by default) -->
+  <div id="insiderArea" style="display:none;flex:1;overflow-y:auto;padding:8px 10px;"></div>
 </aside>
 <!-- CENTER: Signals -->
 <div class="center-panel">
@@ -2369,6 +2383,123 @@ function clearLogs(){
   renderLogPanel();
 }
 
+// ═══════════════════════════════════════════════════════════════
+// NOTICIAS + INSIDERS — tabs y filtros
+// ═══════════════════════════════════════════════════════════════
+let _newsTab='noticias';
+
+function switchNewsTab(tab){
+  _newsTab=tab;
+  const tN=document.getElementById('tabNoticias');
+  const tI=document.getElementById('tabInsiders');
+  const nA=document.getElementById('newsArea');
+  const iA=document.getElementById('insiderArea');
+  if(tab==='noticias'){
+    if(tN){tN.style.color='#fff';tN.style.borderBottomColor='#fff';}
+    if(tI){tI.style.color='var(--text3)';tI.style.borderBottomColor='transparent';}
+    if(nA)nA.style.display='block';
+    if(iA)iA.style.display='none';
+    // Mostrar ticker buttons
+    const btns=document.getElementById('newsTickerBtns');
+    if(btns)btns.style.display='flex';
+  }else{
+    if(tN){tN.style.color='var(--text3)';tN.style.borderBottomColor='transparent';}
+    if(tI){tI.style.color='#ff4d6d';tI.style.borderBottomColor='#ff4d6d';}
+    if(nA)nA.style.display='none';
+    if(iA)iA.style.display='block';
+    // Ocultar ticker buttons (no aplican a insiders)
+    const btns=document.getElementById('newsTickerBtns');
+    if(btns)btns.style.display='none';
+    // Limpiar badge
+    const badge=document.getElementById('insiderBadge');
+    if(badge){badge.style.display='none';badge.classList.remove('insider-blink');}
+    const tabBtn=document.getElementById('tabInsiders');
+    if(tabBtn)tabBtn.classList.remove('insider-blink');
+    renderInsiderCards();
+  }
+}
+
+// Palabras clave que SÍ muestran la noticia
+const NEWS_KEYWORDS_SHOW=[
+  'acquisition','merger','takeover','buyout','partnership','deal','contract','agreement',
+  'ceo','cfo','coo','executive','insider','buys shares','sells shares','purchased shares',
+  'earnings','revenue','guidance','outlook','forecast','beats','misses','beat','miss',
+  'sec filing','sec ','fda','lawsuit','settlement','fine','penalty','investigation',
+  'layoffs','restructuring','spinoff','ipo','buyback','repurchase','dividend',
+  'upgrade','downgrade','price target','raises','lowers','cuts','increases',
+  'raised','lowered','record','surge','plunge','crash','soar','rally',
+  'appoints','names','hires','resigns','fired','steps down','joins',
+  'patent','license','regulator','antitrust','breakup','charges'
+];
+// Patrones clickbait que OCULTAN la noticia aunque tenga keyword
+const NEWS_KEYWORDS_HIDE=[
+  "here's why","top stocks","best stocks","should you buy","is it time",
+  "analysts say","wall street says","experts say","3 reasons","5 reasons",
+  "10 reasons","why i ","the case for","opinion:","commentary:","my top",
+  "you need to know","what you need","etf zoo","stocks to watch",
+  "don't miss","must read","need to know","trading lower today",
+  "trading higher today","are trading","picks up momentum"
+];
+
+function newsPassesFilter(title){
+  if(!title)return false;
+  const t=title.toLowerCase();
+  // Primero verificar si tiene patrón de clickbait — si sí, ocultar
+  if(NEWS_KEYWORDS_HIDE.some(k=>t.includes(k)))return false;
+  // Luego verificar si tiene palabra clave relevante — si sí, mostrar
+  if(NEWS_KEYWORDS_SHOW.some(k=>t.includes(k)))return true;
+  return false;
+}
+
+// Render de tarjetas de insiders filtradas (CEO/CFO, >$100K)
+function renderInsiderCards(){
+  const area=document.getElementById('insiderArea');
+  if(!area)return;
+  const data=(_insiderData||[]).filter(d=>{
+    // Solo CEO y CFO
+    const title=(d.title||'').toLowerCase();
+    const isCeoOrCfo=title.includes('ceo')||title.includes('chief executive')||
+                     title.includes('cfo')||title.includes('chief financial');
+    if(!isCeoOrCfo)return false;
+    // Solo transacciones >$100K (shares * precio estimado — usamos shares como proxy)
+    // Finnhub devuelve 'shares' como número de acciones y 'value' si está disponible
+    const val=Math.abs(d.value||d.shares||0);
+    return val>=100000||Math.abs(d.shares||0)>=500; // >500 shares o >$100K valor
+  });
+
+  if(!data.length){
+    area.innerHTML='<div style="text-align:center;padding:20px;color:var(--text3);font-size:12px;">Sin transacciones de CEO/CFO mayores a $100K esta semana</div>';
+    return;
+  }
+  area.innerHTML=data.map(d=>{
+    const isBuy=d.type==='P';
+    const accentColor=isBuy?'rgba(0,209,122,.25)':'rgba(255,77,109,.25)';
+    const borderColor=isBuy?'rgba(0,209,122,.5)':'rgba(255,77,109,.5)';
+    const label=isBuy?'COMPRA':'VENTA';
+    const labelColor=isBuy?'var(--green)':'var(--red)';
+    const shares=Math.abs(d.shares||0).toLocaleString();
+    const val=d.value?`$${Math.abs(d.value).toLocaleString()}`:shares+' acc.';
+    return`<div style="background:rgba(255,182,193,.08);border:1px solid rgba(255,182,193,.25);border-left:3px solid ${borderColor};border-radius:var(--r);padding:10px 12px;margin-bottom:8px;">
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;flex-wrap:wrap;">
+        <span style="font-size:12px;font-weight:700;color:${getTickerColor(d.sym)||'var(--blue)'};">${d.sym}</span>
+        <span style="font-size:11px;font-weight:700;color:${labelColor};background:${accentColor};padding:1px 7px;border-radius:10px;">${label}</span>
+        <span style="font-size:11px;color:var(--text2);margin-left:auto;">${d.date}</span>
+      </div>
+      <div style="font-size:13px;color:var(--text);font-weight:600;margin-bottom:2px;">${d.name}</div>
+      <div style="font-size:11px;color:var(--text3);">${d.title} · ${val}</div>
+    </div>`;
+  }).join('');
+}
+
+// Activar parpadeo en el botón de Insiders cuando llega data nueva
+function notifyInsiderUpdate(count){
+  if(!count||_newsTab==='insiders')return;
+  const badge=document.getElementById('insiderBadge');
+  const tabBtn=document.getElementById('tabInsiders');
+  if(badge){badge.style.display='block';badge.classList.add('insider-blink');}
+  if(tabBtn){tabBtn.classList.add('insider-blink');tabBtn.style.color='#ff4d6d';}
+}
+
 function saveGainPct(){try{localStorage.setItem('gainPct',document.getElementById('gainPct').value);}catch(e){}}
 // Niveles técnicos por ticker: ATH, LAST HIGH, LAST LOW (avisan en Telegram a 2%)
 function saveStrikeLevels(){
@@ -2723,8 +2854,14 @@ async function loadInsiderData(forceRefresh=false){
   }
   _insiderData.sort((a,b)=>b.date.localeCompare(a.date));
   _insiderData=_insiderData.filter(r=>r.type==='P'||r.type==='S');
-  _saveInsiderCache(_insiderData); // persist for the week
+  _saveInsiderCache(_insiderData);
   checkInsiderAlert();
+  // Notificar al panel de noticias si hay insiders CEO/CFO >$100K
+  const relevantCount=_insiderData.filter(d=>{
+    const t=(d.title||'').toLowerCase();
+    return(t.includes('ceo')||t.includes('chief executive')||t.includes('cfo')||t.includes('chief financial'))&&Math.abs(d.shares||0)>=500;
+  }).length;
+  if(relevantCount>0)notifyInsiderUpdate(relevantCount);
   renderInsiderTable(_insiderData);
   const upEl=document.getElementById('insiderLastUpdate');
   if(upEl)upEl.textContent=`✅ Actualizado: ${new Date().toLocaleDateString('es-PR')} · ${_insiderData.length} transacciones · Próxima actualización: lunes`;
@@ -4169,8 +4306,15 @@ async function loadNews(ticker){
     // Sort by date descending
     items.sort((a,b)=>new Date(b.pubDate)-new Date(a.pubDate));
 
+    // Filtrar noticias por palabras clave — solo mostrar las relevantes
+    const filtered=items.filter(item=>newsPassesFilter(item.title));
+    if(!filtered.length){
+      area.innerHTML='<div style="text-align:center;padding:20px;color:var(--text3);font-size:12px;">Sin noticias relevantes en este momento.<br><span style="font-size:11px;">Solo se muestran: adquisiciones, ejecutivos, earnings, partnerships, etc.</span></div>';
+      return;
+    }
+
     // Render
-    area.innerHTML=items.map(item=>{
+    area.innerHTML=filtered.map(item=>{
       const col=NEWS_COLORS[item.sym]||'var(--blue)';
       const dt=item.pubDate?new Date(item.pubDate):null;
       const timeStr=dt?dt.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true,timeZone:'America/New_York'})+' ET':'';

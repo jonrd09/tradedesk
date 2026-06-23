@@ -664,7 +664,11 @@ async function fetchSchwabCandles(sym,freqType,freq,bars=50){
   for(const cfg of configs){
     try{
       const fetchBars=cfg._merge1h?bars*2:bars;
-      const url=`${SCHWAB_API_BASE}/pricehistory?symbol=${sym}&periodType=${cfg.periodType}&period=${cfg.period}&frequencyType=${cfg.frequencyType}&frequency=${cfg.frequency}&needExtendedHoursData=true`;
+      const _startDate=new Date();
+      _startDate.setDate(_startDate.getDate()-10); // últimos 10 días
+      _startDate.setHours(0,0,0,0);
+      const _startMs=_startDate.getTime();
+      const url=`${SCHWAB_API_BASE}/pricehistory?symbol=${sym}&periodType=${cfg.periodType}&period=${cfg.period}&frequencyType=${cfg.frequencyType}&frequency=${cfg.frequency}&needExtendedHoursData=true&startDate=${_startMs}`;
       const r=await fetch(url,{headers:{'Authorization':'Bearer '+token},signal:AbortSignal.timeout(7000)});
       if(!r.ok){
         // Only log if this is the LAST config (no more fallbacks)

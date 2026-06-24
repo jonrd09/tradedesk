@@ -2596,11 +2596,10 @@ function updateFinnhubBtn(active){
 // CONFIGURACIÓN MODAL
 // ═══════════════════════════════════════════════════════════════
 function openConfigModal(){
-  requirePin(()=>{
-    _loadCfgFields();
-    document.getElementById('configModal').style.display='flex';
-    switchCfgTab('apis');
-  },'PIN para acceder a Configuración');
+  // PIN removido de Configuration — acceso directo
+  _loadCfgFields();
+  document.getElementById('configModal').style.display='flex';
+  switchCfgTab('apis');
 }
 function closeConfigModal(){
   document.getElementById('configModal').style.display='none';

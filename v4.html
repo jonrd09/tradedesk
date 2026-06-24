@@ -5074,66 +5074,75 @@ async function loadIndicesPanel(force=false){
   _idxLoading=true;
   const btn=document.getElementById('idxRefreshBtn');
   if(btn){btn.textContent='⟳…';btn.style.opacity='.6';}
-  area.innerHTML='<div class="idx-loading">⟳ Obteniendo datos de Schwab…</div>';
 
+  // ── FASE 1: Finnhub primero (precios reales) ─────────────────────────────
+  // Independiente de Schwab — siempre corre aunque Schwab no esté disponible
+  // Renderizar inmediatamente con precios aunque no haya sparklines todavía
+  area.innerHTML='<div class="idx-loading">⟳ Obteniendo precios Finnhub…</div>';
+  for(const idx of IDX_SYMS){
+    // Inicializar cache si no existe
+    if(!_idxCache[idx.sym]) _idxCache[idx.sym]={closes:null,price:null,pct:null,ts:0};
+
+    // Primero intentar _livePrices (ya cargado por loadLivePrices)
+    const _lp=_livePrices[idx.sym];
+    if(_lp&&_lp.price>0){
+      _idxCache[idx.sym].price=_lp.price;
+      _idxCache[idx.sym].pct=_lp.pct;
+    }else{
+      // fetchRotationQuote directamente — 600ms entre llamadas para rate limit
+      try{
+        const q=await fetchRotationQuote(idx.sym).catch(()=>null);
+        if(q&&q.price>0){
+          _idxCache[idx.sym].price=q.price;
+          _idxCache[idx.sym].pct=q.pct;
+          addLog('debug','Índices',`${idx.sym} → Finnhub $${q.price.toFixed(2)} (${q.pct>=0?'+':''}${q.pct.toFixed(2)}%)`);
+        }
+      }catch(e){}
+      await new Promise(r=>setTimeout(r,600));
+    }
+  }
+  // Render inmediatamente con precios Finnhub — aunque sparklines no estén aún
+  _idxCache.__pricesTs=Date.now();
+  renderIndicesPanel();
+
+  // ── FASE 2: Schwab sparklines (forma de la curva) ────────────────────────
+  // Solo si hay token disponible — no bloquea la pantalla si falla
+  area.innerHTML+=''; // keep current render visible
   const schwabToken=await getSchwabToken();
   if(!schwabToken){
-    area.innerHTML='<div class="idx-loading" style="color:var(--red);">Sin conexión Schwab — conecta primero</div>';
+    // Precios ya están visibles — solo avisar que sparklines no disponibles
+    addLog('warn','Índices','Sin token Schwab — sparklines no disponibles, precios Finnhub mostrados');
+    // Mostrar cards sin sparkline (solo precio/pct)
+    for(const idx of IDX_SYMS){
+      if(_idxCache[idx.sym]) _idxCache[idx.sym].closes=null;
+    }
+    renderIndicesPanel();
     _idxLoading=false;
     if(btn){btn.textContent='⟳ Actualizar';btn.style.opacity='1';}
     return;
   }
 
-  // Fetch 15min candles for each index sequentially (respect rate limits)
+  // Fetch sparklines secuencialmente con timeout generoso (12s por símbolo)
   for(const idx of IDX_SYMS){
     try{
-      // Use fetchSchwabCandles with existing freshness guards
       const data=await Promise.race([
         fetchSchwabCandles(idx.sym,'minute',15,30),
-        new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),8000))
+        new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),12000))
       ]).catch(()=>null);
 
       if(data&&data.c&&data.c.length>=5){
-        const closes=data.c;
-
-        // Precio y % SOLO de Finnhub — Schwab closes solo para la sparkline
-        // Si Finnhub no tiene precio → price:null → se muestra "—" en la card
-        // Esto evita mostrar precios incorrectos de Schwab (SPY $733, QQQ $713, etc.)
-        const _lp=_livePrices[idx.sym];
-        const displayPrice=(_lp&&_lp.price>0)?_lp.price:null;
-        const displayPct=(_lp&&_lp.pct!=null)?_lp.pct:null;
-
-        // También intentar fetchRotationQuote si _livePrices no tiene este ticker
-        // (los índices IWM y DIA pueden no estar en _signalTickers)
-        let _fetchedQ=null;
-        if(!displayPrice){
-          try{
-            _fetchedQ=await fetchRotationQuote(idx.sym).catch(()=>null);
-          }catch(e){}
-        }
-        const finalPrice=displayPrice||(_fetchedQ&&_fetchedQ.price>0?_fetchedQ.price:null);
-        const finalPct=displayPct!==null?displayPct:(_fetchedQ&&_fetchedQ.pct!=null?_fetchedQ.pct:null);
-
-        _idxCache[idx.sym]={
-          closes,                    // sparkline shape only
-          price:finalPrice,          // null if no Finnhub data
-          pct:finalPct,              // null if no Finnhub data
-          ts:Date.now()
-        };
-        if(finalPrice!=null){
-          addLog('debug','Índices',`${idx.sym} → ${closes.length} velas · $${finalPrice.toFixed(2)} (${finalPct>=0?'+':''}${finalPct.toFixed(2)}%) [Finnhub]`);
-        }else{
-          addLog('debug','Índices',`${idx.sym} → ${closes.length} velas (sin precio Finnhub — sparkline disponible)`);
-        }
+        if(!_idxCache[idx.sym]) _idxCache[idx.sym]={price:null,pct:null,ts:Date.now()};
+        _idxCache[idx.sym].closes=data.c;
+        _idxCache[idx.sym].ts=Date.now();
+        addLog('debug','Índices',`${idx.sym} → sparkline ${data.c.length} velas [Schwab]`);
+        // Re-render after each sparkline arrives (progressive)
+        renderIndicesPanel();
       }else{
-        addLog('warn','Índices',`${idx.sym} → sin datos disponibles`);
-        _idxCache[idx.sym]=null;
+        addLog('warn','Índices',`${idx.sym} → sin sparkline de Schwab`);
       }
     }catch(e){
-      addLog('warn','Índices',`${idx.sym} → error: ${e.message}`);
-      _idxCache[idx.sym]=null;
+      addLog('warn','Índices',`${idx.sym} sparkline error: ${e.message}`);
     }
-    // 300ms between requests
     await new Promise(r=>setTimeout(r,300));
   }
 
@@ -5146,9 +5155,10 @@ function renderIndicesPanel(){
   const area=document.getElementById('idxArea');
   if(!area)return;
 
-  const available=IDX_SYMS.filter(x=>_idxCache[x.sym]);
+  // Show panel if at least one ticker has price data (closes not required)
+  const available=IDX_SYMS.filter(x=>_idxCache[x.sym]&&(_idxCache[x.sym].price!==null||_idxCache[x.sym].closes));
   if(!available.length){
-    area.innerHTML='<div class="idx-loading">Sin datos — conecta Schwab y actualiza</div>';
+    area.innerHTML='<div class="idx-loading">Sin datos — verifica conexión Finnhub y Schwab</div>';
     return;
   }
 
@@ -5199,16 +5209,38 @@ function renderIndicesPanel(){
     const pctNote=!hasPct?`<span style="font-size:9px;color:var(--text3);margin-left:4px;">sin Finnhub</span>`:'';
     const dirArrow=hasPct?(up?'▲':'▼'):'●';
 
-    // Build SVG sparkline from Schwab closes (shape only — not used for price labels)
+    // Build SVG sparkline if Schwab closes available, otherwise show loading bar
     const closes=d.closes;
-    const n=closes.length;
-    const minV=Math.min(...closes)*0.9995;
-    const maxV=Math.max(...closes)*1.0005;
     const W=110,H=38;
-    const px=i=>Math.round(i/(n-1)*(W-2)+1);
-    const py=v=>Math.round(H-(v-minV)/(maxV-minV)*H);
-    const pts=closes.map((v,i)=>`${px(i)},${py(v)}`).join(' ');
-    const fillPts=`${px(0)},${H} `+pts+` ${px(n-1)},${H}`;
+    let sparkSVG='';
+    let velaLabel='cargando…';
+    if(closes&&closes.length>=5){
+      const n=closes.length;
+      const minV=Math.min(...closes)*0.9995;
+      const maxV=Math.max(...closes)*1.0005;
+      const px=i=>Math.round(i/(n-1)*(W-2)+1);
+      const py=v=>maxV===minV?H/2:Math.round(H-(v-minV)/(maxV-minV)*H);
+      const pts=closes.map((v,i)=>`${px(i)},${py(v)}`).join(' ');
+      const fillPts=`${px(0)},${H} `+pts+` ${px(n-1)},${H}`;
+      sparkSVG=`<svg class="idx-spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"
+        role="img" aria-label="${idx.sym} sparkline del día">
+        <polygon points="${fillPts}" fill="${fillCol}"/>
+        <polyline points="${pts}" fill="none" stroke="${lineCol}" stroke-width="1.5"
+          stroke-linejoin="round" stroke-linecap="round"/>
+        <circle cx="${px(closes.length-1)}" cy="${py(closes[closes.length-1])}" r="2" fill="${lineCol}"/>
+      </svg>`;
+      velaLabel=`${dirArrow} ${n} velas`;
+    }else{
+      // No sparkline yet — show animated loading placeholder
+      sparkSVG=`<svg class="idx-spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"
+        role="img" aria-label="${idx.sym} cargando sparkline">
+        <rect x="0" y="${H/2-1}" width="${W}" height="2" fill="rgba(255,255,255,.1)" rx="1"/>
+        <rect x="0" y="${H/2-1}" width="30" height="2" fill="${lineCol}" rx="1" opacity="0.5">
+          <animate attributeName="x" from="0" to="${W}" dur="1.5s" repeatCount="indefinite"/>
+        </rect>
+      </svg>`;
+      velaLabel='⟳ cargando';
+    }
 
     return`<div class="idx-card ${cls}">
       <div class="idx-top">
@@ -5216,16 +5248,10 @@ function renderIndicesPanel(){
         <span class="idx-pct" style="color:${pctCol};">${pctStr}${pctNote}</span>
       </div>
       <div class="idx-price">${priceStr} · ${idx.name}</div>
-      <svg class="idx-spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"
-        role="img" aria-label="${idx.sym} sparkline del día">
-        <polygon points="${fillPts}" fill="${fillCol}"/>
-        <polyline points="${pts}" fill="none" stroke="${lineCol}" stroke-width="1.5"
-          stroke-linejoin="round" stroke-linecap="round"/>
-        <circle cx="${px(n-1)}" cy="${py(closes[n-1])}" r="2" fill="${lineCol}"/>
-      </svg>
+      ${sparkSVG}
       <div class="idx-time">
         <span>apertura</span>
-        <span>${dirArrow} ${n} velas</span>
+        <span>${velaLabel}</span>
         <span>cierre</span>
       </div>
     </div>`;

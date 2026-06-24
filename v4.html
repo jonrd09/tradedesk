@@ -1208,6 +1208,10 @@ async function loadLivePrices(){
   if(lrt)lrt.textContent=timeStr;
   const ks=document.getElementById('keyStatus');
   if(ks){ks.textContent='● Key activa';ks.style.background='var(--green-bg)';ks.style.color='var(--green)';}
+  // FIX: Rebuild signals NOW that Finnhub prices are confirmed
+  // Any signal that was blocked (stale price) will now retry with live prices
+  // and send Telegram if threshold still met
+  addLog('debug','Finnhub','Precios confirmados → reconstruyendo señales con precios live');
   buildSignals();
   loadRotation();
   // Re-render indices panel with updated Finnhub prices (no new Schwab fetch needed)
@@ -2059,13 +2063,27 @@ async function _buildSignalsCore(){
     const fullSignal=s.weighted?s.pct>=100:s.passed===total;
     const accentCol=s.isSetup?'#ffc234':s.type==='call'?'#00d17a':'#ff4d6d';
     // Save to historial when signal passes its threshold
+    // FIX 2: Solo guardar en historial si precio confirmado por Finnhub
+    // Esto evita tener entradas de historial con precios incorrectos (QQQ $720, etc.)
     const _passThreshold=s.weighted?(s.threshold||70):75;
     if(!s.isSetup&&disp>=_passThreshold){
       s.pct_signal=disp;
-      addToHistorial(s);
+      if(!s._priceStale){
+        addToHistorial(s);
+      }else{
+        addLog('warn','Historial',`${s.sym} ${s.code} ${disp}% — NO guardado en historial: precio sin confirmar por Finnhub`);
+      }
     }
-    // Send Telegram SETUP notification
-    if(s.isSetup){
+    // FIX 1: BLOQUEAR Telegram y historial si el precio no tiene confirmación Finnhub
+    // Precio stale = Schwab devolvió datos viejos/incorrectos (ej. QQQ $720 real $474)
+    // Solo enviar cuando _priceIsLive=true (Finnhub confirmó el precio en los últimos 30min)
+    const _priceConfirmed=!s._priceStale;
+    if(s._priceStale){
+      addLog('warn','Telegram',`${s.sym} ${s.code} — Telegram BLOQUEADO: precio sin confirmar por Finnhub ($${s.price.toFixed(2)}) ⚠`);
+    }
+
+    // Send Telegram SETUP notification (solo si precio confirmado)
+    if(s.isSetup&&_priceConfirmed){
       const _today=new Date().toLocaleDateString('es-PR');
       const _setupKey=`tg_sent_setup_${s.sym}_${_today}`;
       if(!localStorage.getItem(_setupKey)){
@@ -2077,7 +2095,7 @@ async function _buildSignalsCore(){
 `+
           `📊 ${s.name}
 `+
-          `💰 Precio: *$${s.price.toFixed(2)}*
+          `💰 Precio: *$${s.price.toFixed(2)}* ✅ Finnhub
 `+
           `🎯 BB comprimido — ruptura inminente
 `+
@@ -2088,13 +2106,20 @@ async function _buildSignalsCore(){
         getTgToken()&&sendTelegram(msg,getTgToken(),getTgChat());
       }
     }
-    // Send Telegram notification for new signals (track sent to avoid duplicates)
+    // Send Telegram notification for new signals
+    // SOLO si precio confirmado por Finnhub — evita enviar precios incorrectos de Schwab
     const _etNow=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
     const _hourKey=`${_etNow.toLocaleDateString('es-PR')}_${_etNow.getHours()}`;
     const _sigKey=`tg_sent_${s.sym}_${s.code}_${_hourKey}`;
     if(disp>=_passThreshold&&!localStorage.getItem(_sigKey)){
-      localStorage.setItem(_sigKey,'1');
-      notifySignal(s.sym,s.code,s.name,s.type,disp,s.price,s.pct);
+      if(_priceConfirmed){
+        localStorage.setItem(_sigKey,'1');
+        notifySignal(s.sym,s.code,s.name,s.type,disp,s.price,s.pct);
+      }else{
+        // Precio no confirmado — guardar key igual para reintentar en siguiente ciclo
+        // cuando Finnhub ya tenga el precio cargado
+        addLog('warn','Señales',`${s.sym} ${s.code} ${disp}% — en espera de precio Finnhub para enviar Telegram`);
+      }
     }
 
     // ── Mini chart SVG (last 30 15min candles with BB) ──────────────
@@ -3920,12 +3945,14 @@ async function notifySignal(sym, code, name, type, pct, price, pctChange){
       if(within(lv.lo)) levelWarn+='\n⬇️ *LAST LOW POSIBLE* ($'+lv.lo.toFixed(2)+')';
     }
   }
+  // FIX 3: precio siempre viene de Finnhub cuando llegamos aquí
+  // (bloqueo en _priceStale garantiza que notifySignal solo se llama con precio confirmado)
   const msg=`${emoji} *SEÑAL ${dir} — ${sym}*
 
 `+
     `📊 Estrategia: *${code}* — ${name}
 `+
-    `💰 Precio: *$${price.toFixed(2)}* (${pctChange>=0?'+':''}${pctChange.toFixed(2)}%)
+    `💰 Precio: *$${price.toFixed(2)}* ✅ (${pctChange>=0?'+':''}${pctChange.toFixed(2)}%)
 `+
     `🎯 Confianza: *${pct}%*
 `+
@@ -4676,8 +4703,10 @@ function addToHistorial(signal){
     pct_signal:signal.pct_signal||100,
     time:et.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true}),
     date:et.toLocaleDateString('es-PR',{weekday:'short',month:'short',day:'numeric'}),
-    outcome:null, // null=pending, 'win'=correct, 'loss'=incorrect
+    outcome:null,     // null=pending, 'win'=correct, 'loss'=incorrect
     note:'',
+    finnhubConfirmed:!signal._priceStale, // FIX 2: precio confirmado por Finnhub
+    tgSent:!signal._priceStale,           // FIX 2: indica si Telegram fue enviado
   };
   entries.unshift(entry);
   if(entries.length>HIST_MAX)entries=entries.slice(0,HIST_MAX);
@@ -4776,6 +4805,12 @@ function renderHistorialList(filter){
     const outcomeBtn=(oc,label,col)=>`<button class="hist-outcome-btn" onclick="setOutcome(${e.id},'${oc}')"
       style="background:${e.outcome===oc?col:'var(--bg4)'};color:${e.outcome===oc?'#fff':'var(--text3)'};">
       ${label}</button>`;
+    // FIX 5: Show Telegram sent status and Finnhub confirmation in historial
+    const _tgBadge=e.tgSent===false
+      ?`<span title="Telegram NO enviado — precio sin confirmar Finnhub" style="font-size:10px;background:rgba(255,194,52,.15);border:1px solid rgba(255,194,52,.35);border-radius:8px;padding:1px 7px;color:var(--yellow);">⚠ TG no enviado</span>`
+      :e.tgSent===true
+        ?`<span title="Telegram enviado con precio Finnhub confirmado" style="font-size:10px;background:rgba(0,209,122,.12);border:1px solid rgba(0,209,122,.3);border-radius:8px;padding:1px 7px;color:var(--green);">✅ TG enviado</span>`
+        :``;
     return `<div class="hist-entry ${e.type}">
       <div style="flex:1;min-width:0;">
         <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:4px;">
@@ -4783,6 +4818,7 @@ function renderHistorialList(filter){
           <span style="font-size:10px;background:var(--bg4);border:1px solid var(--border2);border-radius:8px;padding:1px 7px;color:var(--text2);">${e.code}</span>
           <span style="font-size:11px;font-weight:700;color:${col};">${e.type.toUpperCase()}</span>
           <span style="font-size:11px;color:var(--green);font-weight:700;">${e.pct_signal}%</span>
+          ${_tgBadge}
           <span style="font-size:10px;color:var(--text3);margin-left:auto;">${e.date} · ${e.time} ET</span>
         </div>
         <div style="font-size:12px;color:var(--text2);margin-bottom:6px;">${e.name} · $${(e.price||0).toFixed(2)} · ${e.pct>=0?'+':''}${(e.pct||0).toFixed(2)}%</div>

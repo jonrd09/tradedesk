@@ -112,6 +112,25 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
 
 /* ── Historial ── */
 .hist-filter-btn{background:var(--bg3);border:1px solid var(--border2);border-radius:12px;color:var(--text3);padding:3px 10px;font-size:11px;font-weight:600;cursor:pointer;font-family:var(--sans);}
+/* ── Índices Panel ── */
+.idx-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
+.idx-card{background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);padding:8px 10px;cursor:default;}
+.idx-card.idx-bull{border-left:2px solid var(--green);}
+.idx-card.idx-bear{border-left:2px solid var(--red);}
+.idx-card.idx-flat{border-left:2px solid var(--border2);}
+.idx-top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:3px;}
+.idx-sym{font-family:var(--mono);font-size:12px;font-weight:700;color:var(--text);}
+.idx-pct{font-family:var(--mono);font-size:12px;font-weight:700;}
+.idx-price{font-family:var(--mono);font-size:10px;color:var(--text3);margin-bottom:4px;}
+.idx-spark{display:block;width:100%;height:38px;border-radius:3px;background:rgba(0,0,0,.15);}
+.idx-time{display:flex;justify-content:space-between;margin-top:2px;}
+.idx-time span{font-size:9px;color:var(--text3);}
+.idx-loading{text-align:center;padding:16px;color:var(--text3);font-size:11px;}
+.idx-block-badge{margin-top:6px;padding:5px 8px;border-radius:6px;font-size:11px;font-weight:700;line-height:1.4;}
+.idx-block-bull{background:var(--green-bg);border:1px solid rgba(0,209,122,.3);color:var(--green);}
+.idx-block-bear{background:var(--red-bg);border:1px solid rgba(255,77,109,.3);color:var(--red);}
+.idx-block-mix{background:rgba(255,194,52,.1);border:1px solid rgba(255,194,52,.3);color:var(--yellow);}
+.idx-block-wait{background:var(--bg4);border:1px solid var(--border);color:var(--text3);}
 .hist-filter-btn.active{background:var(--blue);border-color:var(--blue);color:#fff;}
 .hist-entry{background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px;display:flex;gap:10px;align-items:flex-start;}
 .hist-entry.call{border-left:3px solid var(--green);}
@@ -284,6 +303,21 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
       <div class="ig"><label class="ilbl">Contratos</label><input class="inp" type="number" id="cQty" value="1" min="1" step="1" oninput="calcLimit()"></div>
     </div>
     <div id="limitResult"></div>
+  </div>
+
+  <!-- ── ÍNDICES DEL DÍA ──────────────────────────────────── -->
+  <div class="rsec" style="flex:1;min-height:0;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+      <div style="font-size:13px;font-weight:700;color:#fff;">📈 Índices del día</div>
+      <button onclick="loadIndicesPanel(true)"
+        id="idxRefreshBtn"
+        style="background:var(--bg4);border:1px solid var(--border2);border-radius:20px;color:var(--text3);padding:2px 10px;font-size:10px;font-weight:700;cursor:pointer;font-family:var(--mono);">
+        ⟳ Actualizar
+      </button>
+    </div>
+    <div id="idxArea">
+      <div class="idx-loading">⟳ Cargando índices…</div>
+    </div>
   </div>
 </aside>
 </div><!-- end main -->
@@ -1176,6 +1210,8 @@ async function loadLivePrices(){
   if(ks){ks.textContent='● Key activa';ks.style.background='var(--green-bg)';ks.style.color='var(--green)';}
   buildSignals();
   loadRotation();
+  // Re-render indices panel with updated Finnhub prices (no new Schwab fetch needed)
+  if(Object.keys(_idxCache).length)renderIndicesPanel();
 }
 
 // H-06: Guard — returns true if price is live (not stale fallback)
@@ -5012,6 +5048,167 @@ function _renderEarningsSection(){
   }).join('');
 }
 
+// ═══════════════════════════════════════════════════════════════
+// PANEL DE ÍNDICES DEL DÍA — SPY · QQQ · IWM · DIA
+// Sparklines usando velas 15min de Schwab
+// ═══════════════════════════════════════════════════════════════
+const IDX_SYMS=[
+  {sym:'SPY',name:'S&P 500',  color:'#00a651'},
+  {sym:'QQQ',name:'Nasdaq 100',color:'#ffc234'},
+  {sym:'IWM',name:'Russell 2K',color:'#a78bfa'},
+  {sym:'DIA',name:'Dow Jones', color:'#3d8bff'},
+];
+let _idxCache={};    // sym → {closes, price, pct, ts}
+let _idxLoading=false;
+
+async function loadIndicesPanel(force=false){
+  if(_idxLoading)return;
+  const area=document.getElementById('idxArea');
+  if(!area)return;
+
+  // Throttle: no re-fetch within 3 min unless forced
+  const _now=Date.now();
+  const allFresh=IDX_SYMS.every(x=>_idxCache[x.sym]&&(_now-_idxCache[x.sym].ts)<180000);
+  if(allFresh&&!force){renderIndicesPanel();return;}
+
+  _idxLoading=true;
+  const btn=document.getElementById('idxRefreshBtn');
+  if(btn){btn.textContent='⟳…';btn.style.opacity='.6';}
+  area.innerHTML='<div class="idx-loading">⟳ Obteniendo datos de Schwab…</div>';
+
+  const schwabToken=await getSchwabToken();
+  if(!schwabToken){
+    area.innerHTML='<div class="idx-loading" style="color:var(--red);">Sin conexión Schwab — conecta primero</div>';
+    _idxLoading=false;
+    if(btn){btn.textContent='⟳ Actualizar';btn.style.opacity='1';}
+    return;
+  }
+
+  // Fetch 15min candles for each index sequentially (respect rate limits)
+  for(const idx of IDX_SYMS){
+    try{
+      // Use fetchSchwabCandles with existing freshness guards
+      const data=await Promise.race([
+        fetchSchwabCandles(idx.sym,'minute',15,30),
+        new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),8000))
+      ]).catch(()=>null);
+
+      if(data&&data.c&&data.c.length>=5){
+        // Filter to regular market hours only (9:30–16:00 ET)
+        // closes are already in order; just take them as-is
+        const closes=data.c;
+        const lastPrice=closes[closes.length-1];
+        const firstPrice=closes[0];
+        const pct=firstPrice>0?+((lastPrice-firstPrice)/firstPrice*100).toFixed(2):0;
+
+        // Get Finnhub live price for accuracy if available
+        const _lp=_livePrices[idx.sym];
+        const displayPrice=(_lp&&_lp.price>0)?_lp.price:lastPrice;
+        const displayPct=(_lp&&_lp.pct!=null)?_lp.pct:pct;
+
+        _idxCache[idx.sym]={
+          closes,
+          price:displayPrice,
+          pct:displayPct,
+          ts:Date.now()
+        };
+        addLog('debug','Índices',`${idx.sym} → ${closes.length} velas · $${displayPrice.toFixed(2)} (${displayPct>=0?'+':''}${displayPct.toFixed(2)}%)`);
+      }else{
+        addLog('warn','Índices',`${idx.sym} → sin datos disponibles`);
+        _idxCache[idx.sym]=null;
+      }
+    }catch(e){
+      addLog('warn','Índices',`${idx.sym} → error: ${e.message}`);
+      _idxCache[idx.sym]=null;
+    }
+    // 300ms between requests
+    await new Promise(r=>setTimeout(r,300));
+  }
+
+  _idxLoading=false;
+  if(btn){btn.textContent='⟳ Actualizar';btn.style.opacity='1';}
+  renderIndicesPanel();
+}
+
+function renderIndicesPanel(){
+  const area=document.getElementById('idxArea');
+  if(!area)return;
+
+  const available=IDX_SYMS.filter(x=>_idxCache[x.sym]);
+  if(!available.length){
+    area.innerHTML='<div class="idx-loading">Sin datos — conecta Schwab y actualiza</div>';
+    return;
+  }
+
+  // Block move detection
+  const withData=IDX_SYMS.filter(x=>_idxCache[x.sym]);
+  const ups=withData.filter(x=>_idxCache[x.sym].pct>=0.5).length;
+  const dns=withData.filter(x=>_idxCache[x.sym].pct<=-0.5).length;
+  const allUp=ups===withData.length&&withData.length===4;
+  const allDn=dns===withData.length&&withData.length===4;
+  const avgPct=withData.length?+(withData.reduce((s,x)=>s+_idxCache[x.sym].pct,0)/withData.length).toFixed(2):0;
+
+  let blockHTML='';
+  if(allUp){
+    blockHTML=`<div class="idx-block-badge idx-block-bull">🚀 MOVIMIENTO EN BLOQUE ALCISTA · ${avgPct>=0?'+':''}${avgPct}% promedio · Favorable para CALLS</div>`;
+  }else if(allDn){
+    blockHTML=`<div class="idx-block-badge idx-block-bear">🔻 MOVIMIENTO EN BLOQUE BAJISTA · ${avgPct}% promedio · Favorable para PUTS</div>`;
+  }else if(ups>=3){
+    blockHTML=`<div class="idx-block-badge idx-block-bull">📈 Mayoría alcista (${ups}/4) · sesgo CALL</div>`;
+  }else if(dns>=3){
+    blockHTML=`<div class="idx-block-badge idx-block-bear">📉 Mayoría bajista (${dns}/4) · sesgo PUT</div>`;
+  }else{
+    blockHTML=`<div class="idx-block-badge idx-block-mix">⚡ Movimiento mixto — sin bloque claro (${ups}↑ ${dns}↓)</div>`;
+  }
+
+  // Render sparkline cards
+  const cards=IDX_SYMS.map(idx=>{
+    const d=_idxCache[idx.sym];
+    if(!d)return`<div class="idx-card idx-flat">
+      <div class="idx-top"><span class="idx-sym">${idx.sym}</span><span style="font-size:10px;color:var(--text3);">sin datos</span></div>
+    </div>`;
+
+    const up=d.pct>=0;
+    const cls=Math.abs(d.pct)<0.1?'idx-flat':up?'idx-bull':'idx-bear';
+    const pctCol=up?'var(--green)':'var(--red)';
+    const lineCol=up?'#00d17a':'#ff4d6d';
+    const fillCol=up?'rgba(0,209,122,.12)':'rgba(255,77,109,.1)';
+
+    // Build SVG sparkline
+    const closes=d.closes;
+    const n=closes.length;
+    const minV=Math.min(...closes)*0.9995;
+    const maxV=Math.max(...closes)*1.0005;
+    const W=110,H=38;
+    const px=i=>Math.round(i/(n-1)*(W-2)+1);
+    const py=v=>Math.round(H-(v-minV)/(maxV-minV)*H);
+    const pts=closes.map((v,i)=>`${px(i)},${py(v)}`).join(' ');
+    const fillPts=`${px(0)},${H} `+pts+` ${px(n-1)},${H}`;
+
+    return`<div class="idx-card ${cls}">
+      <div class="idx-top">
+        <span class="idx-sym" style="color:${idx.color};">${idx.sym}</span>
+        <span class="idx-pct" style="color:${pctCol};">${up?'+':''}${d.pct.toFixed(2)}%</span>
+      </div>
+      <div class="idx-price">$${d.price.toFixed(2)} · ${idx.name}</div>
+      <svg class="idx-spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"
+        role="img" aria-label="${idx.sym} sparkline del día">
+        <polygon points="${fillPts}" fill="${fillCol}"/>
+        <polyline points="${pts}" fill="none" stroke="${lineCol}" stroke-width="1.5"
+          stroke-linejoin="round" stroke-linecap="round"/>
+        <circle cx="${px(n-1)}" cy="${py(closes[n-1])}" r="2" fill="${lineCol}"/>
+      </svg>
+      <div class="idx-time">
+        <span>apertura</span>
+        <span>${d.pct>=0?'▲':'▼'} ${n} velas</span>
+        <span>cierre</span>
+      </div>
+    </div>`;
+  }).join('');
+
+  area.innerHTML=`<div class="idx-grid">${cards}</div>${blockHTML}`;
+}
+
 async function init(){
   // Establecer PIN por defecto (2122) si no hay ninguno configurado
   if(!getStoredPin()){
@@ -5037,6 +5234,14 @@ async function init(){
   // Earnings calendar — load once on start, refresh once a day
   setTimeout(()=>loadEarningsCalendar(),4000);
   setInterval(()=>loadEarningsCalendar(),4*60*60*1000); // refresh every 4h
+
+  // Índices del día — load after Schwab is ready, refresh every 5min during market
+  setTimeout(()=>loadIndicesPanel(),3000);
+  setInterval(()=>{
+    const _etI=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+    const _mI=_etI.getHours()*60+_etI.getMinutes(),_dI=_etI.getDay();
+    if(_dI>=1&&_dI<=5&&_mI>=570&&_mI<960)loadIndicesPanel();
+  },5*60*1000);
   const _k=getKey();
   if(!_k||_k.length<8){
     // keyModal removed

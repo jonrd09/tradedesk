@@ -5094,25 +5094,37 @@ async function loadIndicesPanel(force=false){
       ]).catch(()=>null);
 
       if(data&&data.c&&data.c.length>=5){
-        // Filter to regular market hours only (9:30–16:00 ET)
-        // closes are already in order; just take them as-is
         const closes=data.c;
-        const lastPrice=closes[closes.length-1];
-        const firstPrice=closes[0];
-        const pct=firstPrice>0?+((lastPrice-firstPrice)/firstPrice*100).toFixed(2):0;
 
-        // Get Finnhub live price for accuracy if available
+        // Precio y % SOLO de Finnhub — Schwab closes solo para la sparkline
+        // Si Finnhub no tiene precio → price:null → se muestra "—" en la card
+        // Esto evita mostrar precios incorrectos de Schwab (SPY $733, QQQ $713, etc.)
         const _lp=_livePrices[idx.sym];
-        const displayPrice=(_lp&&_lp.price>0)?_lp.price:lastPrice;
-        const displayPct=(_lp&&_lp.pct!=null)?_lp.pct:pct;
+        const displayPrice=(_lp&&_lp.price>0)?_lp.price:null;
+        const displayPct=(_lp&&_lp.pct!=null)?_lp.pct:null;
+
+        // También intentar fetchRotationQuote si _livePrices no tiene este ticker
+        // (los índices IWM y DIA pueden no estar en _signalTickers)
+        let _fetchedQ=null;
+        if(!displayPrice){
+          try{
+            _fetchedQ=await fetchRotationQuote(idx.sym).catch(()=>null);
+          }catch(e){}
+        }
+        const finalPrice=displayPrice||(_fetchedQ&&_fetchedQ.price>0?_fetchedQ.price:null);
+        const finalPct=displayPct!==null?displayPct:(_fetchedQ&&_fetchedQ.pct!=null?_fetchedQ.pct:null);
 
         _idxCache[idx.sym]={
-          closes,
-          price:displayPrice,
-          pct:displayPct,
+          closes,                    // sparkline shape only
+          price:finalPrice,          // null if no Finnhub data
+          pct:finalPct,              // null if no Finnhub data
           ts:Date.now()
         };
-        addLog('debug','Índices',`${idx.sym} → ${closes.length} velas · $${displayPrice.toFixed(2)} (${displayPct>=0?'+':''}${displayPct.toFixed(2)}%)`);
+        if(finalPrice!=null){
+          addLog('debug','Índices',`${idx.sym} → ${closes.length} velas · $${finalPrice.toFixed(2)} (${finalPct>=0?'+':''}${finalPct.toFixed(2)}%) [Finnhub]`);
+        }else{
+          addLog('debug','Índices',`${idx.sym} → ${closes.length} velas (sin precio Finnhub — sparkline disponible)`);
+        }
       }else{
         addLog('warn','Índices',`${idx.sym} → sin datos disponibles`);
         _idxCache[idx.sym]=null;
@@ -5140,13 +5152,13 @@ function renderIndicesPanel(){
     return;
   }
 
-  // Block move detection
-  const withData=IDX_SYMS.filter(x=>_idxCache[x.sym]);
+  // Block move detection — only count tickers with valid Finnhub pct
+  const withData=IDX_SYMS.filter(x=>_idxCache[x.sym]&&_idxCache[x.sym].pct!==null);
   const ups=withData.filter(x=>_idxCache[x.sym].pct>=0.5).length;
   const dns=withData.filter(x=>_idxCache[x.sym].pct<=-0.5).length;
   const allUp=ups===withData.length&&withData.length===4;
   const allDn=dns===withData.length&&withData.length===4;
-  const avgPct=withData.length?+(withData.reduce((s,x)=>s+_idxCache[x.sym].pct,0)/withData.length).toFixed(2):0;
+  const avgPct=withData.length?+(withData.reduce((s,x)=>s+(_idxCache[x.sym].pct||0),0)/withData.length).toFixed(2):0;
 
   let blockHTML='';
   if(allUp){
@@ -5157,6 +5169,9 @@ function renderIndicesPanel(){
     blockHTML=`<div class="idx-block-badge idx-block-bull">📈 Mayoría alcista (${ups}/4) · sesgo CALL</div>`;
   }else if(dns>=3){
     blockHTML=`<div class="idx-block-badge idx-block-bear">📉 Mayoría bajista (${dns}/4) · sesgo PUT</div>`;
+  }else if(withData.length<4){
+    const missing=4-withData.length;
+    blockHTML=`<div class="idx-block-badge idx-block-wait">⏳ Esperando precio Finnhub (${withData.length}/4 con datos)${missing>0?' · Actualiza en mercado abierto':''}</div>`;
   }else{
     blockHTML=`<div class="idx-block-badge idx-block-mix">⚡ Movimiento mixto — sin bloque claro (${ups}↑ ${dns}↓)</div>`;
   }
@@ -5168,13 +5183,23 @@ function renderIndicesPanel(){
       <div class="idx-top"><span class="idx-sym">${idx.sym}</span><span style="font-size:10px;color:var(--text3);">sin datos</span></div>
     </div>`;
 
-    const up=d.pct>=0;
-    const cls=Math.abs(d.pct)<0.1?'idx-flat':up?'idx-bull':'idx-bear';
-    const pctCol=up?'var(--green)':'var(--red)';
-    const lineCol=up?'#00d17a':'#ff4d6d';
-    const fillCol=up?'rgba(0,209,122,.12)':'rgba(255,77,109,.1)';
+    // Determine direction from Finnhub pct (null = unknown)
+    const hasPct=d.pct!==null;
+    const hasPrice=d.price!==null;
+    const up=hasPct?d.pct>=0:null; // null = unknown direction
+    // Card border color: green/red if we have Finnhub data, gray if not
+    const cls=!hasPct?'idx-flat':Math.abs(d.pct)<0.1?'idx-flat':up?'idx-bull':'idx-bear';
+    // Sparkline color: use Finnhub direction if known, otherwise neutral gray
+    const lineCol=!hasPct?'#4a5568':up?'#00d17a':'#ff4d6d';
+    const fillCol=!hasPct?'rgba(74,85,104,.1)':up?'rgba(0,209,122,.12)':'rgba(255,77,109,.1)';
+    const pctCol=!hasPct?'var(--text3)':up?'var(--green)':'var(--red)';
+    // Display strings — show "—" when Finnhub data unavailable
+    const priceStr=hasPrice?`$${d.price.toFixed(2)}`:'$—';
+    const pctStr=hasPct?`${up?'+':''}${d.pct.toFixed(2)}%`:'—%';
+    const pctNote=!hasPct?`<span style="font-size:9px;color:var(--text3);margin-left:4px;">sin Finnhub</span>`:'';
+    const dirArrow=hasPct?(up?'▲':'▼'):'●';
 
-    // Build SVG sparkline
+    // Build SVG sparkline from Schwab closes (shape only — not used for price labels)
     const closes=d.closes;
     const n=closes.length;
     const minV=Math.min(...closes)*0.9995;
@@ -5188,9 +5213,9 @@ function renderIndicesPanel(){
     return`<div class="idx-card ${cls}">
       <div class="idx-top">
         <span class="idx-sym" style="color:${idx.color};">${idx.sym}</span>
-        <span class="idx-pct" style="color:${pctCol};">${up?'+':''}${d.pct.toFixed(2)}%</span>
+        <span class="idx-pct" style="color:${pctCol};">${pctStr}${pctNote}</span>
       </div>
-      <div class="idx-price">$${d.price.toFixed(2)} · ${idx.name}</div>
+      <div class="idx-price">${priceStr} · ${idx.name}</div>
       <svg class="idx-spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"
         role="img" aria-label="${idx.sym} sparkline del día">
         <polygon points="${fillPts}" fill="${fillCol}"/>
@@ -5200,7 +5225,7 @@ function renderIndicesPanel(){
       </svg>
       <div class="idx-time">
         <span>apertura</span>
-        <span>${d.pct>=0?'▲':'▼'} ${n} velas</span>
+        <span>${dirArrow} ${n} velas</span>
         <span>cierre</span>
       </div>
     </div>`;

@@ -1790,8 +1790,25 @@ async function _buildSignalsCore(){
     const W={bollinger:60,medias:25,volumen:5,estocastico:5,hlines:5};
     const SCORE_THRESHOLD=70;
 
+    // ── GUARDS DE DIRECCIÓN — previenen señales contradictorias con el precio ──
+    // Guard CALL: precio debe estar sobre MA20 15min Y no en momentum bajista fuerte
+    // Guard PUT:  precio debe estar bajo MA20 15min Y no en momentum alcista fuerte
+    const _last3closes=c15.slice(-3);
+    const _last3opens=opens(ohlc15).slice(-3);
+    const _bearMomentum3=_last3closes.every((c,i)=>c<_last3opens[i]); // 3 velas rojas seguidas
+    const _bullMomentum3=_last3closes.every((c,i)=>c>_last3opens[i]); // 3 velas verdes seguidas
+    // Precio vs MA20 en 15min — el juez de dirección más confiable intraday
+    const _priceAboveMA20_15=lP15>lMA20_15;
+    const _priceBelowMA20_15=lP15<lMA20_15;
+    // Distancia del precio a la MA20 en % — para detectar rupturas claras
+    const _distFromMA20_15pct=lMA20_15>0?Math.abs(lP15-lMA20_15)/lMA20_15*100:0;
+    // CALL guard: no generar CALL si precio está claramente bajo MA20 Y hay momentum bajista
+    const _callGuardOk=!(_priceBelowMA20_15&&_bearMomentum3&&_distFromMA20_15pct>0.3);
+    // PUT guard: no generar PUT si precio está claramente sobre MA20 Y hay momentum alcista
+    const _putGuardOk=!(_priceAboveMA20_15&&_bullMomentum3&&_distFromMA20_15pct>0.3);
+
     // BB-A: CALL — Bollinger (gate) alcista
-    const bollGateCall=lBBW15>=1.5&&mediaUp&&approachingUpper&&bigBodyCall;
+    const bollGateCall=lBBW15>=1.5&&mediaUp&&approachingUpper&&bigBodyCall&&_callGuardOk;
     if(_stratEnabled('BB-A')&&bollGateCall){
       let score=W.bollinger;            // gate cumplido → 60
       if(maCallCross)  score+=W.medias; // +25
@@ -1811,7 +1828,7 @@ async function _buildSignalsCore(){
       ]});
     }
     // BB-B: PUT — Bollinger (gate) bajista
-    const bollGatePut=lBBW15>=1.5&&mediaDn&&approachingLower&&bigBodyPut;
+    const bollGatePut=lBBW15>=1.5&&mediaDn&&approachingLower&&bigBodyPut&&_putGuardOk;
     if(_stratEnabled('BB-B')&&bollGatePut){
       let score=W.bollinger;
       if(maPutCross)  score+=W.medias;
@@ -1891,8 +1908,8 @@ async function _buildSignalsCore(){
     const ma20Touch=Math.abs(lL15-lMA20_15)/lMA20_15<_ma20TouchTol||Math.abs(lH15-lMA20_15)/lMA20_15<_ma20TouchTol;
     const ma20Bull   = lP15>lMA20_15&&pP15>lMA20_15; // precio sobre MA20
     const ma20Bear   = lP15<lMA20_15&&pP15<lMA20_15; // precio bajo MA20
-    const ma20BounceCall = ma20Touch && lP15>lO15 && ma20Bull && lL15<=lMA20_15*1.002 && align1hBull;
-    const ma20BouncePut  = ma20Touch && lP15<lO15 && ma20Bear && lH15>=lMA20_15*0.998 && align1hBear;
+    const ma20BounceCall = ma20Touch && lP15>lO15 && ma20Bull && lL15<=lMA20_15*1.002 && align1hBull && _callGuardOk;
+    const ma20BouncePut  = ma20Touch && lP15<lO15 && ma20Bear && lH15>=lMA20_15*0.998 && align1hBear && _putGuardOk;
 
     if(_stratEnabled('MA20-R')&&ma20BounceCall){
       // Solo el primer rebote alcista del día por ticker (en debug, siempre muestra)
@@ -1935,13 +1952,13 @@ async function _buildSignalsCore(){
       const prevBelowMA20_1h=c1h[n1h-2]<lMA20_1h; // vela anterior bajo MA20
       const nowAboveMA20_1h=lP1h>lMA20_1h;          // precio actual sobre MA20
       const confirmCallCandle=lP1h>o1h[n1h-1];      // vela actual es alcista
-      const ctCallOk=prevBelowMA20_1h&&nowAboveMA20_1h&&confirmCallCandle;
+      const ctCallOk=prevBelowMA20_1h&&nowAboveMA20_1h&&confirmCallCandle&&_callGuardOk;
 
       // PUT: precio cruza MA20 1H hacia abajo con vela bajista + 15min bajista
       const prevAboveMA20_1h=c1h[n1h-2]>lMA20_1h;
       const nowBelowMA20_1h=lP1h<lMA20_1h;
       const confirmPutCandle=lP1h<o1h[n1h-1];
-      const ctPutOk=prevAboveMA20_1h&&nowBelowMA20_1h&&confirmPutCandle;
+      const ctPutOk=prevAboveMA20_1h&&nowBelowMA20_1h&&confirmPutCandle&&_putGuardOk;
 
       if(ctCallOk&&trend15Bull){
         const _ctKey=`ctma20_bull_${sym}_${new Date().toLocaleDateString('es-PR')}`;
@@ -2002,7 +2019,7 @@ async function _buildSignalsCore(){
       const dailyTrendBear=lMA40D>lMA20D;
 
       // RPM-A (CALL): Daily alcista + 1H bajista (pullback) + toca MA20D + 15min rebota + 1H alcista
-      const rpmCallOk=dailyTrendBull&&align1hBear&&nearMA20D&&respectsMA20D_call&&trend15Bull&&lP1h>o1h[n1h-1];
+      const rpmCallOk=dailyTrendBull&&align1hBear&&nearMA20D&&respectsMA20D_call&&trend15Bull&&lP1h>o1h[n1h-1]&&_callGuardOk;
       if(rpmCallOk){
         all.push({...meta,code:'RPM',name:'Rebote Punto Medio — CALL',type:'call',reqs:[
           {ok:dailyTrendBull,     tf:'D',  text:`Daily alcista: MA20 ($${lMA20D.toFixed(2)}) > MA40 ($${lMA40D.toFixed(2)})`},
@@ -2014,7 +2031,7 @@ async function _buildSignalsCore(){
       }
 
       // RPM-B (PUT): Daily bajista + 1H alcista (pullback) + toca MA20D + 15min cae + 1H bajista
-      const rpmPutOk=dailyTrendBear&&align1hBull&&nearMA20D&&respectsMA20D_put&&trend15Bear&&lP1h<o1h[n1h-1];
+      const rpmPutOk=dailyTrendBear&&align1hBull&&nearMA20D&&respectsMA20D_put&&trend15Bear&&lP1h<o1h[n1h-1]&&_putGuardOk;
       if(rpmPutOk){
         all.push({...meta,code:'RPM',name:'Rebote Punto Medio — PUT',type:'put',reqs:[
           {ok:dailyTrendBear,     tf:'D',  text:`Daily bajista: MA40 ($${lMA40D.toFixed(2)}) > MA20 ($${lMA20D.toFixed(2)})`},
@@ -2093,10 +2110,23 @@ async function _buildSignalsCore(){
       const _dk=`${s.sym}_${s.code}_${s.type}`;
       if(!_sigDetectedAt[_dk]){
         _sigDetectedAt[_dk]=Date.now();
-        // Guardar también el timeET en el primer ciclo
         const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
         s._timeET=et.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true});
         _sigDetectedAt[_dk+'_timeET']=s._timeET;
+        // ── GUARDAR EN HISTORIAL en el momento de primera detección ──────────
+        // Aquí es el único lugar donde sabemos que la señal es nueva.
+        // Hacerlo aquí (no en el render) garantiza que se guarda aunque
+        // desaparezca en el siguiente ciclo de buildSignals()
+        if(!s.isSetup){
+          const _totalReqs=s.reqs?s.reqs.length:0;
+          const _dispPct=s.weighted?s.pct:(_totalReqs>0?Math.round((s.reqs.filter(r=>r.ok).length/_totalReqs)*100):0);
+          const _thr=s.weighted?(s.threshold||70):75;
+          if(_dispPct>=_thr){
+            s.pct_signal=_dispPct;
+            addToHistorial(s);
+            addLog('debug','Historial',`✅ ${s.sym} ${s.code} ${s.type.toUpperCase()} ${_dispPct}% — guardado`);
+          }
+        }
       }
       s._detectedAt=_sigDetectedAt[_dk];
       s._timeET=s._timeET||_sigDetectedAt[_dk+'_timeET']||'';

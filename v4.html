@@ -380,31 +380,43 @@ let _rulesTimer=null;
 // ═══════════════════════════════════════════════════════════════
 // MARKET DATA DEFAULTS
 // ═══════════════════════════════════════════════════════════════
+// DEFAULTS: SOLO nombres — NUNCA precios hardcodeados.
+// Precios vienen exclusivamente de Schwab (señales) y Finnhub (display).
 const DEFAULTS={
-  GOOG:{price:365.76,pct:-0.95,name:'Alphabet'},
-  TSLA:{price:391.00,pct:-6.56,name:'Tesla'},
-  SPY: {price:594.52,pct: 0.00,name:'S&P 500 ETF'},
-  QQQ: {price:474.20,pct: 0.00,name:'Nasdaq 100 ETF'},
-  AAPL:{price:201.45,pct: 0.00,name:'Apple'},
-  PLTR:{price:121.00,pct: 0.00,name:'Palantir'},
+  GOOG:{price:null,pct:null,name:'Alphabet'},
+  TSLA:{price:null,pct:null,name:'Tesla'},
+  SPY: {price:null,pct:null,name:'S&P 500 ETF'},
+  QQQ: {price:null,pct:null,name:'Nasdaq 100 ETF'},
+  AAPL:{price:null,pct:null,name:'Apple'},
+  PLTR:{price:null,pct:null,name:'Palantir'},
+  MSFT:{price:null,pct:null,name:'Microsoft'},
+  NVDA:{price:null,pct:null,name:'Nvidia'},
+  AMD: {price:null,pct:null,name:'AMD'},
+  AMZN:{price:null,pct:null,name:'Amazon'},
+  META:{price:null,pct:null,name:'Meta'},
+  NFLX:{price:null,pct:null,name:'Netflix'},
+  COIN:{price:null,pct:null,name:'Coinbase'},
 };
+// MOM_STOCKS: precios null hasta que Finnhub los actualice en loadLivePrices()
 const MOM_STOCKS={
-  GOOG:{price:365.76,name:'Alphabet',  lev2:'GGLL', lev2name:'GGLL 2x', inv:'GGLS', invname:'GGLS Inv'},
-  TSLA:{price:391.00,name:'Tesla',     lev2:'TSLL', lev2name:'TSLL 2x', inv:'TSLQ', invname:'TSLQ Inv'},
-  NVDA:{price:131.38,name:'Nvidia',    lev2:'NVDL', lev2name:'NVDL 2x', inv:'NVDS', invname:'NVDS Inv'},
-  AAPL:{price:201.45,name:'Apple',     lev2:'AAPU', lev2name:'AAPU 2x', inv:'AAPD', invname:'AAPD Inv'},
-  MSFT:{price:448.17,name:'Microsoft', lev2:'MSFU', lev2name:'MSFU 2x', inv:'MSFD', invname:'MSFD Inv'},
-  AVGO:{price:241.18,name:'Broadcom',  lev2:'AVGL', lev2name:'AVGL 2x', inv:'AVGD', invname:'AVGD Inv'},
-  MU:  {price:112.50,name:'Micron',    lev2:'MUU',  lev2name:'MUU 2x',  inv:'MUD',  invname:'MUD Inv'},
-  AMD: {price:142.50,name:'AMD',       lev2:'AMDL', lev2name:'AMDL 2x', inv:'AMDS', invname:'AMDS Inv'},
+  GOOG:{price:null,name:'Alphabet',  lev2:'GGLL', lev2name:'GGLL 2x', inv:'GGLS', invname:'GGLS Inv'},
+  TSLA:{price:null,name:'Tesla',     lev2:'TSLL', lev2name:'TSLL 2x', inv:'TSLQ', invname:'TSLQ Inv'},
+  NVDA:{price:null,name:'Nvidia',    lev2:'NVDL', lev2name:'NVDL 2x', inv:'NVDS', invname:'NVDS Inv'},
+  AAPL:{price:null,name:'Apple',     lev2:'AAPU', lev2name:'AAPU 2x', inv:'AAPD', invname:'AAPD Inv'},
+  MSFT:{price:null,name:'Microsoft', lev2:'MSFU', lev2name:'MSFU 2x', inv:'MSFD', invname:'MSFD Inv'},
+  AVGO:{price:null,name:'Broadcom',  lev2:'AVGL', lev2name:'AVGL 2x', inv:'AVGD', invname:'AVGD Inv'},
+  MU:  {price:null,name:'Micron',    lev2:'MUU',  lev2name:'MUU 2x',  inv:'MUD',  invname:'MUD Inv'},
+  AMD: {price:null,name:'AMD',       lev2:'AMDL', lev2name:'AMDL 2x', inv:'AMDS', invname:'AMDS Inv'},
 };
 const ROT_DATA={
   indices:[{sym:'QQQ',name:'Nasdaq 100',color:'#3d8bff'},{sym:'SPY',name:'S&P 500',color:'#00d17a'},{sym:'IWM',name:'Russell 2K',color:'#ffc234'},{sym:'DIA',name:'Dow Jones',color:'#a78bfa'}],
   sectores:[{sym:'XLK',name:'Tecnología'},{sym:'XLF',name:'Financiero'},{sym:'XLV',name:'Salud'},{sym:'XLE',name:'Energía'},{sym:'XLU',name:'Utilities'},{sym:'XLI',name:'Industrial'},{sym:'XLC',name:'Comunicación'},{sym:'XLP',name:'Consumo Básico'},{sym:'XLY',name:'Consumo Discr.'},{sym:'XLB',name:'Materiales'},{sym:'SOXX',name:'Semiconductores'},{sym:'XBI',name:'Biotech'}],
   refugios:[{sym:'GLD',name:'Oro',color:'#ffc234'},{sym:'TLT',name:'Bonos T',color:'#a78bfa'},{sym:'VIXY',name:'VIX ETF',color:'#ff4d6d'},{sym:'UUP',name:'Dólar',color:'#3d8bff'}]
 };
-const ROT_FALLBACK={QQQ:474.20,SPY:594.52,IWM:208.45,DIA:431.60,XLK:193.17,XLF:51.49,XLV:145.30,XLE:91.20,XLU:68.40,XLI:132.50,XLC:88.90,XLP:79.60,XLY:195.40,XLB:89.30,SOXX:245.80,XBI:98.70,GLD:305.40,TLT:88.20,VIXY:14.20,UUP:27.30};
-const ROT_PREV={QQQ:496.90,SPY:613.10,IWM:215.30,DIA:441.80,XLK:199.40,XLF:50.80,XLV:144.20,XLE:92.80,XLU:67.50,XLI:134.20,XLC:90.10,XLP:78.90,XLY:200.80,XLB:91.20,SOXX:253.40,XBI:100.20,GLD:301.50,TLT:89.40,VIXY:12.40,UUP:27.80};
+// ROT_FALLBACK/ROT_PREV eliminados — rotación usa solo datos live de Finnhub.
+// Si Finnhub no tiene precio, el símbolo se omite del panel de rotación.
+const ROT_FALLBACK={};
+const ROT_PREV={};
 const INSIDER_TICKERS=['TSLA','AAPL','MSFT','NVDA','AMD','COIN','AMZN','NFLX','META','AVGO','MU','QCOM','GOOG','PLTR','UBER','PYPL','CRM','HOOD','UNH','OKLO','URA','ORCL'];
 
 // ═══════════════════════════════════════════════════════════════
@@ -767,17 +779,37 @@ async function fetchSchwabCandles(sym,freqType,freq,bars=50){
       }
       const sl=candles.slice(-bars);
       if(sl.length<5)continue;
-      // Log diagnóstico: mostrar fecha de la última vela para detectar datos viejos
+      // ── FRESHNESS GUARD — rechazar datos de más de 2 días hábiles atrás ──────
+      // Esto previene que velas de días pasados generen señales fantasma
       const _tfLabel=cfg._merge1h?'1H':cfg.frequencyType==='daily'?'D':(cfg.frequency+'min');
       const _lastC=sl[sl.length-1];
       if(_lastC&&_lastC.datetime){
         const lastDt=new Date(_lastC.datetime);
         const lastEt=new Date(lastDt.toLocaleString('en-US',{timeZone:'America/New_York'}));
+        const nowEt=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
         addLog('debug','Schwab',`${sym} ${_tfLabel} → última vela: ${lastEt.toLocaleDateString()} ${lastEt.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})} ET · ${sl.length} velas`);
+        // Para datos intraday: la última vela no puede ser de más de 2 días calendario atrás
+        // (cubre fines de semana: viernes→lunes es ok, pero martes→jueves es stale)
+        if(cfg.frequencyType==='minute'){
+          const ageMs=nowEt-lastEt;
+          const ageDays=ageMs/(1000*60*60*24);
+          // Más de 3 días = datos completamente viejos (incluso cubriendo fin de semana largo)
+          if(ageDays>3&&!_testMode){
+            addLog('warn','Schwab',`${sym} ${_tfLabel} → DATOS VIEJOS (${ageDays.toFixed(1)}d) — descartado para evitar señales falsas`);
+            continue; // try next config or return null
+          }
+          // Entre 1-3 días: puede ser fin de semana/feriado — aceptar pero marcar
+          if(ageDays>1&&!_testMode){
+            addLog('debug','Schwab',`${sym} ${_tfLabel} → datos de ${ageDays.toFixed(1)}d atrás (fin de semana o feriado — ok)`);
+          }
+        }
       }else{
         addLog('debug','Schwab',`${sym} ${_tfLabel} → ${sl.length} velas (sin datetime)`);
       }
-      return{c:sl.map(v=>v.close),h:sl.map(v=>v.high),l:sl.map(v=>v.low),o:sl.map(v=>v.open),v:sl.map(v=>v.volume||0)};
+      // Attach datetime of last candle to result for downstream freshness checks
+      const _result={c:sl.map(v=>v.close),h:sl.map(v=>v.high),l:sl.map(v=>v.low),o:sl.map(v=>v.open),v:sl.map(v=>v.volume||0)};
+      if(_lastC&&_lastC.datetime) _result._lastDatetime=_lastC.datetime;
+      return _result;
     }catch(e){continue;}
   }
   addLog('warn','Schwab API',`${sym} ${freqType} → Sin datos`);
@@ -1349,6 +1381,28 @@ async function _buildSignalsCore(){
       continue;
     }
 
+    // ── FRESHNESS CHECK — validar que los datos 1H y 15min son de hoy o recientes ──
+    // Si la última vela es de más de 3 días, bloquear señales para este ticker
+    if(!_testMode&&!_debugMode){
+      const _checkFresh=(ohlc,tfLabel)=>{
+        if(!ohlc._lastDatetime)return true; // sin datetime = asumir ok (ej. datos merged)
+        const lastDt=new Date(ohlc._lastDatetime);
+        const lastEt=new Date(lastDt.toLocaleString('en-US',{timeZone:'America/New_York'}));
+        const nowEt=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+        const ageDays=(nowEt-lastEt)/(1000*60*60*24);
+        if(ageDays>3){
+          addLog('error','Señales',`${sym} ${tfLabel} → DATOS VIEJOS (${ageDays.toFixed(1)}d desde ${lastEt.toLocaleDateString()}) — señal BLOQUEADA`);
+          return false;
+        }
+        return true;
+      };
+      if(!_checkFresh(ohlc1h,'1H')||!_checkFresh(ohlc15,'15m')){
+        // Mostrar error visible en el panel para este ticker
+        addLog('error','Señales',`${sym} → SEÑAL BLOQUEADA: datos intraday demasiado viejos. Schwab puede estar devolviendo historial incorrecto.`);
+        continue;
+      }
+    }
+
     // Guard: nunca calcular señales sobre datos corruptos (NaN/Infinity).
     // stochastic/sma propagan NaN a través de .filter(v=>v!=null), así que validamos antes.
     const _allFinite=arr=>arr&&arr.length>0&&arr.every(v=>Number.isFinite(v));
@@ -1381,11 +1435,16 @@ async function _buildSignalsCore(){
     const _lVol1h=_vol1h[_vol1h.length-1]||0;
     const _avgVol1h_20=_vol1h.length>=20?_vol1h.slice(-20).reduce((a,b)=>a+b,0)/20:0;
     const ctVolConfirm=_avgVol1h_20>0?_lVol1h>_avgVol1h_20*1.2:true; // 20% above avg or no data
-    // Precio real del último close de Schwab
-    const realPrice=lP1h;
-    const _cDprev=closes(ohlcD);
-    const realPricePrev=_cDprev.length>1?_cDprev[_cDprev.length-2]:lP1h;
-    const realPct=realPricePrev>0?+((lP1h-realPricePrev)/realPricePrev*100).toFixed(2):0;
+    // Precio real: Finnhub live (si existe y es fresco) > último close 1H de Schwab
+    // Esto garantiza que el precio mostrado en la tarjeta es actual, no del cierre anterior
+    const _liveQ=_livePrices[sym];
+    const _liveOk=_liveQ&&_liveQ.price>0&&(Date.now()-_liveQ.ts<30*60*1000);
+    const realPrice=_liveOk?_liveQ.price:lP1h;
+    const realPct=_liveOk?_liveQ.pct:(()=>{
+      const _cDprev=closes(ohlcD);
+      const prev=_cDprev.length>1?_cDprev[_cDprev.length-2]:lP1h;
+      return prev>0?+((lP1h-prev)/prev*100).toFixed(2):0;
+    })();
 
     // ── Indicadores 15min ────────────────────────────────────────────────────
     const c15=closes(ohlc15),h15=highs(ohlc15),l15=lows(ohlc15);
@@ -1438,9 +1497,9 @@ async function _buildSignalsCore(){
     // Para el gráfico miniatura, excluir la última vela si es sintética (evita caída abrupta)
     const _c15chart=c15.length>30?c15.slice(-31,-1):c15.slice(-30);
     // H-06: Flag if price is stale (no live Finnhub price for this ticker)
-    const _priceIsLive=_isPriceLive(sym);
+    const _priceIsLive=_liveOk; // use the flag already computed from _livePrices
     if(!_priceIsLive&&!_testMode){
-      addLog('warn','Señales',`${sym} → precio Finnhub no disponible — señal usa último close de Schwab`);
+      addLog('warn','Señales',`${sym} → precio Finnhub no disponible — señal usa último close 1H de Schwab ($${lP1h.toFixed(2)})`);
     }
     const meta={sym,price:realPrice,pct:realPct,dataLabel:_priceIsLive?'📡 Schwab+Finnhub':'📡 Schwab',
       _priceStale:!_priceIsLive,
@@ -1886,7 +1945,10 @@ async function _buildSignalsCore(){
     .sort((a,b)=>b.passed-a.passed);
 
   if(!active.length){
-    area.innerHTML='<div style="text-align:center;padding:30px;color:var(--text2);font-size:13px;"><div style="font-size:28px;margin-bottom:10px">📊</div><div style="font-weight:600;">Sin señales activas</div><div style="font-size:11px;margin-top:6px;color:var(--text3);">Ninguna estrategia alcanza el 75% actualmente</div></div>';
+    // Check if any ticker was blocked due to stale data — show clear error
+    const _staleLogs=(_logs||[]).filter(l=>l.level==='error'&&l.category==='Señales'&&l.message.includes('BLOQUEADA')&&(Date.now()-l.ts)<120000);
+    const _staleMsg=_staleLogs.length?`<div style="margin-top:10px;padding:10px 14px;background:rgba(255,77,109,.08);border:1px solid rgba(255,77,109,.3);border-radius:8px;font-size:12px;color:var(--red);line-height:1.6;text-align:left;"><strong>⚠ Datos viejos detectados:</strong><br>${_staleLogs.map(l=>l.message).join('<br>')}<br><span style="color:var(--text3);font-size:11px;">Schwab devolvió historial incorrecto. Desconecta y reconecta Schwab para forzar datos frescos.</span></div>`:'';
+    area.innerHTML=`<div style="text-align:center;padding:30px;color:var(--text2);font-size:13px;"><div style="font-size:28px;margin-bottom:10px">📊</div><div style="font-weight:600;">Sin señales activas</div><div style="font-size:11px;margin-top:6px;color:var(--text3);">Ninguna estrategia alcanza el 75% actualmente</div>${_staleMsg}</div>`;
     return;
   }
 
@@ -2265,7 +2327,8 @@ function rotCell(sym,name,pct,color){
 async function loadRotation(){
   const allSyms=[...ROT_DATA.indices.map(x=>x.sym),...ROT_DATA.sectores.map(x=>x.sym),...ROT_DATA.refugios.map(x=>x.sym)];
   const quotes={};
-  allSyms.forEach(s=>{const p=ROT_FALLBACK[s]||100,pv=ROT_PREV[s]||p;quotes[s]={price:p,prev:pv,pct:+((p-pv)/pv*100).toFixed(2)};});
+  // No hardcoded fallback prices — show "sin datos" if Finnhub doesn't respond
+  allSyms.forEach(s=>{quotes[s]=null;}); // null = waiting for live data
   const key=getKey();
   if(key&&key.length>8){
     // 1 símbolo a la vez con 1.2s de pausa — evita 429 con plan gratuito Finnhub
@@ -2278,22 +2341,22 @@ async function loadRotation(){
     }
   }
   const indEl=document.getElementById('rotIndices');
-  if(indEl)indEl.innerHTML=ROT_DATA.indices.map(x=>rotCell(x.sym,x.name,(quotes[x.sym]||{pct:0}).pct,x.color)).join('');
+  if(indEl)indEl.innerHTML=ROT_DATA.indices.map(x=>quotes[x.sym]?rotCell(x.sym,x.name,quotes[x.sym].pct,x.color):'').join('');
   const secEl=document.getElementById('rotSectores');
   if(secEl){
-    const wp=ROT_DATA.sectores.map(x=>({...x,pct:(quotes[x.sym]||{pct:0}).pct})).sort((a,b)=>b.pct-a.pct);
+    const wp=ROT_DATA.sectores.filter(x=>quotes[x.sym]).map(x=>({...x,pct:quotes[x.sym].pct})).sort((a,b)=>b.pct-a.pct);
     secEl.innerHTML=wp.map(x=>{
       const up=x.pct>=0;const col=up?'var(--green)':'var(--red)';const bw=Math.min(Math.abs(x.pct)*20,100);
       return`<div style="display:flex;align-items:center;gap:6px;padding:4px 0;border-bottom:1px solid var(--border);"><div style="font-family:var(--mono);font-size:11px;font-weight:700;color:var(--text);min-width:44px">${x.sym}</div><div style="font-size:10px;color:var(--text3);min-width:90px">${x.name}</div><div style="flex:1;height:5px;background:var(--bg4);border-radius:3px;overflow:hidden;"><div style="height:100%;width:${bw}%;background:${col};border-radius:3px;${!up?'margin-left:auto':''}"></div></div><div style="font-family:var(--mono);font-size:11px;font-weight:700;color:${col};min-width:50px;text-align:right">${up?'+':''}${x.pct.toFixed(2)}%</div></div>`;
     }).join('');
   }
   const refEl=document.getElementById('rotRefugios');
-  if(refEl)refEl.innerHTML=ROT_DATA.refugios.map(x=>rotCell(x.sym,x.name,(quotes[x.sym]||{pct:0}).pct,x.color)).join('');
+  if(refEl)refEl.innerHTML=ROT_DATA.refugios.map(x=>quotes[x.sym]?rotCell(x.sym,x.name,quotes[x.sym].pct,x.color):'').join('');
   const sigEl=document.getElementById('rotSignal');
   if(sigEl){
-    const techPct=(quotes['XLK']||{pct:0}).pct,utilPct=(quotes['XLU']||{pct:0}).pct;
-    const goldPct=(quotes['GLD']||{pct:0}).pct,bondPct=(quotes['TLT']||{pct:0}).pct;
-    const vixPct=(quotes['VIXY']||{pct:0}).pct,semiPct=(quotes['SOXX']||{pct:0}).pct;
+    const techPct=quotes['XLK']?.pct||0,utilPct=quotes['XLU']?.pct||0;
+    const goldPct=quotes['GLD']?.pct||0,bondPct=quotes['TLT']?.pct||0;
+    const vixPct=quotes['VIXY']?.pct||0,semiPct=quotes['SOXX']?.pct||0;
     let sig='〰️ MIXTO — Sin señal clara. Opera con confirmación técnica.',col='var(--text2)',bg='var(--bg3)',bdr='var(--border)';
     if(vixPct>5&&goldPct>0&&bondPct>0&&techPct<0){sig='🚨 FUGA AL REFUGIO — VIXY↑ Oro↑ Bonos↑ Tech↓';col='var(--red)';bg='var(--red-bg)';bdr='rgba(255,77,109,.3)';}
     else if(techPct>1&&semiPct>1&&vixPct<0){sig='🚀 RISK ON — Tech↑ Semis↑ VIXY↓. Favorable para CALLS.';col='var(--green)';bg='var(--green-bg)';bdr='rgba(0,209,122,.3)';}

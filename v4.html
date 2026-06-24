@@ -4131,6 +4131,42 @@ async function notifySignal(sym, code, name, type, pct, price, pctChange){
 `+
     `_TradeDesk Pro — jonrd09.github.io/tradedesk/_`;
   await sendTelegram(msg, tok, chat);
+
+  // Adjuntar el mensaje de Telegram al historial entry correspondiente
+  // Buscar la entrada más reciente con mismo sym+code (dentro de la última hora)
+  try{
+    const _entries=getHistorial();
+    const _match=_entries.find(e=>
+      e.sym===sym &&
+      e.code===code &&
+      e.type===type &&
+      Date.now()-e.ts<3600000
+    );
+    if(_match){
+      // Convertir markdown de Telegram a texto plano legible
+      const _tgText=msg
+        .replace(/\*([^*]+)\*/g,'$1')   // quitar *bold*
+        .replace(/_([^_]+)_/g,'$1')     // quitar _italic_
+        .replace(/
+
+/g,' | ')          // saltos dobles → separador
+        .replace(/
+/g,' · ')            // saltos simples → punto
+        .trim();
+      _match.tgRef=_tgText;
+      _match.tgSent=true;
+      saveHistorial(_entries);
+      addLog('debug','Historial',`📎 Telegram adjuntado a historial: ${sym} ${code}`);
+      // Re-render si el modal está abierto
+      if(document.getElementById('historialModal')?.style.display==='flex')
+        renderHistorialList(_histFilter);
+      if(document.getElementById('cfgPanel-historial')?.style.display!=='none')
+        _renderCfgHistorial();
+    }else{
+      addLog('warn','Historial',`${sym} ${code} — no encontrado en historial para adjuntar TG`);
+    }
+  }catch(e){addLog('warn','Historial','Error adjuntando TG: '+e.message);}
+
   // Web Notification — fires even if Telegram is not configured
   _sendWebNotif(sym, type, code, pct, price);
 }

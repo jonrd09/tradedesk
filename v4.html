@@ -358,6 +358,7 @@ const SCHWAB_API_BASE='https://api.schwabapi.com/marketdata/v1';
 
 // PIN — loaded from localStorage (single definition, see full implementation below)
 let _pinBuffer='',_pinCallback=null;
+let _pinFailCount=0; // track consecutive failures
 let _testMode=false;
 let _debugMode=false; // shows all signals regardless of % threshold
 // Persiste el tiempo de primera detección de cada señal — clave: sym_code_type
@@ -1033,11 +1034,26 @@ async function _verifyPin(pin,stored){
   try{return await _hashPin(pin)===stored;}catch(e){return false;}
 }
 // Migrate: if stored PIN is old XOR format (short base64), re-hash on first correct entry
-function _isLegacyPin(stored){return stored&&stored.length<50;}
+// Legacy format detection:
+// - XOR legacy (v3):      short base64 ~8 chars, decodeable with _xor
+// - SHA-256 intermediate: exactly 44 chars base64 (SHA-256 = 32 bytes)
+// - PBKDF2 current (v4):  ~88 chars base64
+function _isLegacyPin(stored){return stored&&stored.length<88;}
+function _isSHA256Pin(stored){return stored&&stored.length===44;}
 function _legacyDecode(e){try{return _xor(atob(e),'tdp_salt_2025');}catch(ex){return ''};}
 async function _encodePin(p){return _hashPin(p);}
 // _decodePin preserved only for backward compat — returns '' (hash is one-way)
 function _decodePin(e){return '';}
+
+// Verify a PIN against SHA-256 intermediate format (44 char base64)
+async function _verifySHA256Pin(pin, stored){
+  try{
+    const enc=new TextEncoder();
+    const hashBuf=await crypto.subtle.digest('SHA-256',enc.encode(pin));
+    const hashB64=btoa(String.fromCharCode(...new Uint8Array(hashBuf)));
+    return hashB64===stored;
+  }catch(e){return false;}
+}
 function getStoredPin(){return localStorage.getItem('app_pin')||'';}
 
 function requirePin(cb,label='Ingresa tu PIN'){
@@ -1066,25 +1082,51 @@ function pinPress(d){
     setTimeout(async()=>{
       const stored=getStoredPin();
       let ok=false;
-      if(_isLegacyPin(stored)){
-        // Legacy XOR format — verify then migrate
+      if(!stored){
+        // No PIN stored — accept anything and set it as new PIN
+        ok=true;
+        const newHash=await _hashPin(_pinBuffer);
+        try{localStorage.setItem('app_pin',newHash);}catch(e){}
+        addLog('debug','PIN','PIN creado desde entrada vacía');
+      }else if(_isSHA256Pin(stored)){
+        // 44-char SHA-256 intermediate format (NpaE2S6j... type)
+        const sha256ok=await _verifySHA256Pin(_pinBuffer,stored);
+        if(sha256ok){
+          ok=true;
+          // Migrate to PBKDF2
+          const newHash=await _hashPin(_pinBuffer);
+          try{localStorage.setItem('app_pin',newHash);}catch(e){}
+          addLog('debug','PIN','SHA-256 intermedio migrado a PBKDF2');
+        }
+      }else if(_isLegacyPin(stored)){
+        // Short XOR legacy format from v3
         const legacy=_legacyDecode(stored);
         if(_pinBuffer===legacy){
           ok=true;
-          // Migrate to PBKDF2 silently
           const newHash=await _hashPin(_pinBuffer);
           try{localStorage.setItem('app_pin',newHash);}catch(e){}
-          addLog('debug','PIN','Legacy PIN migrado a PBKDF2');
+          addLog('debug','PIN','Legacy XOR migrado a PBKDF2');
         }
       }else{
+        // Current PBKDF2 format
         ok=await _verifyPin(_pinBuffer,stored);
       }
       if(ok){
+        _pinFailCount=0; // reset fail counter on success
+        const _emg=document.getElementById('pinEmergency');
+        if(_emg)_emg.style.display='none';
         document.getElementById('pinModal').style.display='none';
         _pinBuffer='';
         if(_pinCallback)_pinCallback();
       }else{
-        document.getElementById('pinError').textContent='❌ PIN incorrecto';
+        _pinFailCount++;
+        // Show emergency reset after 2 failed attempts
+        const _emg=document.getElementById('pinEmergency');
+        if(_emg&&_pinFailCount>=2)_emg.style.display='block';
+        // Show diagnostic hint
+        const _stored=localStorage.getItem('app_pin');
+        const _fmt=_stored?(_stored.length<50?'legacy':'PBKDF2'):'no PIN';
+        document.getElementById('pinError').textContent=`❌ PIN incorrecto (intento ${_pinFailCount}) — formato: ${_fmt}`;
         _pinBuffer='';
         for(let i=0;i<4;i++)document.getElementById('pd'+i).classList.remove('filled');
       }
@@ -1095,6 +1137,23 @@ function pinBack(){if(_pinBuffer.length===0)return;document.getElementById('pd'+
 function pinClear(){_pinBuffer='';for(let i=0;i<4;i++)document.getElementById('pd'+i).classList.remove('filled');document.getElementById('pinError').textContent='';}
 function closePinModal(){document.getElementById('pinModal').style.display='none';_pinBuffer='';_pinCallback=null;}
 function resetPin(){if(confirm('¿Resetear PIN? Deberás configurar uno nuevo la próxima vez.'))try{localStorage.removeItem('app_pin');alert('PIN reseteado.');}catch(e){}}
+
+function emergencyPinReset(){
+  if(!confirm('¿Resetear PIN de emergencia?\n\nEl PIN se establecerá en 2122.\nPodrás cambiarlo en Configuration → PIN después de entrar.'))return;
+  _hashPin('2122').then(h=>{
+    try{localStorage.setItem('app_pin',h);}catch(e){}
+    _pinFailCount=0;
+    const emg=document.getElementById('pinEmergency');
+    if(emg)emg.style.display='none';
+    document.getElementById('pinError').textContent='✅ PIN reseteado a 2122';
+    document.getElementById('pinError').style.color='var(--green)';
+    setTimeout(()=>{
+      document.getElementById('pinError').textContent='';
+      document.getElementById('pinError').style.color='';
+    },2000);
+    addLog('debug','PIN','Emergency PIN reset → 2122 (PBKDF2)');
+  });
+}
 
 function resetPinFull(){
   if(!confirm('¿Resetear PIN completamente?\n\nSe eliminará el PIN actual. La próxima vez que abras Configuración se te pedirá crear uno nuevo.\n\nPIN por defecto después del reset: 2122'))return;
@@ -2659,7 +2718,9 @@ async function changeCfgPin(){
   if(!/^\d{4}$/.test(old)||!/^\d{4}$/.test(n1)||!/^\d{4}$/.test(n2)){set('⚠ El PIN debe ser exactamente 4 dígitos');return;}
   const stored=getStoredPin();
   let verified=false;
-  if(_isLegacyPin(stored)){
+  if(_isSHA256Pin(stored)){
+    verified=await _verifySHA256Pin(old,stored);
+  }else if(_isLegacyPin(stored)){
     verified=(_legacyDecode(stored)===old);
   }else{
     verified=await _verifyPin(old,stored);
@@ -6205,6 +6266,14 @@ init();
       <button class="pin-key" onclick="pinBack()" style="font-size:14px;">⌫</button>
       <button class="pin-key" onclick="pinPress('0')">0</button>
       <button class="pin-key" onclick="closePinModal()" style="font-size:11px;color:var(--text3);">✕</button>
+    </div>
+    <!-- Emergency reset — visible after 2 failed attempts -->
+    <div id="pinEmergency" style="display:none;margin-top:10px;text-align:center;">
+      <button onclick="emergencyPinReset()"
+        style="background:none;border:none;color:var(--text3);font-size:11px;
+        cursor:pointer;text-decoration:underline;padding:4px 8px;">
+        ¿Olvidaste tu PIN? Resetear a 2122
+      </button>
     </div>
   </div>
 </div>

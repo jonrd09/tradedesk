@@ -2818,15 +2818,15 @@ function _renderStratTab(){
           <span style="font-size:13px;font-weight:700;color:#fff;">${s.name}</span>
           <span style="font-size:10px;color:var(--text3);font-family:var(--mono);background:var(--bg4);padding:1px 6px;border-radius:6px;">${s.code}</span>
         </div>
-        <div style="font-size:11px;color:var(--text3);">${s.desc}</div>
-        <div style="font-size:10px;color:var(--blue);margin-top:2px;">⏱ ${s.tf}</div>
+        <div style="font-size:11px;color:#fff;opacity:.75;">${s.desc}</div>
+        <div style="font-size:10px;color:#7fb3ff;margin-top:2px;">⏱ ${s.tf}</div>
       </div>
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer;flex-shrink:0;">
         <div style="position:relative;width:40px;height:22px;" onclick="_toggleStrat('${s.code}')">
           <div id="strat-track-${s.code}" style="position:absolute;inset:0;border-radius:11px;background:${on?'var(--green)':'var(--border2)'};transition:.2s;"></div>
           <div id="strat-thumb-${s.code}" style="position:absolute;top:3px;left:${on?'21px':'3px'};width:16px;height:16px;border-radius:50%;background:#fff;transition:.2s;"></div>
         </div>
-        <span id="strat-label-${s.code}" style="font-size:12px;font-weight:700;color:${on?'var(--green)':'var(--text3)'};">${on?'ON':'OFF'}</span>
+        <span id="strat-label-${s.code}" style="font-size:12px;font-weight:700;color:${on?'var(--green)':'#fff'};">${on?'ON':'OFF'}</span>
       </label>
     </div>`;
   }).join('');

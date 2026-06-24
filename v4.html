@@ -356,8 +356,7 @@ function getSchwabClientId(){return localStorage.getItem('schwab_client_id')||''
 const SCHWAB_REDIRECT='https://jonrd09.github.io/tradedesk/';
 const SCHWAB_API_BASE='https://api.schwabapi.com/marketdata/v1';
 
-// PIN se carga desde localStorage. Si no existe, el usuario debe configurarlo.
-function getStoredPin(){return localStorage.getItem('app_pin')||'';}
+// PIN — loaded from localStorage (single definition, see full implementation below)
 let _pinBuffer='',_pinCallback=null;
 let _testMode=false;
 let _debugMode=false; // shows all signals regardless of % threshold
@@ -1096,6 +1095,37 @@ function pinBack(){if(_pinBuffer.length===0)return;document.getElementById('pd'+
 function pinClear(){_pinBuffer='';for(let i=0;i<4;i++)document.getElementById('pd'+i).classList.remove('filled');document.getElementById('pinError').textContent='';}
 function closePinModal(){document.getElementById('pinModal').style.display='none';_pinBuffer='';_pinCallback=null;}
 function resetPin(){if(confirm('¿Resetear PIN? Deberás configurar uno nuevo la próxima vez.'))try{localStorage.removeItem('app_pin');alert('PIN reseteado.');}catch(e){}}
+
+function resetPinFull(){
+  if(!confirm('¿Resetear PIN completamente?\n\nSe eliminará el PIN actual. La próxima vez que abras Configuración se te pedirá crear uno nuevo.\n\nPIN por defecto después del reset: 2122'))return;
+  try{localStorage.removeItem('app_pin');}catch(e){}
+  // Set fresh default 2122
+  _hashPin('2122').then(h=>{
+    try{localStorage.setItem('app_pin',h);}catch(e){}
+    const diag=document.getElementById('pinStatusDiag');
+    if(diag){
+      diag.style.color='var(--green)';
+      diag.textContent='✅ PIN reseteado. Nuevo PIN: 2122 (cámbialo arriba después de entrar)';
+    }
+    alert('✅ PIN reseteado a 2122\n\nPuedes cambiarlo en la sección "Cambiar PIN" de arriba.');
+  });
+}
+
+function _renderPinDiag(){
+  const diag=document.getElementById('pinStatusDiag');
+  if(!diag)return;
+  const stored=localStorage.getItem('app_pin');
+  if(!stored){
+    diag.innerHTML='⚠️ Sin PIN configurado — se usará <strong>2122</strong> por defecto al próximo acceso';
+    diag.style.color='var(--yellow)';
+  }else if(_isLegacyPin(stored)){
+    diag.innerHTML=`🔄 PIN en formato <strong>legacy</strong> (v3) — se migrará automáticamente al ingresar tu PIN actual · ${stored.length} chars`;
+    diag.style.color='var(--yellow)';
+  }else{
+    diag.innerHTML=`✅ PIN en formato <strong>PBKDF2</strong> (seguro) · ${stored.length} chars`;
+    diag.style.color='var(--green)';
+  }
+}
 
 // ═══════════════════════════════════════════════════════════════
 // CLOCK & MARKET STATUS
@@ -2517,13 +2547,15 @@ function closeConfigModal(){
   document.getElementById('configModal').style.display='none';
 }
 function switchCfgTab(tab){
-  ['apis','telegram','historial','pin','tickers','estrategias'].forEach(t=>{
+  ['apis','telegram','historial','pin','tickers','estrategias','noticias'].forEach(t=>{
     document.getElementById('cfgTab-'+t).classList.toggle('active',t===tab);
     document.getElementById('cfgPanel-'+t).style.display=t===tab?'block':'none';
   });
   if(tab==='historial')_renderCfgHistorial();
   if(tab==='tickers')_renderCfgTickers();
   if(tab==='estrategias')_renderStratTab();
+  if(tab==='noticias')_renderNewsFilterTab();
+  if(tab==='pin')_renderPinDiag();
 }
 function _loadCfgFields(){
   // APIs
@@ -2923,7 +2955,10 @@ function switchNewsTab(tab){
 }
 
 // Palabras clave que SÍ muestran la noticia
-const NEWS_KEYWORDS_SHOW=[
+// ── NEWS FILTER SYSTEM — palabras editables desde Configuration ──────────────
+const _NEWS_FILTER_KEY='tdp_news_filter_v1';
+
+const _NEWS_DEFAULTS_SHOW=[
   'acquisition','merger','takeover','buyout','partnership','deal','contract','agreement',
   'ceo','cfo','coo','executive','insider','buys shares','sells shares','purchased shares',
   'earnings','revenue','guidance','outlook','forecast','beats','misses','beat','miss',
@@ -2934,8 +2969,7 @@ const NEWS_KEYWORDS_SHOW=[
   'appoints','names','hires','resigns','fired','steps down','joins',
   'patent','license','regulator','antitrust','breakup','charges'
 ];
-// Patrones clickbait que OCULTAN la noticia aunque tenga keyword
-const NEWS_KEYWORDS_HIDE=[
+const _NEWS_DEFAULTS_HIDE=[
   "here's why","top stocks","best stocks","should you buy","is it time",
   "it's time to buy","it's time to sell","its time to buy","its time to sell",
   "time to buy","time to sell","too late to buy","too late to sell",
@@ -2945,16 +2979,31 @@ const NEWS_KEYWORDS_HIDE=[
   "you need to know","what you need","etf zoo","stocks to watch",
   "don't miss","must read","need to know","trading lower today",
   "trading higher today","are trading","picks up momentum",
-  "soaring. is it","is it too","should i buy","should i sell"
+  "soaring. is it","is it too","should i buy","should i sell",
+  "blogspot","wordpress","substack","seeking alpha","motley fool",
+  "benzinga","zacks","the street","investopedia","nerdwallet",
+  "personal finance","credit card","savings account","mortgage",
+  "best etf","best mutual","best index","weekly recap","monthly recap",
+  "portfolio update","watch list","watchlist","my portfolio"
 ];
+
+function _getNewsFilter(){
+  try{
+    const saved=JSON.parse(localStorage.getItem(_NEWS_FILTER_KEY)||'null');
+    if(saved&&Array.isArray(saved.show)&&Array.isArray(saved.hide))return saved;
+  }catch(e){}
+  return{show:[..._NEWS_DEFAULTS_SHOW],hide:[..._NEWS_DEFAULTS_HIDE]};
+}
+function _saveNewsFilter(show,hide){
+  try{localStorage.setItem(_NEWS_FILTER_KEY,JSON.stringify({show,hide}));}catch(e){}
+}
 
 function newsPassesFilter(title){
   if(!title)return false;
   const t=title.toLowerCase();
-  // Primero verificar si tiene patrón de clickbait — si sí, ocultar
-  if(NEWS_KEYWORDS_HIDE.some(k=>t.includes(k)))return false;
-  // Luego verificar si tiene palabra clave relevante — si sí, mostrar
-  if(NEWS_KEYWORDS_SHOW.some(k=>t.includes(k)))return true;
+  const{show,hide}=_getNewsFilter();
+  if(hide.some(k=>t.includes(k.toLowerCase())))return false;
+  if(show.some(k=>t.includes(k.toLowerCase())))return true;
   return false;
 }
 
@@ -5085,6 +5134,95 @@ function _renderEarningsSection(){
 }
 
 // ═══════════════════════════════════════════════════════════════
+// FILTROS DE NOTICIAS — editable desde Configuration tab
+// ═══════════════════════════════════════════════════════════════
+
+function _renderNewsFilterTab(){
+  const f=_getNewsFilter();
+  _renderKeywordTags('show', f.show);
+  _renderKeywordTags('hide', f.hide);
+}
+
+function _renderKeywordTags(type, words){
+  const container=document.getElementById('newsTags'===type?'newsShowTags':type==='show'?'newsShowTags':'newsHideTags');
+  const countEl=document.getElementById(type==='show'?'newsShowCount':'newsHideCount');
+  if(!container)return;
+  const col=type==='show'?'var(--green)':'var(--red)';
+  const bgCol=type==='show'?'rgba(0,209,122,.12)':'rgba(255,77,109,.1)';
+  const borderCol=type==='show'?'rgba(0,209,122,.35)':'rgba(255,77,109,.35)';
+  container.innerHTML=words.map((w,i)=>`
+    <span style="display:inline-flex;align-items:center;gap:4px;background:${bgCol};
+      border:1px solid ${borderCol};border-radius:20px;padding:3px 10px;font-size:11px;
+      color:${col};font-family:var(--mono);">
+      ${w}
+      <button onclick="removeNewsKeyword('${type}',${i})"
+        style="background:none;border:none;color:${col};cursor:pointer;font-size:13px;
+        line-height:1;padding:0;margin-left:2px;opacity:.7;" title="Quitar">×</button>
+    </span>`).join('');
+  if(countEl)countEl.textContent=`${words.length} palabras`;
+}
+
+function addNewsKeyword(type){
+  const inputId=type==='show'?'newsShowInput':'newsHideInput';
+  const input=document.getElementById(inputId);
+  if(!input)return;
+  const val=input.value.trim().toLowerCase();
+  if(!val){input.focus();return;}
+  const f=_getNewsFilter();
+  const arr=type==='show'?f.show:f.hide;
+  if(arr.includes(val)){
+    input.style.borderColor='var(--red)';
+    setTimeout(()=>{input.style.borderColor='';},1500);
+    return;
+  }
+  arr.push(val);
+  _saveNewsFilter(f.show,f.hide);
+  input.value='';
+  _renderKeywordTags(type,arr);
+  // Flash confirmation
+  input.style.borderColor='var(--green)';
+  setTimeout(()=>{input.style.borderColor='';},800);
+}
+
+function removeNewsKeyword(type,index){
+  const f=_getNewsFilter();
+  const arr=type==='show'?f.show:f.hide;
+  arr.splice(index,1);
+  _saveNewsFilter(f.show,f.hide);
+  _renderKeywordTags(type,arr);
+}
+
+function applyNewsFilter(){
+  // Re-filter current news without re-fetching
+  if(_newsActive){
+    const area=document.getElementById('newsArea');
+    if(area){
+      // Reload from cache — _newsCache has the raw items
+      loadNews(_newsActive);
+    }
+  }
+  const r=document.getElementById('newsFilterResult');
+  if(r){
+    r.textContent='✅ Filtros aplicados — noticias actualizadas';
+    r.style.color='var(--green)';
+    setTimeout(()=>{r.textContent='';},3000);
+  }
+}
+
+function resetNewsFilter(){
+  if(!confirm('¿Restaurar los filtros de noticias a los valores por defecto? Se perderán tus cambios.'))return;
+  localStorage.removeItem(_NEWS_FILTER_KEY);
+  _renderNewsFilterTab();
+  applyNewsFilter();
+  const r=document.getElementById('newsFilterResult');
+  if(r){
+    r.textContent='🔄 Filtros restaurados a defaults';
+    r.style.color='var(--text3)';
+    setTimeout(()=>{r.textContent='';},3000);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
 // PANEL DE ÍNDICES DEL DÍA — SPY · QQQ · IWM · DIA
 // Sparklines usando velas 15min de Schwab
 // ═══════════════════════════════════════════════════════════════
@@ -5297,9 +5435,21 @@ function renderIndicesPanel(){
 }
 
 async function init(){
-  // Establecer PIN por defecto (2122) si no hay ninguno configurado
-  if(!getStoredPin()){
-    _hashPin('2122').then(h=>{try{localStorage.setItem('app_pin',h);}catch(e){}});
+  // PIN: solo establecer default si no hay absolutamente ninguno guardado
+  // NUNCA sobreescribir un PIN existente (incluyendo PINs legacy de v3)
+  const _existingPin=localStorage.getItem('app_pin');
+  if(!_existingPin){
+    // Primer uso — guardar PIN default 2122 en PBKDF2
+    _hashPin('2122').then(h=>{
+      try{localStorage.setItem('app_pin',h);}catch(e){}
+      addLog('debug','PIN','PIN default 2122 configurado (PBKDF2)');
+    });
+  }else if(_isLegacyPin(_existingPin)){
+    // PIN legacy detectado — NO migrar automáticamente en init
+    // La migración ocurre al ingresar el PIN correcto en pinPress()
+    addLog('debug','PIN',`PIN legacy detectado (${_existingPin.length} chars) — se migrará al próximo login`);
+  }else{
+    addLog('debug','PIN',`PIN PBKDF2 activo (${_existingPin.length} chars)`);
   }
   // Load ticker configuration (must be first — everything else reads from it)
   loadTickerConfig();
@@ -5759,6 +5909,7 @@ init();
       <button class="cfg-tab"        id="cfgTab-pin"       onclick="switchCfgTab('pin')"      >🔐 PIN</button>
       <button class="cfg-tab"        id="cfgTab-tickers"   onclick="switchCfgTab('tickers')"  >🎛️ Tickers</button>
       <button class="cfg-tab"        id="cfgTab-estrategias" onclick="switchCfgTab('estrategias')">📊 Estrategias</button>
+      <button class="cfg-tab"        id="cfgTab-noticias"  onclick="switchCfgTab('noticias')" >📰 Noticias</button>
     </div>
 
     <!-- Body (scrollable) -->
@@ -5889,10 +6040,14 @@ init();
         <div id="cfg-pinResult" style="font-size:12px;margin-top:8px;min-height:16px;"></div>
 
         <div style="border-top:1px solid var(--border);margin-top:20px;padding-top:14px;">
-          <div style="font-size:11px;color:var(--text3);margin-bottom:8px;">Si olvidaste tu PIN, puedes resetearlo (perderás la protección hasta configurar uno nuevo):</div>
-          <button onclick="resetPin()"
-            style="background:none;border:1px solid var(--border2);color:var(--text3);border-radius:var(--r);padding:6px 14px;font-size:12px;cursor:pointer;">
-            ⚠️ Resetear PIN
+          <!-- PIN status diagnostic -->
+          <div id="pinStatusDiag" style="font-size:11px;background:var(--bg4);border:1px solid var(--border);
+            border-radius:var(--r);padding:8px 10px;margin-bottom:12px;color:var(--text3);line-height:1.6;"></div>
+          <div style="font-size:11px;color:var(--text3);margin-bottom:8px;">Si olvidaste tu PIN o no funciona, resetéalo aquí. Al próximo intento de acceso a Config se te pedirá crear uno nuevo:</div>
+          <button onclick="resetPinFull()"
+            style="background:rgba(255,77,109,.1);border:1px solid rgba(255,77,109,.3);color:var(--red);
+            border-radius:var(--r);padding:8px 16px;font-size:12px;font-weight:700;cursor:pointer;">
+            ⚠️ Resetear PIN y crear nuevo
           </button>
         </div>
       </div>
@@ -5921,6 +6076,69 @@ init();
         <div style="font-size:11px;color:var(--text3);margin-bottom:14px;">Activa o desactiva cada estrategia. Los cambios aplican en el siguiente ciclo de señales.</div>
         <div id="stratList" style="display:flex;flex-direction:column;gap:8px;"></div>
       </div>
+
+      <!-- ── FILTROS DE NOTICIAS ─────────────────────────────── -->
+      <div id="cfgPanel-noticias" style="display:none;">
+        <div class="cfg-section-title">Filtros de Noticias</div>
+        <div style="font-size:11px;color:var(--text3);margin-bottom:14px;line-height:1.6;">
+          Controla qué noticias aparecen en el panel. Las noticias deben tener al menos una palabra
+          <strong style="color:var(--green);">MOSTRAR</strong> y ninguna palabra
+          <strong style="color:var(--red);">BLOQUEAR</strong> para pasar el filtro.
+        </div>
+
+        <!-- SHOW keywords -->
+        <div style="margin-bottom:16px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+            <span style="font-size:12px;font-weight:700;color:var(--green);">✅ PALABRAS QUE MUESTRAN la noticia</span>
+            <span id="newsShowCount" style="font-size:11px;color:var(--text3);"></span>
+          </div>
+          <div id="newsShowTags" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;min-height:36px;
+            background:var(--bg4);border:1px solid var(--border);border-radius:var(--r);padding:8px;"></div>
+          <div style="display:flex;gap:6px;">
+            <input id="newsShowInput" type="text" placeholder="Agregar palabra o frase…"
+              style="flex:1;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);
+              color:var(--text);padding:7px 10px;font-size:12px;outline:none;"
+              onkeydown="if(event.key==='Enter')addNewsKeyword('show')">
+            <button onclick="addNewsKeyword('show')"
+              style="background:var(--green);color:#001a0e;border:none;border-radius:var(--r);
+              padding:7px 14px;font-size:12px;font-weight:700;cursor:pointer;">+ Agregar</button>
+          </div>
+        </div>
+
+        <!-- HIDE keywords -->
+        <div style="margin-bottom:16px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+            <span style="font-size:12px;font-weight:700;color:var(--red);">🚫 PALABRAS QUE BLOQUEAN la noticia</span>
+            <span id="newsHideCount" style="font-size:11px;color:var(--text3);"></span>
+          </div>
+          <div id="newsHideTags" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;min-height:36px;
+            background:var(--bg4);border:1px solid var(--border);border-radius:var(--r);padding:8px;"></div>
+          <div style="display:flex;gap:6px;">
+            <input id="newsHideInput" type="text" placeholder="Agregar palabra o frase a bloquear…"
+              style="flex:1;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);
+              color:var(--text);padding:7px 10px;font-size:12px;outline:none;"
+              onkeydown="if(event.key==='Enter')addNewsKeyword('hide')">
+            <button onclick="addNewsKeyword('hide')"
+              style="background:var(--red);color:#fff;border:none;border-radius:var(--r);
+              padding:7px 14px;font-size:12px;font-weight:700;cursor:pointer;">+ Bloquear</button>
+          </div>
+        </div>
+
+        <!-- Actions -->
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <button onclick="applyNewsFilter()"
+            style="background:var(--blue);color:#fff;border:none;border-radius:var(--r);
+            padding:8px 18px;font-size:12px;font-weight:700;cursor:pointer;">
+            ✅ Aplicar filtros ahora
+          </button>
+          <button onclick="resetNewsFilter()"
+            style="background:var(--bg4);border:1px solid var(--border2);border-radius:var(--r);
+            color:var(--text3);padding:8px 14px;font-size:12px;cursor:pointer;">
+            🔄 Restaurar defaults
+          </button>
+          <div id="newsFilterResult" style="font-size:11px;color:var(--green);min-height:16px;"></div>
+        </div>
+      </div><!-- /cfgPanel-noticias -->
 
     </div><!-- /body -->
   </div>

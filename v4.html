@@ -691,9 +691,23 @@ async function fetchSchwabCandles(sym,freqType,freq,bars=50){
   for(const cfg of configs){
     try{
       const fetchBars=cfg._merge1h?bars*2:bars;
-      // Para intraday: pedir sin startDate fijo (Schwab decide el rango según period)
-      // Para Daily: usar período más largo para tener historia suficiente (min 20 velas para MA20)
-      const url=`${SCHWAB_API_BASE}/pricehistory?symbol=${sym}&periodType=${cfg.periodType}&period=${cfg.period}&frequencyType=${cfg.frequencyType}&frequency=${cfg.frequency}&needExtendedHoursData=true`;
+      // Para intraday: anclar startDate al día actual − period días para evitar que Schwab
+      // devuelva datos de períodos incorrectos. endDate = ahora (incluye hoy).
+      // Para Daily: sin startDate — Schwab elige el rango más largo disponible.
+      let url=`${SCHWAB_API_BASE}/pricehistory?symbol=${sym}&periodType=${cfg.periodType}&period=${cfg.period}&frequencyType=${cfg.frequencyType}&frequency=${cfg.frequency}`;
+      if(cfg.frequencyType==='minute'){
+        // Anclar al rango exacto: desde (hoy − period días) hasta ahora
+        // Esto elimina el problema de Schwab devolviendo velas de períodos incorrectos
+        const _endMs=Date.now();
+        const _startMs=_endMs-(cfg.period*24*60*60*1000);
+        url+=`&startDate=${_startMs}&endDate=${_endMs}`;
+        // needExtendedHoursData=false para intraday: evita mezclar pre/post-market
+        // que tienen precios distintos y contaminan los indicadores
+        url+=`&needExtendedHoursData=false`;
+      }else{
+        // Daily: extended hours no aplica, solo pedir datos normales
+        url+=`&needExtendedHoursData=false`;
+      }
       // Inyectar vela de hoy si los datos históricos son de ayer o antes (solo para intraday)
       // Schwab /pricehistory tiene delay en el día actual — usamos /quotes para la vela actual
       async function _injectTodayCandle(candles){
@@ -779,6 +793,36 @@ async function fetchSchwabCandles(sym,freqType,freq,bars=50){
       }
       const sl=candles.slice(-bars);
       if(sl.length<5)continue;
+
+      // ── PRICE SANITY CHECK — detectar datos corruptos o de instrumento equivocado ──
+      // Si los precios del dataset varían >60% respecto al precio live de Finnhub (si existe),
+      // o si hay precios claramente anómalos (0, negativos, NaN), descartar el dataset.
+      {
+        const _closes=sl.map(v=>v.close).filter(v=>Number.isFinite(v)&&v>0);
+        if(!_closes.length){
+          addLog('warn','Schwab',`${sym} ${cfg._merge1h?'1H':cfg.frequency+'min'} → closes inválidos — descartado`);
+          continue;
+        }
+        const _minC=Math.min(..._closes), _maxC=Math.max(..._closes);
+        // Variación interna excesiva (>80% dentro del mismo dataset = instrumento distinto)
+        if(_minC>0&&(_maxC/_minC)>1.8){
+          addLog('warn','Schwab',`${sym} ${cfg._merge1h?'1H':cfg.frequency+'min'} → rango anómalo $${_minC.toFixed(2)}–$${_maxC.toFixed(2)} — descartado`);
+          continue;
+        }
+        // Validar contra precio live de Finnhub si disponible
+        const _lp=_livePrices[sym];
+        if(_lp&&_lp.price>0){
+          const _lastClose=_closes[_closes.length-1];
+          const _diffPct=Math.abs(_lastClose-_lp.price)/_lp.price*100;
+          // Umbral 15%: cubre moves extremos de earnings (TSLA ±12%)
+          // pero bloquea datasets de períodos equivocados (PLTR $135 vs real $116 = 16%)
+          if(_diffPct>15){
+            addLog('warn','Schwab',`${sym} ${cfg._merge1h?'1H':cfg.frequency+'min'} → precio Schwab ($${_lastClose.toFixed(2)}) difiere ${_diffPct.toFixed(0)}% del precio Finnhub ($${_lp.price.toFixed(2)}) — descartado`);
+            continue;
+          }
+        }
+      }
+
       // ── FRESHNESS GUARD — rechazar datos de más de 2 días hábiles atrás ──────
       // Esto previene que velas de días pasados generen señales fantasma
       const _tfLabel=cfg._merge1h?'1H':cfg.frequencyType==='daily'?'D':(cfg.frequency+'min');
@@ -1119,8 +1163,13 @@ async function loadLivePrices(){
   const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
   const timeStr=et.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:true});
   const liveCount=Object.keys(_livePrices).length;
+  const failedSyms=syms.filter(s=>!_livePrices[s]||!_livePrices[s].price);
+  if(failedSyms.length){
+    addLog('warn','Finnhub',`Sin precio para: ${failedSyms.join(', ')} — Schwab usará último close disponible`);
+  }
+  addLog('debug','Finnhub',`Precios actualizados: ${liveCount}/${syms.length} tickers · ${syms.filter(s=>_livePrices[s]).map(s=>`${s}=$${_livePrices[s].price.toFixed(2)}`).join(' ')}`);
   const tag=document.getElementById('liveTag');
-  if(tag){tag.textContent=`● Live·Finnhub · ${liveCount} activos · ${timeStr} ET`;tag.style.color='var(--green)';}
+  if(tag){tag.textContent=`● Live·Finnhub · ${liveCount}/${syms.length} · ${timeStr} ET`;tag.style.color=liveCount===syms.length?'var(--green)':'var(--yellow)';}
   const lrt=document.getElementById('lastRefreshTime');
   if(lrt)lrt.textContent=timeStr;
   const ks=document.getElementById('keyStatus');
@@ -3338,7 +3387,15 @@ async function runDebugMode(){
     if(logBtn)logBtn.style.display='inline-block';
     await buildSignals();
     const area=document.getElementById('signalArea');
-    area.innerHTML='<div style="text-align:center;padding:6px 12px;color:#ffc234;font-size:11px;font-weight:700;border:1px solid rgba(255,194,52,.3);border-radius:8px;margin-bottom:10px;background:rgba(255,194,52,.08);">🔍 MODO DEBUG — Mostrando TODAS las señales con datos reales (sin filtro de 75%)</div>'+area.innerHTML;
+    // Check if after-hours — add strong warning
+    const _dbgEt=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+    const _dbgMins=_dbgEt.getHours()*60+_dbgEt.getMinutes();
+    const _dbgDay=_dbgEt.getDay();
+    const _isAfterHours=!(_dbgDay>=1&&_dbgDay<=5&&_dbgMins>=570&&_dbgMins<960);
+    const _ahWarning=_isAfterHours
+      ?`<div style="text-align:center;padding:6px 12px;color:#ff4d6d;font-size:11px;font-weight:700;border:1px solid rgba(255,77,109,.4);border-radius:8px;margin-bottom:6px;background:rgba(255,77,109,.08);">⚠ MERCADO CERRADO — Datos de after-hours pueden ser inexactos. Las señales en horario de mercado serán más confiables.</div>`
+      :'';
+    area.innerHTML='<div style="text-align:center;padding:6px 12px;color:#ffc234;font-size:11px;font-weight:700;border:1px solid rgba(255,194,52,.3);border-radius:8px;margin-bottom:6px;background:rgba(255,194,52,.08);">🔍 MODO DEBUG — Mostrando TODAS las señales con datos reales (sin filtro de 75%)</div>'+_ahWarning+area.innerHTML;
   }else{
     btn.textContent='🔍 Debug';
     btn.style.background='rgba(167,139,250,.15)';
@@ -5019,13 +5076,25 @@ async function init(){
     const _isOpen=_d>=1&&_d<=5&&_mins>=570&&_mins<960;
     const _isPre=_d>=1&&_d<=5&&_mins>=240&&_mins<570;
 
-    // Always load live prices first
-  
-    // Load signals and momentum if market is open or premarket
+    // SIEMPRE cargar precios Finnhub PRIMERO — luego señales
+    // Esto garantiza que el price sanity check de Schwab tiene precios live para comparar
+    // loadLivePrices() ya llama buildSignals() + loadRotation() al terminar
     if(_isOpen||_isPre){
-      await buildSignals();
+      // Precios primero, luego señales (loadLivePrices llama buildSignals internamente)
+      await loadLivePrices();
+      // Auto-refresh Finnhub cada 5 min durante mercado — precios siempre frescos
+      if(window._priceInterval)clearInterval(window._priceInterval);
+      window._priceInterval=setInterval(async()=>{
+        const _etP=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+        const _mP=_etP.getHours()*60+_etP.getMinutes(),_dP=_etP.getDay();
+        if(_dP>=1&&_dP<=5&&_mP>=570&&_mP<960){
+          await loadLivePrices(); // también llama buildSignals al terminar
+        }
+      },5*60*1000);
     }else{
-      // Market closed — show message
+      // Mercado cerrado — igual cargamos precios para tenerlos listos (sin buildSignals)
+      // loadLivePrices llama buildSignals; este mostrará "mercado cerrado"
+      await loadLivePrices();
       document.getElementById('signalArea').innerHTML='<div style="text-align:center;padding:30px;color:var(--text2);font-size:13px;"><div style="font-size:28px;margin-bottom:10px">🌙</div><div style="font-weight:600;">Mercado cerrado</div><div style="font-size:11px;margin-top:6px;color:var(--text3)">Las señales se activarán automáticamente a las 9:30 AM ET</div></div>';
     }
 
@@ -5143,7 +5212,9 @@ async function init(){
     _updateCountdownUI();
   },1000);
 
-  // Auto-refresh señales cada 10 min durante mercado — para no perder señales
+  // Auto-refresh señales cada 10 min durante mercado
+  // Nota: el _priceInterval de 5min ya llama loadLivePrices→buildSignals.
+  // Este intervalo de 10min cubre el caso en que _priceInterval no corra (sin key Finnhub).
   if(window._sigInterval)clearInterval(window._sigInterval);
   window._sigInterval=setInterval(async()=>{
     const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
@@ -5151,10 +5222,14 @@ async function init(){
     const isOpen=day>=1&&day<=5&&mins>=570&&mins<960;
     const isPre=day>=1&&day<=5&&mins>=515&&mins<570;
     if(isOpen||isPre){
-      // Clear Telegram sent flags so signals re-evaluate fresh each cycle
-      // Only clear SETUP flags — real signals keep anti-duplicate for the session
       Object.keys(sessionStorage).filter(k=>k.startsWith('tg_sent_setup_')).forEach(k=>sessionStorage.removeItem(k));
-      await buildSignals();
+      // Si hay key Finnhub, loadLivePrices llama buildSignals internamente
+      const _hasKey=getKey()&&getKey().length>8;
+      if(_hasKey){
+        await loadLivePrices();
+      }else{
+        await buildSignals(); // solo Schwab si no hay Finnhub
+      }
       await checkMarketBlockMove();
     }
   },10*60*1000);

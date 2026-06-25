@@ -1884,6 +1884,7 @@ async function _buildSignalsCore(){
       ]});
     }
     // BB-B: PUT — Bollinger (gate) bajista
+    const bollGatePut=lBBW15>=1.5&&mediaDn&&approachingLower&&bigBodyPut&&_putGuardOk;
     if(_stratEnabled('BB-B')&&bollGatePut){
       let score=W.bollinger;
       if(maPutCross)  score+=W.medias;

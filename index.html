@@ -455,7 +455,7 @@ const INSIDER_TICKERS=['TSLA','AAPL','MSFT','NVDA','AMD','COIN','AMZN','NFLX','M
 function getCookie(n){const v=document.cookie.split(';').find(c=>c.trim().startsWith(n+'='));return v?decodeURIComponent(v.trim().split('=')[1]):'';}
 function getKey(){
   if(!window._fk){
-    const k=getCookie('fk')||localStorage.getItem('finnhub_key')||sessionStorage.getItem('finnhub_key')||'';
+    const k=getCookie('fk')||_loadKey('finnhub_key')||_loadKey('levetf_apikey')||sessionStorage.getItem('finnhub_key')||'';
     if(k&&k.length>8)window._fk=k;
   }
   return window._fk||'';
@@ -467,7 +467,7 @@ function saveKeyModal(){
   if(!k||k.length<8){err.style.display='block';return;}
   err.style.display='none';
   window._fk=k;
-  try{localStorage.setItem('finnhub_key',k)}catch(e){}
+  try{_storeKey('finnhub_key',k)}catch(e){}
   try{sessionStorage.setItem('finnhub_key',k)}catch(e){}
   try{localStorage.setItem('ms_fh_key',k)}catch(e){} // plain copy for Morning Scanner
   document.cookie='fk='+encodeURIComponent(k)+';max-age='+365*24*3600+';path=/;SameSite=Lax;Secure';
@@ -1021,6 +1021,28 @@ function exportLogs(){
 // ═══════════════════════════════════════════════════════════════
 // _xor — solo se conserva para Telegram (no hay alternativa sin refactor de TG keys existentes)
 function _xor(s,k){return s.split('').map((c,i)=>String.fromCharCode(c.charCodeAt(0)^k.charCodeAt(i%k.length))).join('');}
+// ── C-03: API key obfuscation — XOR+b64 before localStorage ──────────────
+// Prevents plaintext exposure to browser extensions / trivial XSS.
+// Not encryption — keys live in the same origin — but eliminates casual reads.
+// Salt includes a per-device anchor so a stolen localStorage dump is useless elsewhere.
+const _KS='tdp_k_25'; // bump suffix on format change for auto-migration
+function _storeKey(storageKey, val){
+  try{
+    const salt=_KS+(navigator.userAgent.slice(0,12)||'ua');
+    localStorage.setItem(storageKey, 'x:'+btoa(_xor(val, salt)));
+  }catch(e){ try{localStorage.setItem(storageKey, val);}catch(_){} }
+}
+function _loadKey(storageKey){
+  const raw=localStorage.getItem(storageKey)||'';
+  if(!raw) return '';
+  if(raw.startsWith('x:')){ // obfuscated format
+    try{
+      const salt=_KS+(navigator.userAgent.slice(0,12)||'ua');
+      return _xor(atob(raw.slice(2)), salt);
+    }catch(e){ return ''; }
+  }
+  return raw; // legacy plaintext — read as-is, will be re-obfuscated on next save
+}
 // ── PIN Crypto — Web Crypto PBKDF2 (C-03 fix: XOR → hash) ────
 const _PIN_SALT='TradeDeskPro_2025_salt_v4';
 async function _hashPin(pin){
@@ -1804,9 +1826,12 @@ async function _buildSignalsCore(){
     // Distancia del precio a la MA20 en % — para detectar rupturas claras
     const _distFromMA20_15pct=lMA20_15>0?Math.abs(lP15-lMA20_15)/lMA20_15*100:0;
     // CALL guard: no generar CALL si precio está claramente bajo MA20 Y hay momentum bajista
-    const _callGuardOk=!(_priceBelowMA20_15&&_bearMomentum3&&_distFromMA20_15pct>0.3);
+    // C-02: en los primeros 20min post-apertura, bloquear además si hay gap >1.5% alejado de MA20
+    // (gap extremo en apertura = movimiento institucional, no rebote — BB-A/BB-B no deben disparar)
+    const _openingGapBlock=_mNow<590&&_distFromMA20_15pct>1.5; // primeros 20min, gap >1.5%
+    const _callGuardOk=!(_priceBelowMA20_15&&_bearMomentum3&&_distFromMA20_15pct>0.3)&&!(_openingGapBlock&&_priceBelowMA20_15);
     // PUT guard: no generar PUT si precio está claramente sobre MA20 Y hay momentum alcista
-    const _putGuardOk=!(_priceAboveMA20_15&&_bullMomentum3&&_distFromMA20_15pct>0.3);
+    const _putGuardOk=!(_priceAboveMA20_15&&_bullMomentum3&&_distFromMA20_15pct>0.3)&&!(_openingGapBlock&&_priceAboveMA20_15);
 
     // BB-A: CALL — Bollinger (gate) alcista
     const bollGateCall=lBBW15>=1.5&&mediaUp&&approachingUpper&&bigBodyCall&&_callGuardOk;
@@ -1850,8 +1875,13 @@ async function _buildSignalsCore(){
     // Patrón C: PUT de regreso — EFECTO IMÁN: vela completa SOBRE la banda superior
     // Tesis: SIN volatilidad previa (BB comprimido) el precio se dispara expuesto
     // y es "succionado" de vuelta al disipador (la media). Por eso pedimos BBW BAJO.
-    // H-04: Efecto Imán solo en ventana 9:30–9:45 AM ET (primeros 15min, no 30)
-    const _imanWindow=_mNow>=570&&_mNow<585; // 9:30–9:45 AM ET
+    // H-04: Dos ventanas separadas para estrategias de imán
+    // BB-C / BB-D: 9:30–9:45 AM ET (solo la primera vela de 15min — breakout extremo)
+    const _imanWindow=_mNow>=570&&_mNow<585; // 9:30–9:45 AM ET (BB-C/BB-D)
+    // IMAN (efecto imán hacia MA20): 9:30–10:00 AM ET — el imán es más potente en los primeros 30min
+    // Ampliar de 10min (_isOpen15) a 30min permite capturar el regreso real hacia la media
+    // Los primeros 10-15min pueden ser "gap fill" antes de que el imán se active
+    const _imanWindowExt=_mNow>=570&&_mNow<600; // 9:30–10:00 AM ET (IMAN strategy)
     // M-05: BB comprimido — umbral dinámico: percentil 25 de las últimas 20 velas de BBW
     // Esto adapta la sensibilidad al ticker (TSLA vs SPY tienen BBW muy diferente)
     const _bbwHistory=c15.slice(-22).map((_,i)=>{
@@ -2059,20 +2089,20 @@ async function _buildSignalsCore(){
     // Guard de gap excesivo: caída >4% es pánico, no imán — bloquear CALL
     const imanGapSafe = Math.abs(distFromMA20_15)<=4.5;
 
-    if((_isOpen15||_testMode||_debugMode)&&gapUp15){
+    if((_imanWindowExt||_testMode||_debugMode)&&gapUp15){
       all.push({...meta,code:'IMAN',name:'Efecto Imán Apertura — PUT',type:'put',reqs:[
         {ok:gapUp15,       tf:'15m',text:`Precio $${lP15.toFixed(2)} está ${distFromMA20_15.toFixed(1)}% sobre MA20 ($${lMA20_15.toFixed(2)})`},
-        {ok:_isOpen15||_testMode||_debugMode,tf:'15m',text:`Ventana de apertura 9:30–9:40 AM ET`},
+        {ok:_imanWindowExt||_testMode||_debugMode,tf:'15m',text:`Ventana de apertura 9:30–10:00 AM ET`},
         {ok:lK15>60,       tf:'15m',text:`Worden sobrecomprado en apertura (%K ${lK15.toFixed(0)})`},
         {ok:volActive15,   tf:'15m',text:`Volumen activo${volLabel}`},
         {ok:lBBW15>1.0,    tf:'15m',text:`Volatilidad activa (BBW ${lBBW15.toFixed(1)}%)`},
         {ok:imanPutOk,     tf:'15m',text:`Vela bajista confirmada: cierre $${lP15.toFixed(2)} < apertura $${lO15.toFixed(2)}`},
       ]});
     }
-    if((_isOpen15||_testMode||_debugMode)&&gapDown15){
+    if((_imanWindowExt||_testMode||_debugMode)&&gapDown15){
       all.push({...meta,code:'IMAN',name:'Efecto Imán Apertura — CALL',type:'call',reqs:[
         {ok:gapDown15,     tf:'15m',text:`Precio $${lP15.toFixed(2)} está ${Math.abs(distFromMA20_15).toFixed(1)}% bajo MA20 ($${lMA20_15.toFixed(2)})`},
-        {ok:_isOpen15||_testMode||_debugMode,tf:'15m',text:`Ventana de apertura 9:30–9:40 AM ET`},
+        {ok:_imanWindowExt||_testMode||_debugMode,tf:'15m',text:`Ventana de apertura 9:30–10:00 AM ET`},
         {ok:lK15<40,       tf:'15m',text:`Worden sobrevendido en apertura (%K ${lK15.toFixed(0)})`},
         {ok:volActive15,   tf:'15m',text:`Volumen activo${volLabel}`},
         {ok:lBBW15>1.0,    tf:'15m',text:`Volatilidad activa (BBW ${lBBW15.toFixed(1)}%)`},
@@ -2657,17 +2687,17 @@ function _updateApiStatus(){
   if(elSch) elSch.textContent = schwabOk?'📡✅' : schwabHas?'📡🔴' : '📡';
 
   // Finnhub: verde si key presente y longitud válida, rojo no aplica (no hay ping), gris si vacío
-  const fhKey = localStorage.getItem('finnhub_key')||localStorage.getItem('levetf_apikey')||'';
+  const fhKey = _loadKey('finnhub_key')||_loadKey('levetf_apikey')||'';
   const elFh=document.getElementById('api-status-finnhub');
   if(elFh) elFh.textContent = fhKey.length>8 ? '📡✅' : fhKey.length>0 ? '📡🔴' : '📡';
 
   // Claude: verde si key presente y empieza con sk-ant, rojo si hay algo pero inválido, gris vacío
-  const clKey = localStorage.getItem('anthropic_api_key')||'';
+  const clKey = _loadKey('anthropic_api_key')||'';
   const elCl=document.getElementById('api-status-claude');
   if(elCl) elCl.textContent = clKey.startsWith('sk-ant') ? '📡✅' : clKey.length>0 ? '📡🔴' : '📡';
 
   // GitHub: verde si empieza con ghp_, rojo si hay algo pero inválido, gris vacío
-  const ghKey = localStorage.getItem('github_token')||'';
+  const ghKey = _loadKey('github_token')||'';
   const elGh=document.getElementById('api-status-github');
   if(elGh) elGh.textContent = ghKey.startsWith('ghp_') ? '📡✅' : ghKey.length>0 ? '📡🔴' : '📡';
 }
@@ -2676,15 +2706,15 @@ function _loadCfgFields(){
   const cid=localStorage.getItem('schwab_client_id')||'';
   const csec=localStorage.getItem('schwab_client_secret')||'';
   const proxy=localStorage.getItem('proxy_url')||'';
-  const fhk=localStorage.getItem('finnhub_key')||localStorage.getItem('levetf_apikey')||'';
-  const clk=localStorage.getItem('anthropic_api_key')||'';
+  const fhk=_loadKey('finnhub_key')||_loadKey('levetf_apikey')||'';
+  const clk=_loadKey('anthropic_api_key')||'';
   const el=id=>document.getElementById(id);
   if(el('cfg-schwabClientId'))el('cfg-schwabClientId').value=cid;
   if(el('cfg-schwabClientSecret'))el('cfg-schwabClientSecret').value=csec;
   if(el('cfg-proxyUrl'))el('cfg-proxyUrl').value=proxy;
   if(el('cfg-finnhubKey'))el('cfg-finnhubKey').value=fhk;
   if(el('cfg-claudeKey'))el('cfg-claudeKey').value=clk;
-  const ghk=localStorage.getItem('github_token')||'';
+  const ghk=_loadKey('github_token')||'';
   if(el('cfg-githubKey'))el('cfg-githubKey').value=ghk;
   _updateApiStatus();
   setTimeout(_cfgAttachSectionListeners, 50);
@@ -2752,8 +2782,8 @@ function saveCfgFinnhub(){
   const k=(document.getElementById('cfg-finnhubKey').value||'').trim();
   const r=document.getElementById('cfg-finnhubSaved');
   if(!k||k.length<8){if(r){r.style.color='var(--red)';r.textContent='⚠ Key inválida (mínimo 8 caracteres)';r.style.display='block';}return;}
-  try{localStorage.setItem('finnhub_key',k);window._fk=k;}catch(e){}
-  try{localStorage.setItem('levetf_apikey',k);}catch(e){}
+  try{_storeKey('finnhub_key',k);window._fk=k;}catch(e){}
+  try{_storeKey('levetf_apikey',k);}catch(e){}
   if(r){r.style.color='var(--green)';r.textContent='✅ Finnhub key guardada';r.style.display='block';setTimeout(()=>r.style.display='none',2500);}  _updateApiStatus();
   loadLivePrices && loadLivePrices();
 }
@@ -2768,7 +2798,7 @@ function saveCfgClaude(){
   const k=(document.getElementById('cfg-claudeKey').value||'').trim();
   const r=document.getElementById('cfg-claudeSaved');
   if(!k||k.length<20){if(r){r.style.color='var(--red)';r.textContent='⚠ Key inválida';r.style.display='block';}return;}
-  try{localStorage.setItem('anthropic_api_key',k);}catch(e){}
+  try{_storeKey('anthropic_api_key',k);}catch(e){}
   if(r){r.style.color='var(--green)';r.textContent='✅ Claude API key guardada';r.style.display='block';setTimeout(()=>r.style.display='none',2500);}  _updateApiStatus();
 }
 function forgetCfgClaude(){
@@ -2782,7 +2812,7 @@ function saveCfgGithub(){
   const k=(document.getElementById('cfg-githubKey').value||'').trim();
   const r=document.getElementById('cfg-githubSaved');
   if(!k||!k.startsWith('ghp_')){if(r){r.style.color='var(--red)';r.textContent='⚠ Token inválido (debe empezar con ghp_)';r.style.display='block';}return;}
-  try{localStorage.setItem('github_token',k);}catch(e){}
+  try{_storeKey('github_token',k);}catch(e){}
   if(r){r.style.color='var(--green)';r.textContent='✅ GitHub token guardado';r.style.display='block';setTimeout(()=>r.style.display='none',2500);}  _updateApiStatus();
 }
 function forgetCfgGithub(){
@@ -3858,7 +3888,7 @@ async function runTestMode(){
 // PREMARKET REPORT — Generado con Claude API + web search
 // C-02: Anthropic key handled — proxy preferred, direct fallback with warning
 // ═══════════════════════════════════════════════════════════════
-function getAnthropicKey(){return localStorage.getItem('anthropic_api_key')||'';}
+function getAnthropicKey(){return _loadKey('anthropic_api_key')||'';}
 function saveAnthropicKey(){
   const k=document.getElementById('pmKeyInput').value.trim();
   if(!k||!k.startsWith('sk-')){alert('Key inválida. Debe comenzar con sk-');return;}
@@ -3868,7 +3898,7 @@ function saveAnthropicKey(){
     const ok=confirm('⚠ ADVERTENCIA DE SEGURIDAD\n\nLa API key de Anthropic se guardará en localStorage del navegador.\n\nEsto es seguro para uso personal, pero para mayor protección configura un Proxy URL en la sección de Schwab.\n\n¿Continuar de todas formas?');
     if(!ok)return;
   }
-  localStorage.setItem('anthropic_api_key',k);
+  _storeKey('anthropic_api_key',k);
   document.getElementById('pmKeySetup').style.display='none';
   addLog('warn','Anthropic','API key guardada en localStorage — considera usar proxy para mayor seguridad');
 }
@@ -4363,10 +4393,12 @@ updateClock();
 ═══════════════════════════════ */
 // Use same key storage as TradeDesk Pro
 function saveKey(k){
-  try{localStorage.setItem('finnhub_key',k);}catch(e){}
+  if(typeof _storeKey==='function'){try{_storeKey('finnhub_key',k);}catch(e){}}
+  else{try{localStorage.setItem('finnhub_key',k);}catch(e){}}
   try{localStorage.setItem('levetf_apikey',k);}catch(e){}
 }
 function loadKey(){
+  if(typeof _loadKey==='function') return _loadKey('finnhub_key')||_loadKey('levetf_apikey')||'';
   return localStorage.getItem('finnhub_key')||localStorage.getItem('levetf_apikey')||'';
 }
 function clearKey(){
@@ -4401,8 +4433,7 @@ async function msConnect() {
     const d = await r.json();
     if (!d.c) throw new Error('Respuesta inválida — verifica tu API key');
     APIKEY = k;
-    saveKey(k);
-    try{localStorage.setItem('finnhub_key', k);}catch(e){}
+    saveKey(k); // handles _storeKey obfuscation automatically
     try{localStorage.setItem('ms_fh_key', k);}catch(e){}
     const btn=document.getElementById('scanbtn');
     if(btn){btn.disabled=false;btn.style.opacity='1';}
@@ -4963,10 +4994,10 @@ async function manualScan(){
 (function(){
   function msAutoInit(){
     // Use TradeDesk's getKey() which handles decryption properly
-    // Read key directly from localStorage — ms_fh_key or finnhub_key (both plain text)
+    // ms_fh_key is plain for scanner; obfuscated keys go through _loadKey
     const saved = localStorage.getItem('ms_fh_key') ||
-                  localStorage.getItem('levetf_apikey') ||
-                  localStorage.getItem('finnhub_key') || '';
+                  (typeof _loadKey==='function'?_loadKey('levetf_apikey'):localStorage.getItem('levetf_apikey')) ||
+                  (typeof _loadKey==='function'?_loadKey('finnhub_key'):localStorage.getItem('finnhub_key')) || '';
     if(saved && saved.length > 8){
       APIKEY = saved;
       saveKey(saved);

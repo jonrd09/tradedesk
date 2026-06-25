@@ -1269,7 +1269,7 @@ async function fetchQuote(sym){
       if(_dq>=1&&_dq<=5&&_mq>=570&&_mq<960)addLog('warn','Finnhub',`Precio vacío para ${sym} durante mercado`);
       return null;
     }
-    return{price:d.c,prev:d.pc,pct:+((d.c-d.pc)/d.pc*100).toFixed(2),change:+(d.c-d.pc).toFixed(2)};
+    return{price:d.c,prev:d.pc,pct:+((d.c-d.pc)/d.pc*100).toFixed(2),change:+(d.c-d.pc).toFixed(2),_pctReliable:d.pc>0&&Math.abs((d.c-d.pc)/d.pc*100)<=25};
   }catch(e){
     if(e.name==='TimeoutError'||e.message?.includes('timeout'))addLog('warn','Finnhub',`Timeout precio ${sym}`,'Sin respuesta en 5s');
     return null;
@@ -1288,7 +1288,7 @@ async function loadLivePrices(){
   for(const s of syms){
     const q=await fetchQuote(s).catch(()=>null);
     if(q&&q.price>0){
-      _livePrices[s]={price:q.price,pct:q.pct,change:q.change,ts:Date.now()};
+      _livePrices[s]={price:q.price,pct:q.pct,change:q.change,_pctReliable:q._pctReliable,ts:Date.now()};
       // Update DEFAULTS and MOM_STOCKS with live data
       if(DEFAULTS[s])Object.assign(DEFAULTS[s],{price:q.price,pct:q.pct});
       else DEFAULTS[s]={price:q.price,pct:q.pct,name:s};
@@ -1641,6 +1641,8 @@ async function _buildSignalsCore(){
       const prev=_cDprev.length>1?_cDprev[_cDprev.length-2]:lP1h;
       return prev>0?+((lP1h-prev)/prev*100).toFixed(2):0;
     })();
+    // W-03: flag si el % diario es poco confiable (after-hours / pc=0 de Finnhub)
+    const _pctReliable=_liveOk?(_liveQ._pctReliable!==false):Math.abs(realPct)<=25;
 
     // ── Indicadores 15min ────────────────────────────────────────────────────
     const c15=closes(ohlc15),h15=highs(ohlc15),l15=lows(ohlc15);
@@ -1697,7 +1699,7 @@ async function _buildSignalsCore(){
     if(!_priceIsLive&&!_testMode){
       addLog('warn','Señales',`${sym} → precio Finnhub no disponible — señal usa último close 1H de Schwab ($${lP1h.toFixed(2)})`);
     }
-    const meta={sym,price:realPrice,pct:realPct,dataLabel:_priceIsLive?'📡 Schwab+Finnhub':'📡 Schwab',
+    const meta={sym,price:realPrice,pct:realPct,_pctReliable,dataLabel:_priceIsLive?'📡 Schwab+Finnhub':'📡 Schwab',
       _priceStale:!_priceIsLive,
       name:(DEFAULTS[sym]&&DEFAULTS[sym].name)||sym,
       _c15:_c15chart,_bb15_up:bb15.upper.filter(v=>v!=null).slice(-30),
@@ -2300,7 +2302,7 @@ async function _buildSignalsCore(){
     if(disp>=_passThreshold&&!localStorage.getItem(_sigKey)){
       if(_priceConfirmed){
         localStorage.setItem(_sigKey,'1');
-        notifySignal(s.sym,s.code,s.name,s.type,disp,s.price,s.pct);
+        notifySignal(s.sym,s.code,s.name,s.type,disp,s.price,s._pctReliable!==false?s.pct:null);
       }else{
         // Precio no confirmado — guardar key igual para reintentar en siguiente ciclo
         // cuando Finnhub ya tenga el precio cargado
@@ -2361,7 +2363,7 @@ async function _buildSignalsCore(){
           </div>
           <div style="font-size:12px;color:rgba(255,255,255,.8);font-weight:600;">${s.name}</div>
           <div style="font-size:11px;color:rgba(255,255,255,.55);margin-top:2px;">
-            $${s.price.toFixed(2)} <span style="color:${s.pct>=0?'rgba(0,209,122,.9)':'rgba(255,77,109,.9)'}">(${s.pct>=0?'+':''}${s.pct.toFixed(2)}%)</span> · ${s.dataLabel}${s._priceStale?` <span style="color:var(--yellow);font-size:10px;" title="Precio de Finnhub no disponible — usando último close de Schwab">⚠ precio est.</span>`:''}
+            $${s.price.toFixed(2)} ${s._pctReliable!==false?`<span style="color:${s.pct>=0?'rgba(0,209,122,.9)':'rgba(255,77,109,.9)'}">(${s.pct>=0?'+':''}${s.pct.toFixed(2)}%)</span>`:`<span style="color:var(--yellow);font-size:10px;" title="% diario no confiable — Finnhub devolvió referencia incorrecta (after-hours)">⚠ % n/d</span>`} · ${s.dataLabel}${s._priceStale?` <span style="color:var(--yellow);font-size:10px;" title="Precio de Finnhub no disponible — usando último close de Schwab">⚠ precio est.</span>`:''}
             ${s._timeET?`<span style="color:rgba(255,194,52,.8);margin-left:4px;">· ${s._timeET} ET</span>`:''}
           </div>
         </div>
@@ -2402,7 +2404,16 @@ async function _buildSignalsCore(){
         ${!s.isSetup?`<textarea placeholder="📝 Notas..." rows="2"
           style="width:100%;margin-top:8px;background:rgba(0,0,0,.25);border:1px solid rgba(255,255,255,.1);border-radius:6px;color:rgba(255,255,255,.8);font-size:11px;padding:6px 8px;resize:none;outline:none;font-family:var(--sans);box-sizing:border-box;"
           onchange="saveSignalNote('${s.sym}','${s.code}',this.value)">${s._note||''}</textarea>`:''}
-      </div>
+        ${getAnthropicKey()?`
+        <div style="margin-top:8px;">
+          <button id="claude-btn-${s.sym}-${s.code}"
+            onclick="analyzeSignalCard(this,'${s.sym}','${s.code}','${s.name}','${s.type}',${disp},${s.price.toFixed(2)},'${encodeURIComponent(s.reqs.map(r=>(r.ok?`OK`:`NO`)+`: `+r.text).join(`\n`))}')"
+            style="width:100%;padding:7px 10px;background:rgba(139,92,246,.15);border:1px solid rgba(139,92,246,.4);border-radius:6px;color:rgba(139,92,246,.9);font-size:11px;font-weight:600;cursor:pointer;font-family:var(--sans);display:flex;align-items:center;justify-content:center;gap:6px;"
+            onmouseover="this.style.background='rgba(139,92,246,.25)'" onmouseout="this.style.background='rgba(139,92,246,.15)'">
+            <span>🤖</span><span>Analizar con Claude</span>
+          </button>
+          <div id="claude-out-${s.sym}-${s.code}" style="display:none;margin-top:8px;padding:10px 12px;background:rgba(139,92,246,.07);border:1px solid rgba(139,92,246,.25);border-radius:6px;font-size:11px;color:var(--text);line-height:1.6;"></div>
+        </div>`:''}\n      </div>
     </div>`;
   });
   area.innerHTML=html;
@@ -4064,7 +4075,8 @@ Sé directo, concreto y accionable. Sin introducciones. Sin disclaimers. Solo el
           <div style="font-weight:700;">API Key inválida</div>
           <div style="font-size:12px;margin-top:6px;color:var(--text3);">Ve a console.anthropic.com y verifica tu key</div>
         </div>`;
-        localStorage.removeItem('anthropic_api_key');
+        try{localStorage.removeItem('anthropic_api_key');}catch(e){}
+        try{_storeKey('anthropic_api_key','');}catch(e){}
         document.getElementById('pmKeySetup').style.display='block';
       }else{
         content.innerHTML=`<div style="padding:20px;color:var(--red);">Error ${resp.status}: ${err.error?.message||'Error desconocido'}</div>`;
@@ -4325,8 +4337,7 @@ async function notifySignal(sym, code, name, type, pct, price, pctChange){
 `+
     `📊 Estrategia: *${code}* — ${name}
 `+
-    `💰 Precio: *$${price.toFixed(2)}* ✅ (${pctChange>=0?'+':''}${pctChange.toFixed(2)}%)
-`+
+    `💰 Precio: *$${price.toFixed(2)}* ✅ ${pctChange!==null&&pctChange!==undefined?'('+( pctChange>=0?'+':'')+pctChange.toFixed(2)+'%)':'(% n/d)'}`+
     `🎯 Confianza: *${pct}%*
 `+
     `🕐 ${time} ET`+levelWarn+`
@@ -5269,6 +5280,104 @@ function renderHistorialList(filter){
       </div>
     </div>`;
   }).join('');
+}
+
+// ── analyzeSignalCard — análisis Claude en tarjetas del panel principal ──────
+// Recibe los datos de la señal y genera un análisis conciso directamente
+// en la tarjeta, sin necesidad de ir al Historial o Post-Mortem.
+async function analyzeSignalCard(btn,sym,code,name,type,confidence,price,reqsEncoded){
+  const key=getAnthropicKey();
+  if(!key||!key.startsWith('sk-')){
+    alert('Configura tu API key de Claude en Configuración → APIs.');
+    return;
+  }
+  const outEl=document.getElementById(`claude-out-${sym}-${code}`);
+  if(!outEl)return;
+
+  // Toggle: si ya tiene contenido, colapsar/expandir
+  if(outEl.dataset.loaded==='1'){
+    outEl.style.display=outEl.style.display==='none'?'block':'none';
+    btn.querySelector('span:last-child').textContent=outEl.style.display==='none'?'Analizar con Claude':'Ocultar análisis';
+    return;
+  }
+
+  // Loading state
+  btn.disabled=true;
+  btn.querySelector('span:last-child').textContent='Analizando...';
+  btn.style.opacity='0.6';
+  outEl.style.display='block';
+  outEl.innerHTML='<span style="color:rgba(139,92,246,.6);font-size:11px;">🤖 Claude analizando la señal...</span>';
+
+  const reqs=decodeURIComponent(reqsEncoded);
+  const dir=type==='call'?'CALL 📈':'PUT 📉';
+  const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+  const timeStr=et.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true});
+  const mNow=et.getHours()*60+et.getMinutes();
+  const session=mNow<570?'Pre-Market':mNow<960?'Regular Market Hours':'After-Hours';
+
+  const prompt=`Eres un trader profesional especialista en opciones intraday. Analiza esta señal técnica y da un veredicto directo.
+
+SEÑAL: ${sym} ${dir} | Estrategia: ${code} — ${name}
+Precio: $${price} | Confianza: ${confidence}% | Hora: ${timeStr} ET (${session})
+
+CONDICIONES QUE PASARON/FALLARON:
+${reqs}
+
+Responde en este formato EXACTO (máximo 120 palabras total):
+
+🎯 VEREDICTO: [OPERAR / ESPERAR / EVITAR]
+📊 CONTEXTO: [1 oración sobre el estado técnico actual]
+⚠️ RIESGO PRINCIPAL: [1 oración sobre el mayor riesgo de esta entrada]
+💡 ACCIÓN: [1 oración concreta — qué hacer ahora]
+
+Sin introducciones. Sin disclaimers. Directo al punto.`;
+
+  try{
+    const proxyUrl=localStorage.getItem('proxy_url')||'';
+    const endpoint=proxyUrl?`${proxyUrl}/anthropic`:'https://api.anthropic.com/v1/messages';
+    const headers={'Content-Type':'application/json'};
+    if(!proxyUrl){
+      headers['x-api-key']=key;
+      headers['anthropic-version']='2023-06-01';
+      headers['anthropic-dangerous-direct-browser-access']='true';
+    }
+    const resp=await fetch(endpoint,{
+      method:'POST',headers,
+      body:JSON.stringify({
+        model:'claude-sonnet-4-6',
+        max_tokens:300,
+        messages:[{role:'user',content:prompt}]
+      })
+    });
+    if(!resp.ok){
+      const er=await resp.json().catch(()=>({}));
+      throw new Error(er.error?.message||`HTTP ${resp.status}`);
+    }
+    const res=await resp.json();
+    const txt=(res.content?.find(b=>b.type==='text')?.text||'Sin respuesta.').trim();
+
+    // Render con colores según veredicto
+    const isOperar=txt.includes('OPERAR');
+    const isEvitar=txt.includes('EVITAR');
+    const verdictColor=isOperar?'var(--green)':isEvitar?'var(--red)':'var(--yellow)';
+
+    outEl.innerHTML=`<div style="font-size:11px;line-height:1.7;color:var(--text);">${
+      txt.replace(/🎯 VEREDICTO:/g,`<span style="font-weight:700;color:${verdictColor};">🎯 VEREDICTO:</span>`)
+         .replace(/📊 CONTEXTO:/g,'<span style="font-weight:700;color:var(--blue);">📊 CONTEXTO:</span>')
+         .replace(/⚠️ RIESGO PRINCIPAL:/g,'<span style="font-weight:700;color:var(--yellow);">⚠️ RIESGO PRINCIPAL:</span>')
+         .replace(/💡 ACCIÓN:/g,'<span style="font-weight:700;color:rgba(139,92,246,.9);">💡 ACCIÓN:</span>')
+         .replace(/\n/g,'<br>')
+    }</div>`;
+    outEl.dataset.loaded='1';
+    btn.querySelector('span:last-child').textContent='Ocultar análisis';
+    addLog('debug','Claude',`Análisis ${sym} ${code} completado`);
+  }catch(e){
+    outEl.innerHTML=`<span style="color:var(--red);font-size:11px;">❌ Error: ${e.message}</span>`;
+    addLog('error','Claude',`Error analizando ${sym}: ${e.message}`);
+  }finally{
+    btn.disabled=false;
+    btn.style.opacity='1';
+  }
 }
 
 function saveSignalNote(sym,code,note){
@@ -6215,7 +6324,10 @@ function _pmClear(id){
 async function _pmAnalyze(id){
   const d=_pmStore[id];if(!d?.b64){alert('Primero sube un screenshot.');return;}
   const key=getAnthropicKey();
-  if(!key){alert('Configura tu API key de Claude en Configuración → APIs.');return;}
+  if(!key||key.length<20||!key.startsWith('sk-')){
+    alert('API key de Claude no encontrada o inválida.\n\nVe a Configuración → APIs → sección Claude y guarda tu key (debe comenzar con sk-ant-).');
+    return;
+  }
 
   document.getElementById('pm-abtn-'+id).style.display='none';
   document.getElementById('pm-spin-'+id).style.display='block';

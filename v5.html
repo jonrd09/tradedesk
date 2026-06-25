@@ -2651,6 +2651,8 @@ function _loadCfgFields(){
   if(el('cfg-proxyUrl'))el('cfg-proxyUrl').value=proxy;
   if(el('cfg-finnhubKey'))el('cfg-finnhubKey').value=fhk;
   if(el('cfg-claudeKey'))el('cfg-claudeKey').value=clk;
+  const ghk=localStorage.getItem('github_token')||'';
+  if(el('cfg-githubKey'))el('cfg-githubKey').value=ghk;
   // Telegram
   const tok=getTgToken(),chat=getTgChat(),enabled=isTgEnabled();
   if(el('cfg-tgToken'))el('cfg-tgToken').value=tok;
@@ -2698,6 +2700,20 @@ function forgetCfgClaude(){
   document.getElementById('cfg-claudeKey').value='';
   const r=document.getElementById('cfg-claudeSaved');
   if(r){r.style.color='var(--text3)';r.textContent='Key eliminada';r.style.display='block';setTimeout(()=>r.style.display='none',2000);}
+}
+function saveCfgGithub(){
+  const k=(document.getElementById('cfg-githubKey').value||'').trim();
+  const r=document.getElementById('cfg-githubSaved');
+  if(!k||!k.startsWith('ghp_')){if(r){r.style.color='var(--red)';r.textContent='⚠ Token inválido (debe empezar con ghp_)';r.style.display='block';}return;}
+  try{localStorage.setItem('github_token',k);}catch(e){}
+  if(r){r.style.color='var(--green)';r.textContent='✅ GitHub token guardado';r.style.display='block';setTimeout(()=>r.style.display='none',2500);}
+}
+function forgetCfgGithub(){
+  if(!confirm('¿Borrar el GitHub token?'))return;
+  localStorage.removeItem('github_token');
+  document.getElementById('cfg-githubKey').value='';
+  const r=document.getElementById('cfg-githubSaved');
+  if(r){r.style.color='var(--text3)';r.textContent='Token eliminado';r.style.display='block';setTimeout(()=>r.style.display='none',2000);}
 }
 // ── Telegram ──────────────────────────────────────────────────
 function saveCfgTelegram(){
@@ -6502,6 +6518,28 @@ async function _pmPDF(id){
           </button>
         </div>
         <div id="cfg-claudeSaved" style="display:none;font-size:12px;margin-top:6px;"></div>
+
+        <div style="border-top:1px solid var(--border);margin:18px 0;"></div>
+
+        <div class="cfg-section-title">GitHub</div>
+        <div style="font-size:11px;color:var(--text3);margin-bottom:10px;line-height:1.6;">
+          Personal Access Token para publicar actualizaciones automáticamente.<br>
+          Genera en <span style="color:var(--blue);">github.com → Settings → Developer settings → Tokens (classic)</span> · scope: <strong style="color:#fff;">repo</strong>
+        </div>
+        <div class="cfg-label">Personal Access Token</div>
+        <input id="cfg-githubKey" type="password" placeholder="ghp_..."
+          class="cfg-input" style="margin-bottom:10px;">
+        <div style="display:flex;gap:8px;align-items:center;">
+          <button onclick="saveCfgGithub()"
+            style="background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.2);color:var(--text);border-radius:var(--r);padding:8px 18px;font-size:13px;font-weight:700;cursor:pointer;">
+            🐙 Guardar GitHub Token
+          </button>
+          <button onclick="forgetCfgGithub()"
+            style="background:none;border:1px solid var(--border2);color:var(--text3);border-radius:var(--r);padding:8px 14px;font-size:12px;cursor:pointer;">
+            🗑 Borrar token
+          </button>
+        </div>
+        <div id="cfg-githubSaved" style="display:none;font-size:12px;margin-top:6px;"></div>
       </div>
 
       <!-- ── TAB: Telegram ──────────────────────────────────── -->

@@ -1728,8 +1728,8 @@ async function _buildSignalsCore(){
     const distToLower=(lP15-lLow15)/lP15*100;
     const nearUpper=distToUpper>=0&&distToUpper<0.3;
     const nearLower=distToLower>=0&&distToLower<0.3;
-    const setupBull=lBBW15<2.0&&nearUpper&&lP15>lMA20_15&&bbwRising&&stochCallOk;
-    const setupBear=lBBW15<2.0&&nearLower&&lP15<lMA20_15&&bbwRising&&stochPutOk;
+    const setupBull=lBBW15<2.0&&nearUpper&&lP15>lMA20_15&&bbwRising&&stochCallOk&&align1hBull;
+    const setupBear=lBBW15<2.0&&nearLower&&lP15<lMA20_15&&bbwRising&&stochPutOk&&align1hBear;
     if(setupBull||setupBear){
       const setupType=setupBull?'call':'put';
       const setupDir=setupBull?'Superior':'Inferior';
@@ -1740,6 +1740,7 @@ async function _buildSignalsCore(){
         {ok:setupBull?lP15>lMA20_15:lP15<lMA20_15,tf:'15m',text:`MA20 alineada: $${lMA20_15.toFixed(2)}`},
         {ok:stochCallOk||stochPutOk, tf:'15m',text:`Stochastics apoyando (%K ${lK15.toFixed(0)})`},
         {ok:bbwRising,               tf:'15m',text:`BBW expandiéndose: ${lBBW15.toFixed(2)}% > ${lBBW15_1.toFixed(2)}%`},
+        {ok:setupBull?align1hBull:align1hBear, tf:'1H', text:`1H confirma dirección: precio ${setupBull?'sobre':'bajo'} MA20 1H con slope ${setupBull?'alcista':'bajista'}`},
       ]});
     }
 

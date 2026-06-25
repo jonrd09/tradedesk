@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>TradeDesk Pro</title>
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
 :root{
   --bg:#0a0e1a;--bg2:#111827;--bg3:#1a2235;--bg4:#1e2d42;
@@ -5009,7 +5010,7 @@ function renderHistorialList(filter){
       :e.tgSent===true
         ?`<span style="font-size:9px;background:rgba(0,209,122,.1);border:1px solid rgba(0,209,122,.25);border-radius:8px;padding:1px 6px;color:var(--green);">✅ TG</span>`
         :``;
-    return `<div class="hist-entry ${e.type}" style="background:${outcomeBg};border-color:${outcomeBorder};">
+    return `<div class="hist-entry ${e.type}" id="hist-card-${e.id}" style="background:${outcomeBg};border-color:${outcomeBorder};">
       <div style="flex:1;min-width:0;">
 
         <!-- Row 1: sym + strategy + confidence + date -->
@@ -5065,6 +5066,21 @@ function renderHistorialList(filter){
       </div>
     </div>`;
   }).join('');
+
+  // ── Post-Mortem: inyectar UI en cada tarjeta después del render ──
+  entries.forEach(e=>{
+    const card=document.getElementById(`hist-card-${e.id}`);
+    if(card) _pmInjectUI(card,{
+      id:      String(e.id),
+      ticker:  e.sym,
+      type:    e.type.toUpperCase(),
+      strategy:e.code,
+      price:   (e.price||0).toFixed(2),
+      date:    `${e.date} · ${e.time} ET`,
+      result:  e.outcome==='win'?'correct':e.outcome==='loss'?'incorrect':'pending',
+      notes:   e.note||''
+    });
+  });
 }
 
 function saveSignalNote(sym,code,note){
@@ -5867,6 +5883,343 @@ async function init(){
   },10*60*1000);
 }
 init();
+
+// ══════════════════════════════════════════════════════════════
+// SIGNAL POST-MORTEM MODULE
+// Upload chart de TOS → Claude Vision analiza → Descarga PDF → Limpia
+// ══════════════════════════════════════════════════════════════
+
+// Almacenamiento temporal en memoria (NO localStorage — imágenes solo en RAM)
+const _pmStore={};
+
+// Mapa de estrategias a descripción legible
+function _pmStratDesc(code){
+  const m={'MA20-R':'Rebote en MA20 Diaria','MA20-C':'Cruce de MA20',
+    'BB':'Bollinger Bands','STOCH':'Stochastic (Worden)','RPM':'Respeto a MA20 Daily','COMBINED':'Multi-indicador'};
+  return m[code]||code;
+}
+
+// ── Inyectar UI post-mortem en tarjeta del historial ──
+function _pmInjectUI(cardEl,sig){
+  if(cardEl.querySelector('.pm-wrap'))return; // evitar duplicados
+  if(!_pmStore[sig.id]) _pmStore[sig.id]={sig,b64:null,mime:null,analysis:null};
+  else _pmStore[sig.id].sig=sig;
+
+  cardEl.insertAdjacentHTML('beforeend',`
+  <div class="pm-wrap" style="margin-top:10px;border-top:1px solid var(--border);padding-top:10px;">
+
+    <div id="pm-drop-${sig.id}" onclick="document.getElementById('pm-file-${sig.id}').click()"
+      ondragover="event.preventDefault();this.style.borderColor='var(--green)'"
+      ondragleave="this.style.borderColor='rgba(255,255,255,.15)'"
+      ondrop="_pmDrop(event,'${sig.id}')"
+      style="border:1.5px dashed rgba(255,255,255,.15);border-radius:8px;padding:9px 12px;
+      display:flex;align-items:center;gap:8px;cursor:pointer;
+      background:rgba(255,255,255,.02);transition:border-color .2s;">
+      <span style="font-size:16px;">📸</span>
+      <span id="pm-lbl-${sig.id}" style="font-size:11px;color:var(--text3);">Subir chart TOS para análisis post-mortem</span>
+      <input type="file" id="pm-file-${sig.id}" accept="image/*" style="display:none"
+        onchange="_pmFile(event,'${sig.id}')">
+    </div>
+
+    <div id="pm-prev-${sig.id}" style="display:none;margin-top:7px;position:relative;">
+      <img id="pm-img-${sig.id}" style="width:100%;border-radius:6px;border:1px solid var(--border);
+        max-height:170px;object-fit:contain;background:#050810;" src="" alt="Chart TOS">
+      <button onclick="_pmClear('${sig.id}')" style="position:absolute;top:4px;right:4px;
+        background:rgba(0,0,0,.75);border:none;border-radius:50%;width:20px;height:20px;
+        color:#fff;cursor:pointer;font-size:12px;line-height:20px;text-align:center;">×</button>
+    </div>
+
+    <button id="pm-abtn-${sig.id}" onclick="_pmAnalyze('${sig.id}')" style="display:none;
+      margin-top:7px;width:100%;background:linear-gradient(135deg,rgba(0,80,40,.9),rgba(0,60,30,.9));
+      border:1px solid var(--green);color:var(--green);border-radius:6px;
+      padding:7px 0;font-size:11px;font-weight:700;cursor:pointer;">
+      🔍 Analizar con Claude
+    </button>
+
+    <div id="pm-spin-${sig.id}" style="display:none;text-align:center;padding:7px 0;
+      font-size:11px;color:var(--text3);">⏳ Analizando chart vs estrategia…</div>
+
+    <div id="pm-out-${sig.id}" style="display:none;margin-top:7px;
+      background:var(--bg4);border:1px solid var(--border);border-radius:6px;
+      padding:10px 12px;font-size:11px;line-height:1.65;color:var(--text2);
+      max-height:155px;overflow-y:auto;"></div>
+
+    <button id="pm-pbtn-${sig.id}" onclick="_pmPDF('${sig.id}')" style="display:none;
+      margin-top:7px;width:100%;background:linear-gradient(135deg,rgba(30,20,80,.9),rgba(20,10,60,.9));
+      border:1px solid var(--purple);color:var(--purple);border-radius:6px;
+      padding:7px 0;font-size:11px;font-weight:700;cursor:pointer;">
+      ⬇️ Descargar PDF · limpiar
+    </button>
+
+  </div>`);
+}
+
+// ── File / Drag handlers ──
+function _pmFile(ev,id){const f=ev.target.files[0];if(f)_pmLoad(f,id);}
+function _pmDrop(ev,id){
+  ev.preventDefault();
+  document.getElementById(`pm-drop-${id}`).style.borderColor='rgba(255,255,255,.15)';
+  const f=ev.dataTransfer.files[0];
+  if(f&&f.type.startsWith('image/'))_pmLoad(f,id);
+}
+function _pmLoad(file,id){
+  const r=new FileReader();
+  r.onload=e=>{
+    const[header,b64]=e.target.result.split(',');
+    const mime=header.split(':')[1].split(';')[0];
+    _pmStore[id].b64=b64; _pmStore[id].mime=mime; _pmStore[id].analysis=null;
+    document.getElementById(`pm-img-${id}`).src=e.target.result;
+    document.getElementById(`pm-prev-${id}`).style.display='block';
+    document.getElementById(`pm-abtn-${id}`).style.display='block';
+    document.getElementById(`pm-out-${id}`).style.display='none';
+    document.getElementById(`pm-pbtn-${id}`).style.display='none';
+    document.getElementById(`pm-lbl-${id}`).textContent=`✅ ${file.name}`;
+  };
+  r.readAsDataURL(file);
+}
+function _pmClear(id){
+  _pmStore[id].b64=null; _pmStore[id].mime=null; _pmStore[id].analysis=null;
+  ['pm-prev-','pm-abtn-','pm-out-','pm-pbtn-'].forEach(p=>{
+    const el=document.getElementById(p+id); if(el)el.style.display='none';
+  });
+  document.getElementById(`pm-lbl-${id}`).textContent='Subir chart TOS para análisis post-mortem';
+  const fi=document.getElementById(`pm-file-${id}`); if(fi)fi.value='';
+}
+
+// ── Análisis Claude Vision ──
+async function _pmAnalyze(id){
+  const d=_pmStore[id]; if(!d?.b64){alert('Primero sube un screenshot.');return;}
+  const key=getAnthropicKey();
+  if(!key){alert('Configura tu API key de Claude en Configuración → APIs.');return;}
+
+  document.getElementById(`pm-abtn-${id}`).style.display='none';
+  document.getElementById(`pm-spin-${id}`).style.display='block';
+  document.getElementById(`pm-out-${id}`).style.display='none';
+  document.getElementById(`pm-pbtn-${id}`).style.display='none';
+
+  const s=d.sig;
+  const resultLabel=s.result==='correct'?'CORRECTA ✅':s.result==='incorrect'?'INCORRECTA ❌':'PENDIENTE ⏳';
+
+  const prompt=`Eres un analista técnico experto en opciones. Analiza este screenshot de ThinkorSwim.
+
+SEÑAL: ${s.type} en ${s.ticker} | Estrategia: ${s.strategy} (${_pmStratDesc(s.strategy)}) | Entrada: $${s.price} | ${s.date} | Resultado: ${resultLabel}
+${s.notes?'Notas: '+s.notes:''}
+
+Responde EXACTAMENTE con este formato:
+
+📊 CONTEXTO DEL CHART
+[Timeframe visible, tendencia general, estructura de precio]
+
+🎯 VALIDACIÓN DE LA SEÑAL
+[¿El chart confirma visualmente los criterios de ${s.strategy}? Posición vs MA20, momentum, estructura de velas en la entrada]
+
+⚠️ FACTORES NO CONSIDERADOS
+[Soportes/resistencias, gaps, volumen, patrones que la señal automática no captó]
+
+✅ VEREDICTO TÉCNICO
+[1-2 oraciones: ¿fue técnicamente válida la señal? ¿Qué aprendizaje práctico deja?]
+
+Directo y concreto. Sin explicar conceptos básicos.`;
+
+  try{
+    const proxyUrl=localStorage.getItem('proxy_url')||'';
+    const endpoint=proxyUrl?`${proxyUrl}/anthropic`:'https://api.anthropic.com/v1/messages';
+    const headers={'Content-Type':'application/json'};
+    if(!proxyUrl){
+      headers['x-api-key']=key;
+      headers['anthropic-version']='2023-06-01';
+      headers['anthropic-dangerous-direct-browser-access']='true';
+    }
+    const resp=await fetch(endpoint,{
+      method:'POST',headers,
+      body:JSON.stringify({
+        model:'claude-sonnet-4-6',max_tokens:1000,
+        messages:[{role:'user',content:[
+          {type:'image',source:{type:'base64',media_type:d.mime,data:d.b64}},
+          {type:'text',text:prompt}
+        ]}]
+      })
+    });
+    if(!resp.ok){const er=await resp.json().catch(()=>({}));throw new Error(er.error?.message||`HTTP ${resp.status}`);}
+    const res=await resp.json();
+    const txt=res.content?.[0]?.text||'Sin respuesta.';
+    _pmStore[id].analysis=txt;
+
+    const outEl=document.getElementById(`pm-out-${id}`);
+    outEl.innerHTML=txt
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+      .replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>')
+      .replace(/\n/g,'<br>');
+    outEl.style.display='block';
+    document.getElementById(`pm-pbtn-${id}`).style.display='block';
+  }catch(err){
+    const outEl=document.getElementById(`pm-out-${id}`);
+    outEl.innerHTML=`<span style="color:var(--red);">❌ Error: ${err.message}</span>`;
+    outEl.style.display='block';
+    document.getElementById(`pm-abtn-${id}`).style.display='block';
+  }finally{
+    document.getElementById(`pm-spin-${id}`).style.display='none';
+  }
+}
+
+// ── Generar y descargar PDF ──
+async function _pmPDF(id){
+  const d=_pmStore[id];
+  if(!d?.b64||!d?.analysis){alert('Necesitas el chart y el análisis antes de descargar.');return;}
+
+  const jspdf=window.jspdf;
+  if(!jspdf){alert('jsPDF no está cargado. Verifica la conexión a internet.');return;}
+  const {jsPDF}=jspdf;
+
+  const doc=new jsPDF({unit:'mm',format:'a4',orientation:'portrait'});
+  const W=210,H=297;
+  let y=0;
+  const s=d.sig;
+
+  // Colores
+  const isCall=s.type==='CALL';
+  const accentR=isCall?[0,209,122]:[255,77,109];
+  const accentAlt=[167,139,250]; // purple
+
+  // ── Fondo oscuro
+  doc.setFillColor(10,14,26); doc.rect(0,0,W,H,'F');
+
+  // ── Header band
+  doc.setFillColor(17,24,39); doc.rect(0,0,W,20,'F');
+  doc.setFont('helvetica','bold'); doc.setFontSize(12);
+  doc.setTextColor(...accentAlt); doc.text('TradeDesk Pro',12,8);
+  doc.setFont('helvetica','normal'); doc.setFontSize(7.5);
+  doc.setTextColor(130,145,165); doc.text('Signal Post-Mortem Report',12,14);
+  const nowStr=new Date().toLocaleString('es-PR',{timeZone:'America/Puerto_Rico',dateStyle:'medium',timeStyle:'short'});
+  doc.setFontSize(7); doc.text(`Generado: ${nowStr}`,W-12,14,{align:'right'});
+
+  y=26;
+
+  // ── Panel señal
+  doc.setFillColor(26,34,53); doc.roundedRect(10,y,W-20,40,3,3,'F');
+  doc.setDrawColor(45,55,80); doc.roundedRect(10,y,W-20,40,3,3,'S');
+
+  // Ticker
+  doc.setFont('helvetica','bold'); doc.setFontSize(18);
+  doc.setTextColor(...accentR); doc.text(s.ticker,17,y+12);
+
+  // Badge tipo
+  const bx=17+doc.getTextWidth(s.ticker)+3;
+  doc.setFillColor(...accentR); doc.roundedRect(bx,y+4,14,7,2,2,'F');
+  doc.setFontSize(7); doc.setTextColor(10,14,26);
+  doc.text(s.type,bx+7,y+9.5,{align:'center'});
+
+  // Estrategia
+  doc.setFont('helvetica','normal'); doc.setFontSize(8.5);
+  doc.setTextColor(160,175,200);
+  doc.text(`${s.strategy}  —  ${_pmStratDesc(s.strategy)}`,17,y+21);
+
+  // Precio
+  doc.setFont('helvetica','bold'); doc.setFontSize(10);
+  doc.setTextColor(230,235,245); doc.text(`$${s.price}`,17,y+30);
+  doc.setFont('helvetica','normal'); doc.setFontSize(7.5);
+  doc.setTextColor(130,145,165); doc.text('Entrada',17,y+35);
+
+  // Fecha
+  doc.setFont('helvetica','bold'); doc.setFontSize(9);
+  doc.setTextColor(230,235,245); doc.text(s.date,72,y+30);
+  doc.setFont('helvetica','normal'); doc.setFontSize(7.5);
+  doc.setTextColor(130,145,165); doc.text('Fecha / Hora',72,y+35);
+
+  // Resultado
+  const resText=s.result==='correct'?'CORRECTA':s.result==='incorrect'?'INCORRECTA':'PENDIENTE';
+  const resCol=s.result==='correct'?[0,209,122]:s.result==='incorrect'?[255,77,109]:[180,190,210];
+  doc.setFont('helvetica','bold'); doc.setFontSize(9);
+  doc.setTextColor(...resCol); doc.text(resText,W-17,y+30,{align:'right'});
+  doc.setFont('helvetica','normal'); doc.setFontSize(7.5);
+  doc.setTextColor(130,145,165); doc.text('Resultado',W-17,y+35,{align:'right'});
+
+  y+=44;
+
+  // Notas del trader
+  if(s.notes){
+    doc.setFont('helvetica','italic'); doc.setFontSize(8);
+    doc.setTextColor(130,145,165);
+    const nl=doc.splitTextToSize(`📝 ${s.notes}`,W-22);
+    doc.text(nl,12,y); y+=nl.length*4+4;
+  }
+
+  y+=4;
+
+  // ── Chart TOS
+  doc.setFont('helvetica','bold'); doc.setFontSize(8);
+  doc.setTextColor(...accentAlt); doc.text('📸  CHART — ThinkorSwim',12,y);
+  doc.setDrawColor(...accentAlt); doc.setLineWidth(0.25); doc.line(12,y+2,W-12,y+2);
+  y+=7;
+
+  const imgData=`data:${d.mime};base64,${d.b64}`;
+  const iW=W-24; let iH=90;
+  try{const p=doc.getImageProperties(imgData);iH=Math.min(95,iW/(p.width/p.height));}catch(e){}
+  doc.addImage(imgData,d.mime.split('/')[1].toUpperCase(),12,y,iW,iH);
+  y+=iH+8;
+
+  // ── Análisis (nueva página si no cabe)
+  const analysisClean=d.analysis.replace(/\*\*(.*?)\*\*/g,'$1');
+  const aLines=doc.splitTextToSize(analysisClean,W-28);
+  const aH=aLines.length*4.5+18;
+  if(y+aH>H-12){
+    doc.addPage();
+    doc.setFillColor(10,14,26); doc.rect(0,0,W,H,'F');
+    y=14;
+  }
+
+  doc.setFont('helvetica','bold'); doc.setFontSize(8);
+  doc.setTextColor(0,209,122); doc.text('🔍  ANÁLISIS TÉCNICO — Claude',12,y);
+  doc.setDrawColor(0,209,122); doc.setLineWidth(0.25); doc.line(12,y+2,W-12,y+2);
+  y+=8;
+
+  // Fondo panel
+  const panelH=Math.min(aH,H-y-10);
+  doc.setFillColor(26,34,53); doc.roundedRect(10,y-3,W-20,panelH,3,3,'F');
+
+  // Renderizar líneas del análisis
+  for(const line of analysisClean.split('\n')){
+    if(y>H-14){doc.addPage();doc.setFillColor(10,14,26);doc.rect(0,0,W,H,'F');y=14;}
+    const tr=line.trim(); if(!tr){y+=2;continue;}
+    const isHdr=/^[📊🎯⚠️✅]/.test(tr);
+    if(isHdr){y+=2;doc.setFont('helvetica','bold');doc.setFontSize(8.5);doc.setTextColor(...accentAlt);}
+    else{doc.setFont('helvetica','normal');doc.setFontSize(8);doc.setTextColor(210,220,235);}
+    const wl=doc.splitTextToSize(tr,W-28);
+    doc.text(wl,15,y);
+    y+=wl.length*(isHdr?5:4.5);
+  }
+
+  // ── Footer en todas las páginas
+  const pc=doc.getNumberOfPages();
+  for(let p=1;p<=pc;p++){
+    doc.setPage(p);
+    doc.setFillColor(17,24,39); doc.rect(0,H-9,W,9,'F');
+    doc.setFont('helvetica','normal'); doc.setFontSize(6.5);
+    doc.setTextColor(100,115,140);
+    doc.text('TradeDesk Pro — Uso interno',12,H-3.5);
+    doc.text(`Pág ${p} / ${pc}`,W-12,H-3.5,{align:'right'});
+  }
+
+  // ── Descargar
+  const safeName=`PostMortem_${s.ticker}_${s.type}_${s.date.replace(/[/:,·\s]+/g,'-').replace(/-+/g,'-')}.pdf`;
+  doc.save(safeName);
+
+  // ── Limpiar tras descarga
+  setTimeout(()=>{
+    _pmClear(id);
+    const outEl=document.getElementById(`pm-out-${id}`);
+    const pbEl=document.getElementById(`pm-pbtn-${id}`);
+    if(outEl)outEl.style.display='none';
+    if(pbEl)pbEl.style.display='none';
+    const lbl=document.getElementById(`pm-lbl-${id}`);
+    if(lbl){
+      lbl.textContent='✅ PDF descargado — análisis borrado';
+      lbl.style.color='var(--green)';
+      setTimeout(()=>{lbl.textContent='Subir chart TOS para análisis post-mortem';lbl.style.color='';},4000);
+    }
+  },800);
+}
+// ── fin módulo post-mortem ──
 </script>
 <!-- ══════════════════════════════════════════════════════
      PREMARKET MODAL

@@ -589,6 +589,9 @@ async function handleSchwabCallback(){
     localStorage.setItem('schwab_token_expiry',Date.now()+(d.expires_in||1800)*1000);
     localStorage.setItem('schwab_refresh_expiry',Date.now()+7*24*60*60*1000); // refresh token lasts 7 days
     localStorage.removeItem('schwab_oauth_state');
+    // Limpiar dedup keys de alertas — token renovado, se puede volver a avisar si expira
+    clearTelegramOnceKey('schwab_refresh_expiring');
+    clearTelegramOnceKey('schwab_refresh_expired');
     window.history.replaceState({},document.title,SCHWAB_REDIRECT);
     updateSchwabStatus();
   }catch(e){console.warn('Schwab token error:',e);
@@ -4290,6 +4293,30 @@ async function sendTelegram(msg, token, chatId){
   }catch(e){return false;}
 }
 
+// ── sendTelegramOnce — wrapper con dedup para alertas de sistema ──────────────
+// Evita spam cuando un token expira, una API key falla, o cualquier alerta
+// de sistema se dispara múltiples veces en el mismo período.
+// key:      string único para este tipo de alerta (ej: 'schwab_token_expired')
+// cooldown: minutos mínimos entre mensajes del mismo tipo (default: 60min)
+// Usa localStorage para persistir entre recargas de página.
+async function sendTelegramOnce(key, msg, cooldownMinutes=60){
+  if(!isTgEnabled()||!getTgToken()||!getTgChat()) return false;
+  const storageKey=`tg_once_${key}`;
+  const lastSent=parseInt(localStorage.getItem(storageKey)||'0');
+  const cooldownMs=cooldownMinutes*60*1000;
+  if(Date.now()-lastSent < cooldownMs){
+    addLog('debug','Telegram',`sendTelegramOnce bloqueado: ${key} (cooldown ${cooldownMinutes}min)`);
+    return false;
+  }
+  localStorage.setItem(storageKey, String(Date.now()));
+  return await sendTelegram(msg, getTgToken(), getTgChat());
+}
+
+// Limpiar dedup keys de alertas de sistema al reconectar exitosamente
+function clearTelegramOnceKey(key){
+  localStorage.removeItem(`tg_once_${key}`);
+}
+
 // Called from buildSignals render when a signal reaches ≥75%
 // ═══════════════════════════════════════════════════════════════
 // WEB NOTIFICATIONS — Browser push alerts for signals ≥75%
@@ -6378,30 +6405,20 @@ async function init(){
     if(refreshExp>0){
       const hoursLeft=(refreshExp-Date.now())/(1000*60*60);
       if(hoursLeft>0&&hoursLeft<=12){
-        const warnKey=`schwab_refresh_warned_${new Date().toLocaleDateString('es-PR')}`;
-        if(!localStorage.getItem(warnKey)){
-          localStorage.setItem(warnKey,'1');
-          const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
-          const time=et.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true});
-          const msg='⚠️ *SCHWAB — Sesión por expirar*\n\n'+
-            '🔑 Tu sesión de Schwab expira en '+Math.round(hoursLeft)+' horas\n'+
-            '📱 Abre TradeDesk Pro y reconecta Schwab\n'+
-            '🕐 '+time+' ET\n\n'+
-            '_Reconecta antes de que expire para no perder señales_';
-          getTgToken()&&sendTelegram(msg,getTgToken(),getTgChat());
-          addLog('warn','Schwab','Sesión de Schwab expira en '+Math.round(hoursLeft)+'h — reconecta pronto');
-        }
+        // sendTelegramOnce: máximo 1 aviso cada 4h — evita spam cuando el timer se dispara repetido
+        const warnMsg='⚠️ *SCHWAB — Sesión por expirar*\n\n'+
+          '🔑 Tu sesión expira en '+Math.round(hoursLeft)+' horas\n'+
+          '📱 Abre TradeDesk Pro → Configuración → APIs → Reconectar Schwab\n\n'+
+          '_Sin reconexión no habrá señales_';
+        sendTelegramOnce('schwab_refresh_expiring', warnMsg, 240);
+        addLog('warn','Schwab','Sesión de Schwab expira en '+Math.round(hoursLeft)+'h — reconecta pronto');
       } else if(hoursLeft<=0){
-        // Already expired — warn once per day
-        const expKey=`schwab_refresh_expired_${new Date().toLocaleDateString('es-PR')}`;
-        if(!localStorage.getItem(expKey)){
-          localStorage.setItem(expKey,'1');
-          const msg='🔴 *SCHWAB — Sesión expirada*\n\n'+
-            '❌ Tu sesión de Schwab ha expirado\n'+
-            '📱 Abre TradeDesk Pro → Configuración → APIs para reconectar\n\n'+
-            '_Sin reconexión no hay señales_';
-          getTgToken()&&sendTelegram(msg,getTgToken(),getTgChat());
-        }
+        // sendTelegramOnce: máximo 1 aviso cada 6h — evita spam por token expirado
+        const expMsg='🔴 *SCHWAB — Sesión expirada*\n\n'+
+          '❌ Tu sesión de Schwab ha expirado\n'+
+          '📱 Abre TradeDesk Pro → Configuración → APIs para reconectar\n\n'+
+          '_Sin reconexión no hay señales_';
+        sendTelegramOnce('schwab_refresh_expired', expMsg, 360);
       }
     }
   },20*60*1000);

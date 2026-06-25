@@ -5152,7 +5152,7 @@ async function loadNews(ticker){
 
     for(const sym of syms){
       // Check cache (5min TTL)
-      if(_newsCache[sym]&&Date.now()-_newsCache[sym].ts<300000){
+      if(_newsCache[sym]&&Date.now()-_newsCache[sym].ts<1800000){
         items.push(..._newsCache[sym].items);
         continue;
       }
@@ -5250,13 +5250,13 @@ async function loadNews(ticker){
 // Auto-load ALL news on init
 function initNews(){
   setTimeout(()=>loadNews('ALL'),2000);
-  // Refresh every 5 minutes
+  // Refresh every 30 minutes
   setInterval(()=>{
     if(_newsActive){
       _newsCache={};
       loadNews(_newsActive);
     }
-  },5*60*1000);
+  },30*60*1000);
 }
 
 // ═══════════════════════════════════════════════════════════════

@@ -195,6 +195,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--font);font-size:14
 
 <div class="nav">
   <button class="nt act" onclick="goPanel('dashboard',this)">Dashboard</button>
+  <button class="nt" onclick="goPanel('intradia',this)">Intradía · Singles</button>
   <button class="nt" onclick="goPanel('indicadores',this)">Indicadores Técnicos</button>
 </div>
 
@@ -258,6 +259,48 @@ body{background:var(--bg);color:var(--text);font-family:var(--font);font-size:14
   <div class="disc"><strong>Fuentes:</strong> Precios en tiempo real vía Finnhub API · Datos históricos vía Yahoo Finance proxy · Los precios pueden tener hasta 15 min de retraso fuera del horario de mercado.</div>
 </div>
 
+<!-- INTRADIA SINGLES -->
+<div id="p-intradia" class="panel">
+  <div class="sh">
+    <div class="sh-eye">Operación intra día</div>
+    <div class="sh-title">ETFs Singles · x2 · Inversos x1</div>
+    <div class="sh-sub">Acciones individuales apalancadas — compra y venta en el mismo día</div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;" class="dual-col">
+    <div class="col-block">
+      <div class="col-header bull-hdr">
+        <div class="col-header-dot" style="background:var(--green);"></div>
+        Alcistas x2 · Singles
+        <span style="margin-left:auto;font-size:10px;font-weight:400;opacity:.7;">Long</span>
+      </div>
+      <div class="col-body bull-body" id="col-singl-bull">
+        <div style="color:var(--muted);font-size:12px;text-align:center;padding:16px;">Conecta tu API key</div>
+      </div>
+    </div>
+    <div class="col-block">
+      <div class="col-header bear-hdr">
+        <div class="col-header-dot" style="background:var(--red);"></div>
+        Inversos x1 · Singles
+        <span style="margin-left:auto;font-size:10px;font-weight:400;opacity:.7;">Short</span>
+      </div>
+      <div class="col-body bear-body" id="col-singl-bear">
+        <div style="color:var(--muted);font-size:12px;text-align:center;padding:16px;">Conecta tu API key</div>
+      </div>
+    </div>
+  </div>
+  <div id="detail-intra" style="display:none;border-top:2px solid var(--border);padding-top:1.25rem;margin-top:4px;">
+    <div style="font-size:11px;font-family:var(--mono);color:var(--green);margin-bottom:10px;display:flex;align-items:center;gap:8px;font-weight:600;">
+      <span id="det-intra-title">—</span>
+      <button class="btn-ghost" style="padding:3px 10px;font-size:10px;" onclick="refreshIntraDet()">↻ actualizar</button>
+    </div>
+    <div class="card">
+      <div class="ctitle">Precio <span id="det-intra-ticker" style="color:var(--green);font-weight:600;"></span></div>
+      <div class="cw" style="height:260px;"><canvas id="pChartIntra" role="img" aria-label="Gráfico precio histórico">Precio histórico</canvas></div>
+    </div>
+  </div>
+  <div class="disc" style="margin-top:1.25rem;"><strong>Nota:</strong> ETFs de acción única apalancada (x2) e inversos (x1). Diseñados para operaciones intra día — el decay beta puede ser severo si se mantienen overnight. Verifica liquidez antes de operar.</div>
+</div>
+
 <!-- INDICADORES -->
 <div id="p-indicadores" class="panel">
   <div class="sh">
@@ -318,7 +361,45 @@ const BEAR=[
   {t:'QID', n:'ProShares UltraShort QQQ',tags:['-2x','bear'],tc:['t-x2','t-bear']},
   {t:'SOXS',n:'Direxion Semis Bear 3x',tags:['-3x','bear'],tc:['t-x3','t-bear'],sector:true},
 ];
-const ALL=[...BULL,...BEAR];
+const SINGL_BULL=[
+  {t:'AAPU', n:'Direxion Daily AAPL Bull 2x',tags:['x2','single'],tc:['t-x2','t-bull']},
+  {t:'MSFU', n:'Direxion Daily MSFT Bull 2x',tags:['x2','single'],tc:['t-x2','t-bull']},
+  {t:'MSFL', n:'GraniteShares 2x Long MSFT',tags:['x2','single'],tc:['t-x2','t-bull']},
+  {t:'TSLL', n:'Direxion Daily TSLA Bull 2x',tags:['x2','single'],tc:['t-x2','t-bull']},
+  {t:'NVDL', n:'GraniteShares 2x Long NVDA',tags:['x2','single'],tc:['t-x2','t-bull']},
+  {t:'NVDG', n:'T-Rex 2x Long NVDA',tags:['x2','single'],tc:['t-x2','t-bull']},
+  {t:'NVDU', n:'Direxion Daily NVDA Bull 2x',tags:['x2','single'],tc:['t-x2','t-bull']},
+  {t:'AMDL', n:'GraniteShares 2x Long AMD',tags:['x2','single'],tc:['t-x2','t-bull']},
+  {t:'CONL', n:'GraniteShares 2x Long COIN',tags:['x2','single'],tc:['t-x2','t-bull']},
+  {t:'AMZZ', n:'GraniteShares 2x Long AMZN',tags:['x2','single'],tc:['t-x2','t-bull']},
+  {t:'AMZU', n:'Direxion Daily AMZN Bull 2x',tags:['x2','single'],tc:['t-x2','t-bull']},
+  {t:'NFXL', n:'GraniteShares 2x Long NFLX',tags:['x2','single'],tc:['t-x2','t-bull']},
+  {t:'METU', n:'Direxion Daily META Bull 2x',tags:['x2','single'],tc:['t-x2','t-bull']},
+  {t:'AVL',  n:'GraniteShares 2x Long AVGO',tags:['x2','single'],tc:['t-x2','t-bull']},
+  {t:'MUU',  n:'GraniteShares 2x Long MU',tags:['x2','single'],tc:['t-x2','t-bull']},
+  {t:'QCML', n:'GraniteShares 2x Long QCOM',tags:['x2','single'],tc:['t-x2','t-bull']},
+  {t:'GGLL', n:'Direxion Daily GOOGL Bull 2x',tags:['x2','single'],tc:['t-x2','t-bull']},
+  {t:'PTIR', n:'GraniteShares 2x Long PLTR',tags:['x2','single'],tc:['t-x2','t-bull']},
+];
+const SINGL_BEAR=[
+  {t:'SH',   n:'ProShares Short S&P500',tags:['-1x','inverse'],tc:['t-x2','t-bear']},
+  {t:'PSQ',  n:'ProShares Short QQQ',tags:['-1x','inverse'],tc:['t-x2','t-bear']},
+  {t:'DOG',  n:'ProShares Short Dow30',tags:['-1x','inverse'],tc:['t-x2','t-bear']},
+  {t:'DXD',  n:'ProShares UltraShort Dow30',tags:['-2x','inverse'],tc:['t-x3','t-bear']},
+  {t:'AAPD', n:'Direxion Daily AAPL Bear 2x',tags:['-2x','inverse'],tc:['t-x2','t-bear']},
+  {t:'MSFD', n:'GraniteShares 2x Short MSFT',tags:['-2x','inverse'],tc:['t-x2','t-bear']},
+  {t:'TSLS', n:'Direxion Daily TSLA Bear 1x',tags:['-1x','inverse'],tc:['t-x2','t-bear']},
+  {t:'NVDD', n:'GraniteShares 2x Short NVDA',tags:['-2x','inverse'],tc:['t-x2','t-bear']},
+  {t:'AMDD', n:'Direxion Daily AMD Bear 2x',tags:['-2x','inverse'],tc:['t-x2','t-bear']},
+  {t:'AMZD', n:'Direxion Daily AMZN Bear 2x',tags:['-2x','inverse'],tc:['t-x2','t-bear']},
+  {t:'NFXS', n:'GraniteShares 2x Short NFLX',tags:['-2x','inverse'],tc:['t-x2','t-bear']},
+  {t:'METD', n:'Direxion Daily META Bear 2x',tags:['-2x','inverse'],tc:['t-x2','t-bear']},
+  {t:'AVS',  n:'GraniteShares 2x Short AVGO',tags:['-2x','inverse'],tc:['t-x2','t-bear']},
+  {t:'MUD',  n:'GraniteShares 2x Short MU',tags:['-2x','inverse'],tc:['t-x2','t-bear']},
+  {t:'GGLS', n:'Direxion Daily GOOGL Bear 2x',tags:['-2x','inverse'],tc:['t-x2','t-bear']},
+  {t:'PLTD', n:'GraniteShares 2x Short PLTR',tags:['-2x','inverse'],tc:['t-x2','t-bear']},
+];
+const ALL=[...BULL,...BEAR,...SINGL_BULL,...SINGL_BEAR];
 
 /* ── XSS ESCAPE ── */
 function esc(s){const d=document.createElement('div');d.textContent=s||'';return d.innerHTML;}
@@ -430,6 +511,82 @@ function computeSignal(price,ma20,ma50,ma100,ma200,rsi,macdObj){
   return r>=0.65?'buy':r<=0.35?'sell':'neutral';
 }
 
+/* ── SINGLES PANEL ── */
+let pChartIntra=null, curSelIntra=null;
+
+async function buildSinglesCols(){
+  renderColSkeleton('col-singl-bull',SINGL_BULL);
+  renderColSkeleton('col-singl-bear',SINGL_BEAR);
+  for(const e of [...SINGL_BULL,...SINGL_BEAR]){
+    try{const d=await fh(`/quote?symbol=${e.t}`);if(d&&d.c)liveQ[e.t]=d;}catch(err){}
+    await new Promise(r=>setTimeout(r,120));
+  }
+  renderColSortedIntra('col-singl-bull',SINGL_BULL);
+  renderColSortedIntra('col-singl-bear',SINGL_BEAR);
+}
+
+function renderColSortedIntra(id,etfs){
+  const container=document.getElementById(id);
+  const sorted=[...etfs].sort((a,b)=>{
+    const da=liveQ[a.t]?.dp??-999;
+    const db=liveQ[b.t]?.dp??-999;
+    return db-da;
+  });
+  container.innerHTML=sorted.map(e=>{
+    const q=liveQ[e.t];
+    const rank=sorted.indexOf(e);
+    const rankBadge=rank===0
+      ?`<span style="font-size:9px;font-family:var(--mono);font-weight:700;padding:1px 6px;border-radius:20px;background:${q&&q.dp>=0?'var(--gd)':'var(--rd)'};color:${q&&q.dp>=0?'var(--green)':'var(--red)'};border:1px solid ${q&&q.dp>=0?'var(--gb)':'var(--rb)'};">↑ TOP</span>`:'';
+    const priceHTML=q
+      ?`<div class="qp" id="qp-${esc(e.t)}" style="color:${q.dp>=0?'var(--green)':'var(--red)'};">$${q.c.toFixed(2)}</div>
+         <div class="qc ${q.dp>=0?'pos':'neg'}" id="qch-${esc(e.t)}">${q.dp>=0?'+':''}${q.dp.toFixed(2)}%&nbsp;(${q.dp>=0?'+':''}${(q.c-q.pc).toFixed(2)})</div>`
+      :`<div class="qp" id="qp-${esc(e.t)}"><span class="skel" style="width:60px;height:18px;border-radius:3px;">&nbsp;</span></div>
+         <div class="qc" id="qch-${esc(e.t)}">—</div>`;
+    return `<div class="qcard" id="qc-${esc(e.t)}" onclick="selETFIntra('${esc(e.t)}')">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;">
+        <div><div class="qt" style="display:flex;align-items:center;gap:6px;">${esc(e.t)} ${rankBadge}</div><div class="qn">${esc(e.n)}</div></div>
+        <div style="text-align:right;">${priceHTML}</div>
+      </div>
+      <div class="qtags">${e.tags.map((t,i)=>`<span class="tag ${e.tc[i]}">${esc(t)}</span>`).join('')}</div>
+    </div>`;
+  }).join('');
+}
+
+async function selETFIntra(sym){
+  document.querySelectorAll('#p-intradia .qcard').forEach(c=>{c.classList.remove('sel');c.classList.remove('sel-bear');});
+  const isBear=SINGL_BEAR.find(e=>e.t===sym);
+  const card=document.getElementById(`qc-${sym}`);
+  if(card) card.classList.add(isBear?'sel-bear':'sel');
+  curSelIntra=sym;
+  document.getElementById('detail-intra').style.display='block';
+  document.getElementById('det-intra-title').textContent=`▶ ${sym}`;
+  document.getElementById('det-intra-ticker').textContent=sym;
+  loadDetChartIntra(sym);
+  document.getElementById('detail-intra').scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+function refreshIntraDet(){if(curSelIntra)selETFIntra(curSelIntra);}
+
+async function loadDetChartIntra(sym){
+  const titleEl=document.getElementById('det-intra-ticker');
+  const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+  const day=et.getDay(),totalMin=et.getHours()*60+et.getMinutes();
+  const isOpen=day>=1&&day<=5&&totalMin>=570&&totalMin<960;
+  if(isOpen){
+    titleEl.textContent=sym+' · hoy 9:30–4pm ET (1 min)';
+    try{await loadCandleChartTo('pChartIntra',sym,pChartIntra,c=>{pChartIntra=c;});return;}
+    catch(e){console.warn('Candles failed, fallback:',e.message);}
+  }
+  titleEl.textContent=sym+' · últimos 5 días';
+  try{
+    const hist=await getHistory(sym,7);
+    drawLineChart('pChartIntra',hist.slice(-5),sym,pChartIntra,c=>{pChartIntra=c;});
+  }catch(e){
+    const ctx=document.getElementById('pChartIntra').getContext('2d');
+    ctx.clearRect(0,0,ctx.canvas.width,ctx.canvas.height);
+    document.getElementById('det-intra-ticker').textContent=sym+' · sin datos';
+  }
+}
+
 /* ── CONNECT ── */
 async function afterConnect(){
   connected=true;
@@ -441,9 +598,10 @@ async function afterConnect(){
   tick();
   updateMarketBadge();
   buildDualCols();
+  buildSinglesCols();
   buildIndBtns();
   // Auto-refresh: pause when tab hidden, resume when visible
-  function startTimer(){autoTimer=setInterval(()=>{if(connected){buildDualCols();tick();updateMarketBadge();}},60000);}
+  function startTimer(){autoTimer=setInterval(()=>{if(connected){buildDualCols();buildSinglesCols();tick();updateMarketBadge();}},60000);}
   startTimer();
   document.addEventListener('visibilitychange',()=>{
     if(document.hidden){if(autoTimer){clearInterval(autoTimer);autoTimer=null;}}
@@ -549,7 +707,7 @@ async function loadDetChart(sym){
   const isOpen=day>=1&&day<=5&&totalMin>=570&&totalMin<960;
   if(isOpen){
     titleEl.textContent=sym+' · hoy 9:30–4pm ET (1 min)';
-    try{await loadCandleChart(sym);return;}
+    try{await loadCandleChartTo('pChart',sym,pChart,c=>{pChart=c;});return;}
     catch(e){console.warn('Candles failed, fallback:',e.message);}
   }
   titleEl.textContent=sym+' · últimos 5 días';
@@ -563,7 +721,7 @@ async function loadDetChart(sym){
   }
 }
 
-async function loadCandleChart(sym){
+async function loadCandleChartTo(canvasId,sym,existingChart,setChart){
   const url=`https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=1m&range=1d`;
   const proxies=[
     `https://corsproxy.io/?${encodeURIComponent(url)}`,
@@ -602,9 +760,9 @@ async function loadCandleChart(sym){
   const bodyColors=candles.map(x=>x.c>=x.o?upF:dnF);
   const borderColors=candles.map(x=>x.c>=x.o?upC:dnC);
   const currentPrice=liveQ[sym]?.c;
-  const ctx=document.getElementById('pChart').getContext('2d');
-  if(pChart){pChart.destroy();pChart=null;}
-  pChart=new Chart(ctx,{
+  const ctx=document.getElementById(canvasId).getContext('2d');
+  if(existingChart){existingChart.destroy();}
+  const _newChart=new Chart(ctx,{
     type:'bar',
     data:{labels,datasets:[{label:'Vela',data:bodyData,backgroundColor:bodyColors,borderColor:borderColors,borderWidth:1,borderSkipped:false}]},
     options:{
@@ -656,6 +814,7 @@ async function loadCandleChart(sym){
       }
     }]
   });
+  if(setChart) setChart(_newChart); else pChart=_newChart;
 }
 
 /* ── INDICATORS PANEL ── */

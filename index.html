@@ -2406,6 +2406,18 @@ async function _buildSignalsCore(){
           onchange="saveSignalNote('${s.sym}','${s.code}',this.value)">${s._note||''}</textarea>`:''}
         ${getAnthropicKey()?`
         <div style="margin-top:8px;">
+          <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">
+            <label id="claude-img-lbl-${s.sym}-${s.code}"
+              style="flex:1;padding:6px 10px;background:rgba(255,255,255,.05);border:1px dashed rgba(255,255,255,.2);border-radius:6px;color:var(--text3);font-size:11px;cursor:pointer;display:flex;align-items:center;gap:6px;transition:border-color .2s;"
+              onmouseover="this.style.borderColor='rgba(139,92,246,.5)'" onmouseout="this.style.borderColor='rgba(255,255,255,.2)'">
+              <span>📎</span><span id="claude-img-name-${s.sym}-${s.code}">Adjuntar chart TOS (opcional)</span>
+              <input type="file" accept="image/*" style="display:none"
+                onchange="signalCardImageLoad(this,'${s.sym}','${s.code}')">
+            </label>
+            <button id="claude-img-clear-${s.sym}-${s.code}"
+              onclick="signalCardImageClear('${s.sym}','${s.code}')"
+              style="display:none;padding:6px 8px;background:rgba(255,77,109,.12);border:1px solid rgba(255,77,109,.3);border-radius:6px;color:rgba(255,77,109,.8);font-size:11px;cursor:pointer;">✕</button>
+          </div>
           <button id="claude-btn-${s.sym}-${s.code}"
             onclick="analyzeSignalCard(this,'${s.sym}','${s.code}','${s.name}','${s.type}',${disp},${s.price.toFixed(2)},'${encodeURIComponent(s.reqs.map(r=>(r.ok?`OK`:`NO`)+`: `+r.text).join(`\n`))}')"
             style="width:100%;padding:7px 10px;background:rgba(139,92,246,.15);border:1px solid rgba(139,92,246,.4);border-radius:6px;color:rgba(139,92,246,.9);font-size:11px;font-weight:600;cursor:pointer;font-family:var(--sans);display:flex;align-items:center;justify-content:center;gap:6px;"
@@ -5284,59 +5296,91 @@ function renderHistorialList(filter){
   }).join('');
 }
 
-// ── analyzeSignalCard — análisis Claude en tarjetas del panel principal ──────
-// Recibe los datos de la señal y genera un análisis conciso directamente
-// en la tarjeta, sin necesidad de ir al Historial o Post-Mortem.
+// ── Signal card image store — base64 por sym+code ────────────────────────
+const _cardImgStore={};
+
+function signalCardImageLoad(input,sym,code){
+  const file=input.files[0];if(!file)return;
+  const reader=new FileReader();
+  reader.onload=ev=>{
+    const b64=ev.target.result.split(',')[1];
+    const mime=file.type||'image/jpeg';
+    _cardImgStore[`${sym}-${code}`]={b64,mime,name:file.name};
+    const nameEl=document.getElementById(`claude-img-name-${sym}-${code}`);
+    const clearBtn=document.getElementById(`claude-img-clear-${sym}-${code}`);
+    if(nameEl)nameEl.textContent='✅ '+file.name;
+    if(clearBtn)clearBtn.style.display='block';
+    const outEl=document.getElementById(`claude-out-${sym}-${code}`);
+    if(outEl){outEl.dataset.loaded='';outEl.style.display='none';}
+    const btn=document.getElementById(`claude-btn-${sym}-${code}`);
+    if(btn)btn.querySelector('span:last-child').textContent='Analizar con Claude';
+  };
+  reader.readAsDataURL(file);
+}
+
+function signalCardImageClear(sym,code){
+  delete _cardImgStore[`${sym}-${code}`];
+  const nameEl=document.getElementById(`claude-img-name-${sym}-${code}`);
+  const clearBtn=document.getElementById(`claude-img-clear-${sym}-${code}`);
+  const lbl=document.getElementById(`claude-img-lbl-${sym}-${code}`);
+  if(nameEl)nameEl.textContent='Adjuntar chart TOS (opcional)';
+  if(clearBtn)clearBtn.style.display='none';
+  if(lbl){const fi=lbl.querySelector('input[type=file]');if(fi)fi.value='';}
+}
+
+// ── analyzeSignalCard — análisis Claude + imagen opcional en tarjetas ─────────
 async function analyzeSignalCard(btn,sym,code,name,type,confidence,price,reqsEncoded){
   const key=getAnthropicKey();
-  if(!key||!key.startsWith('sk-')){
-    alert('Configura tu API key de Claude en Configuración → APIs.');
-    return;
+  if(!key||key.length<20||!key.startsWith('sk-')){
+    alert('Configura tu API key de Claude en Configuración → APIs.');return;
   }
   const outEl=document.getElementById(`claude-out-${sym}-${code}`);
   if(!outEl)return;
 
-  // Toggle: si ya tiene contenido, colapsar/expandir
+  // Toggle colapsar/expandir si ya está analizado
   if(outEl.dataset.loaded==='1'){
     outEl.style.display=outEl.style.display==='none'?'block':'none';
     btn.querySelector('span:last-child').textContent=outEl.style.display==='none'?'Analizar con Claude':'Ocultar análisis';
     return;
   }
 
-  // Loading state
   btn.disabled=true;
   btn.querySelector('span:last-child').textContent='Analizando...';
   btn.style.opacity='0.6';
   outEl.style.display='block';
-  outEl.innerHTML='<span style="color:rgba(139,92,246,.6);font-size:11px;">🤖 Claude analizando la señal...</span>';
+  outEl.innerHTML='<span style="color:rgba(139,92,246,.6);font-size:11px;">🤖 Claude analizando...</span>';
 
   const reqs=decodeURIComponent(reqsEncoded);
+  const imgData=_cardImgStore[`${sym}-${code}`]||null;
   const dir=type==='call'?'CALL 📈':'PUT 📉';
   const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
   const timeStr=et.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true});
   const mNow=et.getHours()*60+et.getMinutes();
   const session=mNow<570?'Pre-Market':mNow<960?'Regular Market Hours':'After-Hours';
 
-  const prompt=`Eres un trader profesional especialista en opciones intraday. Analiza esta señal técnica y da un veredicto directo.
+  const promptText=`Eres un trader profesional especialista en opciones intraday. Analiza esta señal técnica${imgData?' y el chart adjunto':''} y da un veredicto directo.
 
 SEÑAL: ${sym} ${dir} | Estrategia: ${code} — ${name}
 Precio: $${price} | Confianza: ${confidence}% | Hora: ${timeStr} ET (${session})
 
-CONDICIONES QUE PASARON/FALLARON:
+CONDICIONES:
 ${reqs}
-
-Responde en este formato EXACTO (máximo 120 palabras total):
+${imgData?'\nAnaliza el chart: confirma si BB, MA20 y estructura son consistentes con la señal. Identifica factores adicionales visibles.':''}
+Responde EXACTAMENTE en este formato (máximo 150 palabras):
 
 🎯 VEREDICTO: [OPERAR / ESPERAR / EVITAR]
-📊 CONTEXTO: [1 oración sobre el estado técnico actual]
-⚠️ RIESGO PRINCIPAL: [1 oración sobre el mayor riesgo de esta entrada]
+📊 CONTEXTO: [1 oración sobre el estado técnico${imgData?' basada en el chart':''}]
+⚠️ RIESGO PRINCIPAL: [1 oración sobre el mayor riesgo]
 💡 ACCIÓN: [1 oración concreta — qué hacer ahora]
-
+${imgData?'🔍 CHART: [1 oración sobre lo que confirma o contradice el chart]':''}
 Sin introducciones. Sin disclaimers. Directo al punto.`;
+
+  const msgContent=imgData
+    ?[{type:'image',source:{type:'base64',media_type:imgData.mime,data:imgData.b64}},{type:'text',text:promptText}]
+    :[{type:'text',text:promptText}];
 
   try{
     const proxyUrl=(localStorage.getItem('proxy_url')||'').trim();
-    // W-03b: proxy solo válido si es URL real (empieza con http) — evita falso positivo con valor vacío/inválido
     const _proxyValid=proxyUrl.startsWith('http');
     const endpoint=_proxyValid?`${proxyUrl}/anthropic`:'https://api.anthropic.com/v1/messages';
     const headers={'Content-Type':'application/json'};
@@ -5345,42 +5389,34 @@ Sin introducciones. Sin disclaimers. Directo al punto.`;
       headers['anthropic-version']='2023-06-01';
       headers['anthropic-dangerous-direct-browser-access']='true';
     }
-    const resp=await fetch(endpoint,{
-      method:'POST',headers,
-      body:JSON.stringify({
-        model:'claude-sonnet-4-6',
-        max_tokens:300,
-        messages:[{role:'user',content:prompt}]
-      })
+    const resp=await fetch(endpoint,{method:'POST',headers,
+      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:400,
+        messages:[{role:'user',content:msgContent}]})
     });
-    if(!resp.ok){
-      const er=await resp.json().catch(()=>({}));
-      throw new Error(er.error?.message||`HTTP ${resp.status}`);
-    }
+    if(!resp.ok){const er=await resp.json().catch(()=>({}));throw new Error(er.error?.message||`HTTP ${resp.status}`);}
     const res=await resp.json();
     const txt=(res.content?.find(b=>b.type==='text')?.text||'Sin respuesta.').trim();
 
-    // Render con colores según veredicto
     const isOperar=txt.includes('OPERAR');
     const isEvitar=txt.includes('EVITAR');
     const verdictColor=isOperar?'var(--green)':isEvitar?'var(--red)':'var(--yellow)';
 
-    outEl.innerHTML=`<div style="font-size:11px;line-height:1.7;color:var(--text);">${
+    outEl.innerHTML=`<div style="font-size:11px;line-height:1.8;color:var(--text);">${
       txt.replace(/🎯 VEREDICTO:/g,`<span style="font-weight:700;color:${verdictColor};">🎯 VEREDICTO:</span>`)
          .replace(/📊 CONTEXTO:/g,'<span style="font-weight:700;color:var(--blue);">📊 CONTEXTO:</span>')
          .replace(/⚠️ RIESGO PRINCIPAL:/g,'<span style="font-weight:700;color:var(--yellow);">⚠️ RIESGO PRINCIPAL:</span>')
          .replace(/💡 ACCIÓN:/g,'<span style="font-weight:700;color:rgba(139,92,246,.9);">💡 ACCIÓN:</span>')
+         .replace(/🔍 CHART:/g,'<span style="font-weight:700;color:var(--blue);">🔍 CHART:</span>')
          .replace(/\n/g,'<br>')
-    }</div>`;
+    }${imgData?'<div style="font-size:10px;color:var(--text3);margin-top:6px;">📎 Analizado con chart adjunto</div>':''}</div>`;
     outEl.dataset.loaded='1';
     btn.querySelector('span:last-child').textContent='Ocultar análisis';
-    addLog('debug','Claude',`Análisis ${sym} ${code} completado`);
+    addLog('debug','Claude',`Análisis ${sym} ${code}${imgData?' +img':''} OK`);
   }catch(e){
     outEl.innerHTML=`<span style="color:var(--red);font-size:11px;">❌ Error: ${e.message}</span>`;
-    addLog('error','Claude',`Error analizando ${sym}: ${e.message}`);
+    addLog('error','Claude',`Error ${sym}: ${e.message}`);
   }finally{
-    btn.disabled=false;
-    btn.style.opacity='1';
+    btn.disabled=false;btn.style.opacity='1';
   }
 }
 

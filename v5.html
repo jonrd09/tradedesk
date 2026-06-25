@@ -2644,11 +2644,13 @@ function _loadCfgFields(){
   const csec=localStorage.getItem('schwab_client_secret')||'';
   const proxy=localStorage.getItem('proxy_url')||'';
   const fhk=localStorage.getItem('finnhub_key')||localStorage.getItem('levetf_apikey')||'';
+  const clk=localStorage.getItem('anthropic_api_key')||'';
   const el=id=>document.getElementById(id);
   if(el('cfg-schwabClientId'))el('cfg-schwabClientId').value=cid;
   if(el('cfg-schwabClientSecret'))el('cfg-schwabClientSecret').value=csec;
   if(el('cfg-proxyUrl'))el('cfg-proxyUrl').value=proxy;
   if(el('cfg-finnhubKey'))el('cfg-finnhubKey').value=fhk;
+  if(el('cfg-claudeKey'))el('cfg-claudeKey').value=clk;
   // Telegram
   const tok=getTgToken(),chat=getTgChat(),enabled=isTgEnabled();
   if(el('cfg-tgToken'))el('cfg-tgToken').value=tok;
@@ -2681,6 +2683,20 @@ function forgetCfgFinnhub(){
   localStorage.removeItem('finnhub_key');localStorage.removeItem('levetf_apikey');window._fk='';
   document.getElementById('cfg-finnhubKey').value='';
   const r=document.getElementById('cfg-finnhubSaved');
+  if(r){r.style.color='var(--text3)';r.textContent='Key eliminada';r.style.display='block';setTimeout(()=>r.style.display='none',2000);}
+}
+function saveCfgClaude(){
+  const k=(document.getElementById('cfg-claudeKey').value||'').trim();
+  const r=document.getElementById('cfg-claudeSaved');
+  if(!k||k.length<20){if(r){r.style.color='var(--red)';r.textContent='⚠ Key inválida';r.style.display='block';}return;}
+  try{localStorage.setItem('anthropic_api_key',k);}catch(e){}
+  if(r){r.style.color='var(--green)';r.textContent='✅ Claude API key guardada';r.style.display='block';setTimeout(()=>r.style.display='none',2500);}
+}
+function forgetCfgClaude(){
+  if(!confirm('¿Borrar la Claude API key?'))return;
+  localStorage.removeItem('anthropic_api_key');
+  document.getElementById('cfg-claudeKey').value='';
+  const r=document.getElementById('cfg-claudeSaved');
   if(r){r.style.color='var(--text3)';r.textContent='Key eliminada';r.style.display='block';setTimeout(()=>r.style.display='none',2000);}
 }
 // ── Telegram ──────────────────────────────────────────────────
@@ -6446,6 +6462,28 @@ async function _pmPDF(id){
           </button>
         </div>
         <div id="cfg-finnhubSaved" style="display:none;font-size:12px;margin-top:6px;"></div>
+
+        <div style="border-top:1px solid var(--border);margin:18px 0;"></div>
+
+        <div class="cfg-section-title">Claude (Anthropic)</div>
+        <div style="font-size:11px;color:var(--text3);margin-bottom:10px;line-height:1.6;">
+          Requerida para el <strong style="color:var(--purple);">Reporte Premarket</strong> y el <strong style="color:var(--purple);">análisis Post-Mortem</strong> de señales.<br>
+          Obtén tu key en <span style="color:var(--blue);">console.anthropic.com</span>
+        </div>
+        <div class="cfg-label">API Key</div>
+        <input id="cfg-claudeKey" type="password" placeholder="sk-ant-api03-..."
+          class="cfg-input" style="margin-bottom:10px;">
+        <div style="display:flex;gap:8px;align-items:center;">
+          <button onclick="saveCfgClaude()"
+            style="background:rgba(167,139,250,.2);border:1px solid rgba(167,139,250,.4);color:var(--purple);border-radius:var(--r);padding:8px 18px;font-size:13px;font-weight:700;cursor:pointer;">
+            🤖 Guardar Claude Key
+          </button>
+          <button onclick="forgetCfgClaude()"
+            style="background:none;border:1px solid var(--border2);color:var(--text3);border-radius:var(--r);padding:8px 14px;font-size:12px;cursor:pointer;">
+            🗑 Borrar key
+          </button>
+        </div>
+        <div id="cfg-claudeSaved" style="display:none;font-size:12px;margin-top:6px;"></div>
       </div>
 
       <!-- ── TAB: Telegram ──────────────────────────────────── -->

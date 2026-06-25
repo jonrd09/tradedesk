@@ -4047,10 +4047,12 @@ Sé directo, concreto y accionable. Sin introducciones. Sin disclaimers. Solo el
 
   try{
     // Use proxy if configured (recommended) or direct with key (fallback)
-    const proxyUrl=localStorage.getItem('proxy_url')||'';
-    const endpoint=proxyUrl?`${proxyUrl}/anthropic`:'https://api.anthropic.com/v1/messages';
+    const proxyUrl=(localStorage.getItem('proxy_url')||'').trim();
+    // W-03b: proxy solo válido si es URL real (empieza con http) — evita falso positivo con valor vacío/inválido
+    const _proxyValid=proxyUrl.startsWith('http');
+    const endpoint=_proxyValid?`${proxyUrl}/anthropic`:'https://api.anthropic.com/v1/messages';
     const headers={'Content-Type':'application/json'};
-    if(!proxyUrl){
+    if(!_proxyValid){
       // Direct — key exposed in browser (only until proxy is configured)
       headers['x-api-key']=key;
       headers['anthropic-version']='2023-06-01';
@@ -5333,10 +5335,12 @@ Responde en este formato EXACTO (máximo 120 palabras total):
 Sin introducciones. Sin disclaimers. Directo al punto.`;
 
   try{
-    const proxyUrl=localStorage.getItem('proxy_url')||'';
-    const endpoint=proxyUrl?`${proxyUrl}/anthropic`:'https://api.anthropic.com/v1/messages';
+    const proxyUrl=(localStorage.getItem('proxy_url')||'').trim();
+    // W-03b: proxy solo válido si es URL real (empieza con http) — evita falso positivo con valor vacío/inválido
+    const _proxyValid=proxyUrl.startsWith('http');
+    const endpoint=_proxyValid?`${proxyUrl}/anthropic`:'https://api.anthropic.com/v1/messages';
     const headers={'Content-Type':'application/json'};
-    if(!proxyUrl){
+    if(!_proxyValid){
       headers['x-api-key']=key;
       headers['anthropic-version']='2023-06-01';
       headers['anthropic-dangerous-direct-browser-access']='true';
@@ -6358,10 +6362,12 @@ Responde EXACTAMENTE con este formato:
 Directo y concreto para un trader experimentado. Sin explicar conceptos básicos.`;
 
   try{
-    const proxyUrl=localStorage.getItem('proxy_url')||'';
-    const endpoint=proxyUrl?`${proxyUrl}/anthropic`:'https://api.anthropic.com/v1/messages';
+    const proxyUrl=(localStorage.getItem('proxy_url')||'').trim();
+    // W-03b: proxy solo válido si es URL real (empieza con http) — evita falso positivo con valor vacío/inválido
+    const _proxyValid=proxyUrl.startsWith('http');
+    const endpoint=_proxyValid?`${proxyUrl}/anthropic`:'https://api.anthropic.com/v1/messages';
     const headers={'Content-Type':'application/json'};
-    if(!proxyUrl){
+    if(!_proxyValid){
       headers['x-api-key']=key;
       headers['anthropic-version']='2023-06-01';
       headers['anthropic-dangerous-direct-browser-access']='true';

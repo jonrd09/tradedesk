@@ -2054,6 +2054,12 @@ async function _buildSignalsCore(){
     const gapUp15=distFromMA20_15>=1.5;    // precio 1.5%+ sobre MA20 → PUT (imán hacia abajo)
     const gapDown15=distFromMA20_15<=-1.5; // precio 1.5%+ bajo MA20 → CALL (imán hacia arriba)
 
+    // Guards de dirección: la vela de apertura debe confirmar el rebote
+    const imanCallOk = lP15>lO15;          // vela alcista — precio subiendo, no siguiendo la caída
+    const imanPutOk  = lP15<lO15;          // vela bajista — precio bajando, no rebotando
+    // Guard de gap excesivo: caída >4% es pánico, no imán — bloquear CALL
+    const imanGapSafe = Math.abs(distFromMA20_15)<=4.5;
+
     if((_isOpen15||_testMode||_debugMode)&&gapUp15){
       all.push({...meta,code:'IMAN',name:'Efecto Imán Apertura — PUT',type:'put',reqs:[
         {ok:gapUp15,       tf:'15m',text:`Precio $${lP15.toFixed(2)} está ${distFromMA20_15.toFixed(1)}% sobre MA20 ($${lMA20_15.toFixed(2)})`},
@@ -2061,6 +2067,7 @@ async function _buildSignalsCore(){
         {ok:lK15>60,       tf:'15m',text:`Worden sobrecomprado en apertura (%K ${lK15.toFixed(0)})`},
         {ok:volActive15,   tf:'15m',text:`Volumen activo${volLabel}`},
         {ok:lBBW15>1.0,    tf:'15m',text:`Volatilidad activa (BBW ${lBBW15.toFixed(1)}%)`},
+        {ok:imanPutOk,     tf:'15m',text:`Vela bajista confirmada: cierre $${lP15.toFixed(2)} < apertura $${lO15.toFixed(2)}`},
       ]});
     }
     if((_isOpen15||_testMode||_debugMode)&&gapDown15){
@@ -2070,6 +2077,8 @@ async function _buildSignalsCore(){
         {ok:lK15<40,       tf:'15m',text:`Worden sobrevendido en apertura (%K ${lK15.toFixed(0)})`},
         {ok:volActive15,   tf:'15m',text:`Volumen activo${volLabel}`},
         {ok:lBBW15>1.0,    tf:'15m',text:`Volatilidad activa (BBW ${lBBW15.toFixed(1)}%)`},
+        {ok:imanCallOk,    tf:'15m',text:`Vela alcista confirmada: cierre $${lP15.toFixed(2)} > apertura $${lO15.toFixed(2)}`},
+        {ok:imanGapSafe,   tf:'15m',text:`Gap dentro del rango imán (${Math.abs(distFromMA20_15).toFixed(1)}% ≤ 4.5% — gap extremo bloquea CALL)`},
       ]});
     }
   }

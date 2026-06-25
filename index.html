@@ -2425,6 +2425,12 @@ async function _buildSignalsCore(){
             <span>🤖</span><span>Analizar con Claude</span>
           </button>
           <div id="claude-out-${s.sym}-${s.code}" style="display:none;margin-top:8px;padding:10px 12px;background:rgba(139,92,246,.07);border:1px solid rgba(139,92,246,.25);border-radius:6px;font-size:11px;color:var(--text);line-height:1.6;"></div>
+          <button id="claude-pdf-${s.sym}-${s.code}"
+            onclick="downloadSignalCardPDF('${s.sym}','${s.code}','${s.name}','${s.type}',${disp},${s.price.toFixed(2)},'${encodeURIComponent(s.reqs.map(r=>(r.ok?'OK':'NO')+': '+r.text).join('\n'))}')"
+            style="display:none;width:100%;margin-top:6px;padding:7px 10px;background:rgba(0,209,122,.12);border:1px solid rgba(0,209,122,.35);border-radius:6px;color:rgba(0,209,122,.9);font-size:11px;font-weight:600;cursor:pointer;font-family:var(--sans);align-items:center;justify-content:center;gap:6px;"
+            onmouseover="this.style.background='rgba(0,209,122,.22)'" onmouseout="this.style.background='rgba(0,209,122,.12)'">
+            <span>📥</span><span>Descargar PDF + Limpiar</span>
+          </button>
         </div>`:''}\n      </div>
     </div>`;
   });
@@ -5411,6 +5417,9 @@ Sin introducciones. Sin disclaimers. Directo al punto.`;
     }${imgData?'<div style="font-size:10px;color:var(--text3);margin-top:6px;">📎 Analizado con chart adjunto</div>':''}</div>`;
     outEl.dataset.loaded='1';
     btn.querySelector('span:last-child').textContent='Ocultar análisis';
+    // Mostrar botón de descarga PDF
+    const pdfBtn=document.getElementById(`claude-pdf-${sym}-${code}`);
+    if(pdfBtn)pdfBtn.style.display='flex';
     addLog('debug','Claude',`Análisis ${sym} ${code}${imgData?' +img':''} OK`);
   }catch(e){
     outEl.innerHTML=`<span style="color:var(--red);font-size:11px;">❌ Error: ${e.message}</span>`;
@@ -5418,6 +5427,210 @@ Sin introducciones. Sin disclaimers. Directo al punto.`;
   }finally{
     btn.disabled=false;btn.style.opacity='1';
   }
+}
+
+// ── downloadSignalCardPDF — PDF completo desde tarjeta ───────────────────────
+// Genera: info señal + condiciones + imagen TOS + análisis Claude + fix sugerido
+// Luego limpia imagen y análisis de la tarjeta
+async function downloadSignalCardPDF(sym,code,name,type,confidence,price,reqsEncoded){
+  const jspdf=window.jspdf;
+  if(!jspdf){alert('jsPDF no cargado. Verifica conexión.');return;}
+  const {jsPDF}=jspdf;
+
+  const outEl=document.getElementById(`claude-out-${sym}-${code}`);
+  const analysisHtml=outEl?.innerHTML||'';
+  const analysisText=outEl?.innerText||outEl?.textContent||'';
+  const imgData=_cardImgStore[`${sym}-${code}`]||null;
+  const key=getAnthropicKey();
+  const reqs=decodeURIComponent(reqsEncoded);
+
+  // Pedir fix sugerido a Claude antes de generar el PDF
+  const pdfBtn=document.getElementById(`claude-pdf-${sym}-${code}`);
+  if(pdfBtn){pdfBtn.querySelector('span:last-child').textContent='Generando PDF...';pdfBtn.disabled=true;}
+
+  let fixText='No se pudo generar el fix automático.';
+  if(key&&key.startsWith('sk-')){
+    try{
+      const fixPrompt=`Eres un ingeniero de trading systems. Basándote en este análisis de señal falsa, propón un fix concreto para el guard de la estrategia.
+
+SEÑAL: ${sym} ${type.toUpperCase()} | Estrategia: ${code} — ${name}
+Precio entrada: $${price} | Confianza: ${confidence}%
+
+CONDICIONES:
+${reqs}
+
+ANÁLISIS DE CLAUDE:
+${analysisText}
+
+Responde EXACTAMENTE en este formato (máximo 120 palabras):
+
+🔧 GUARD A MODIFICAR: [nombre del guard o condición específica]
+📋 PROBLEMA: [por qué esta condición falló en este contexto]
+💻 FIX SUGERIDO: [código JavaScript de 1-3 líneas con el cambio exacto al guard]
+✅ RESULTADO ESPERADO: [qué señales evitaría con este fix]
+
+Sin explicaciones adicionales. Solo el fix.`;
+
+      const proxyUrl=(localStorage.getItem('proxy_url')||'').trim();
+      const _proxyValid=proxyUrl.startsWith('http');
+      const endpoint=_proxyValid?`${proxyUrl}/anthropic`:'https://api.anthropic.com/v1/messages';
+      const headers={'Content-Type':'application/json'};
+      if(!_proxyValid){headers['x-api-key']=key;headers['anthropic-version']='2023-06-01';headers['anthropic-dangerous-direct-browser-access']='true';}
+      const r=await fetch(endpoint,{method:'POST',headers,
+        body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:300,
+          messages:[{role:'user',content:fixPrompt}]})});
+      if(r.ok){const d=await r.json();fixText=d.content?.find(b=>b.type==='text')?.text||fixText;}
+    }catch(e){fixText='Error generando fix: '+e.message;}
+  }
+
+  // ── Generar PDF ──────────────────────────────────────────────────────────
+  const doc=new jsPDF({unit:'mm',format:'a4',orientation:'portrait'});
+  const W=210,H=297;
+  let y=0;
+  const isCall=type==='call';
+  const acR=isCall?[0,209,122]:[255,77,109];
+  const acP=[167,139,250];
+  const acG=[0,209,122];
+  const nowStr=new Date().toLocaleString('es-PR',{timeZone:'America/Puerto_Rico',dateStyle:'medium',timeStyle:'short'});
+
+  const newPage=()=>{
+    doc.addPage();
+    doc.setFillColor(10,14,26);doc.rect(0,0,W,H,'F');
+    y=14;
+  };
+
+  // Fondo
+  doc.setFillColor(10,14,26);doc.rect(0,0,W,H,'F');
+
+  // Header
+  doc.setFillColor(17,24,39);doc.rect(0,0,W,20,'F');
+  doc.setFont('helvetica','bold');doc.setFontSize(12);
+  doc.setTextColor(...acP);doc.text('TradeDesk Pro',12,8);
+  doc.setFont('helvetica','normal');doc.setFontSize(7.5);
+  doc.setTextColor(130,145,165);doc.text('Signal Analysis Report',12,14);
+  doc.setFontSize(7);doc.text('Generado: '+nowStr,W-12,14,{align:'right'});
+  y=26;
+
+  // ── Sección 1: Info señal ─────────────────────────────────────────────────
+  doc.setFillColor(26,34,53);doc.roundedRect(10,y,W-20,36,3,3,'F');
+  doc.setDrawColor(...acR);doc.setLineWidth(0.4);doc.roundedRect(10,y,W-20,36,3,3,'S');
+  doc.setFont('helvetica','bold');doc.setFontSize(20);
+  doc.setTextColor(...acR);doc.text(sym,17,y+13);
+  const bx=17+doc.getTextWidth(sym)+4;
+  doc.setFillColor(...acR);doc.roundedRect(bx,y+5,22,8,2,2,'F');
+  doc.setFontSize(7.5);doc.setTextColor(10,14,26);
+  doc.text(type.toUpperCase()+' · '+code,bx+11,y+10.5,{align:'center'});
+  doc.setFont('helvetica','normal');doc.setFontSize(9);
+  doc.setTextColor(180,195,220);doc.text(name,17,y+21);
+  doc.setFont('helvetica','bold');doc.setFontSize(11);
+  doc.setTextColor(230,235,245);doc.text('$'+price,17,y+30);
+  doc.setFont('helvetica','bold');doc.setFontSize(13);
+  doc.setTextColor(...acP);doc.text(confidence+'%',W-17,y+14,{align:'right'});
+  doc.setFont('helvetica','normal');doc.setFontSize(7);
+  doc.setTextColor(130,145,165);doc.text('confianza',W-17,y+20,{align:'right'});
+  y+=42;
+
+  // ── Sección 2: Condiciones ───────────────────────────────────────────────
+  doc.setFont('helvetica','bold');doc.setFontSize(8);
+  doc.setTextColor(...acP);doc.text('📋  CONDICIONES DE LA SEÑAL',12,y);
+  doc.setDrawColor(...acP);doc.setLineWidth(0.25);doc.line(12,y+2,W-12,y+2);
+  y+=7;
+
+  const reqLines=reqs.split('\n').filter(l=>l.trim());
+  for(const req of reqLines){
+    if(y>H-18)newPage();
+    const isOk=req.startsWith('OK:');
+    const col=isOk?[0,209,122]:[255,77,109];
+    const mark=isOk?'✓':'✗';
+    const txt=req.replace(/^(OK|NO): /,'');
+    doc.setFont('helvetica','bold');doc.setFontSize(8);
+    doc.setTextColor(...col);doc.text(mark,13,y);
+    doc.setFont('helvetica','normal');doc.setFontSize(7.5);
+    doc.setTextColor(210,220,235);
+    const wl=doc.splitTextToSize(txt,W-32);
+    doc.text(wl,18,y);y+=wl.length*4.2+1;
+  }
+  y+=4;
+
+  // ── Sección 3: Imagen TOS ─────────────────────────────────────────────────
+  if(imgData){
+    if(y>H-50)newPage();
+    doc.setFont('helvetica','bold');doc.setFontSize(8);
+    doc.setTextColor(...acP);doc.text('📸  CHART — ThinkorSwim',12,y);
+    doc.setDrawColor(...acP);doc.setLineWidth(0.25);doc.line(12,y+2,W-12,y+2);
+    y+=7;
+    const imgSrc='data:'+imgData.mime+';base64,'+imgData.b64;
+    const iW=W-24;let iH=85;
+    try{const p=doc.getImageProperties(imgSrc);iH=Math.min(90,iW/(p.width/p.height));}catch(e){}
+    if(y+iH>H-12)newPage();
+    doc.addImage(imgSrc,imgData.mime.split('/')[1].toUpperCase(),12,y,iW,iH);
+    y+=iH+8;
+  }
+
+  // ── Sección 4: Análisis Claude ───────────────────────────────────────────
+  if(analysisText.trim()){
+    if(y>H-30)newPage();
+    doc.setFont('helvetica','bold');doc.setFontSize(8);
+    doc.setTextColor(...acG);doc.text('🤖  ANÁLISIS TÉCNICO — Claude',12,y);
+    doc.setDrawColor(...acG);doc.setLineWidth(0.25);doc.line(12,y+2,W-12,y+2);
+    y+=8;
+    const cleanAnalysis=analysisText.replace(/[\u{1F300}-\u{1FFFF}]/gu,' ').trim();
+    for(const line of cleanAnalysis.split('\n')){
+      if(y>H-14)newPage();
+      const tr=line.trim();if(!tr){y+=2;continue;}
+      const isHdr=/VEREDICTO:|CONTEXTO:|RIESGO|ACCI[OÓ]N:|CHART:/.test(tr);
+      if(isHdr){doc.setFont('helvetica','bold');doc.setFontSize(8.5);doc.setTextColor(...acP);}
+      else{doc.setFont('helvetica','normal');doc.setFontSize(8);doc.setTextColor(210,220,235);}
+      const wl=doc.splitTextToSize(tr,W-28);
+      doc.text(wl,15,y);y+=wl.length*(isHdr?5:4.5);
+    }
+    y+=4;
+  }
+
+  // ── Sección 5: Fix sugerido ───────────────────────────────────────────────
+  if(y>H-40)newPage();
+  doc.setFont('helvetica','bold');doc.setFontSize(8);
+  doc.setTextColor(255,194,52);doc.text('🔧  FIX SUGERIDO — Guard a modificar',12,y);
+  doc.setDrawColor(255,194,52);doc.setLineWidth(0.25);doc.line(12,y+2,W-12,y+2);
+  y+=8;
+  doc.setFillColor(26,30,20);doc.roundedRect(10,y-3,W-20,4,2,2,'F');
+  const cleanFix=fixText.replace(/[\u{1F300}-\u{1FFFF}]/gu,' ').trim();
+  for(const line of cleanFix.split('\n')){
+    if(y>H-14)newPage();
+    const tr=line.trim();if(!tr){y+=2;continue;}
+    const isHdr=/GUARD|PROBLEMA:|FIX|RESULTADO:/.test(tr);
+    const isCode=tr.includes('const ')||tr.includes('&&')||tr.includes('||')||tr.startsWith('//');
+    if(isHdr){doc.setFont('helvetica','bold');doc.setFontSize(8.5);doc.setTextColor(255,194,52);}
+    else if(isCode){doc.setFont('courier','normal');doc.setFontSize(7.5);doc.setTextColor(0,209,122);}
+    else{doc.setFont('helvetica','normal');doc.setFontSize(8);doc.setTextColor(210,220,235);}
+    const wl=doc.splitTextToSize(tr,W-28);
+    doc.text(wl,15,y);y+=wl.length*(isHdr?5:isCode?4.2:4.5);
+  }
+
+  // Footer
+  const totalPages=doc.getNumberOfPages();
+  for(let p=1;p<=totalPages;p++){
+    doc.setPage(p);
+    doc.setFillColor(17,24,39);doc.rect(0,H-10,W,10,'F');
+    doc.setFont('helvetica','normal');doc.setFontSize(6.5);
+    doc.setTextColor(80,90,110);
+    doc.text(`TradeDesk Pro — ${sym} ${type.toUpperCase()} · ${code} · ${nowStr}`,12,H-4);
+    doc.text(`${p}/${totalPages}`,W-12,H-4,{align:'right'});
+  }
+
+  // Descargar
+  const fname=`TDP_${sym}_${code}_${type.toUpperCase()}_${new Date().toISOString().slice(0,10)}.pdf`;
+  doc.save(fname);
+
+  // ── Limpiar tarjeta ───────────────────────────────────────────────────────
+  setTimeout(()=>{
+    signalCardImageClear(sym,code);
+    if(outEl){outEl.innerHTML='';outEl.style.display='none';outEl.dataset.loaded='';}
+    const analyzeBtn=document.getElementById(`claude-btn-${sym}-${code}`);
+    if(analyzeBtn){analyzeBtn.querySelector('span:last-child').textContent='Analizar con Claude';}
+    if(pdfBtn){pdfBtn.style.display='none';pdfBtn.querySelector('span:last-child').textContent='Descargar PDF + Limpiar';pdfBtn.disabled=false;}
+    addLog('debug','Claude',`PDF ${fname} descargado — tarjeta limpiada`);
+  },1000);
 }
 
 function saveSignalNote(sym,code,note){

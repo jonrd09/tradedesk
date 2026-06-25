@@ -1647,7 +1647,7 @@ async function _buildSignalsCore(){
     const n15=c15.length;
     const ma20_15=sma(c15,Math.min(20,n15-1));
     const ma40_15=sma(c15,Math.min(40,n15-1)); // MA40 en 15min — para tendencia alcista/bajista
-    const bb15=bollinger(c15,14);
+    const bb15=bollinger(c15,20); // W-02: BB(20,2) — estándar TOS/institucional
     const lP15=c15[n15-1],pP15=c15[n15-2]||c15[n15-1];
     const lMA20_15=ma20_15.filter(v=>v!=null).slice(-1)[0]||lP15;
     const lMA40_15=ma40_15.filter(v=>v!=null).slice(-1)[0]||lP15;
@@ -1721,8 +1721,8 @@ async function _buildSignalsCore(){
     // ── Volumen 15min ────────────────────────────────────────────────────────
     const vol15=ohlc15.v||[];
     // BB expandiéndose activamente: BBW subiendo en las últimas 3 velas
-    const bb15_prev1=bollinger(c15.slice(0,-1),14);
-    const bb15_prev2=bollinger(c15.slice(0,-2),14);
+    const bb15_prev1=bollinger(c15.slice(0,-1),20); // W-02: alineado con BB(20,2)
+    const bb15_prev2=bollinger(c15.slice(0,-2),20); // W-02: alineado con BB(20,2)
     const lBBW15_1=bb15_prev1.upper.filter(v=>v!=null).slice(-1)[0]&&bb15_prev1.lower.filter(v=>v!=null).slice(-1)[0]&&bb15_prev1.mid.filter(v=>v!=null).slice(-1)[0]?(bb15_prev1.upper.filter(v=>v!=null).slice(-1)[0]-bb15_prev1.lower.filter(v=>v!=null).slice(-1)[0])/bb15_prev1.mid.filter(v=>v!=null).slice(-1)[0]*100:0;
     const lBBW15_2=bb15_prev2.upper.filter(v=>v!=null).slice(-1)[0]&&bb15_prev2.lower.filter(v=>v!=null).slice(-1)[0]&&bb15_prev2.mid.filter(v=>v!=null).slice(-1)[0]?(bb15_prev2.upper.filter(v=>v!=null).slice(-1)[0]-bb15_prev2.lower.filter(v=>v!=null).slice(-1)[0])/bb15_prev2.mid.filter(v=>v!=null).slice(-1)[0]*100:0;
     const isExpanding15=(lBBW15-lBBW15_1)>0.03; // BB expanding — less strict
@@ -1813,6 +1813,36 @@ async function _buildSignalsCore(){
     const W={bollinger:60,medias:25,volumen:5,estocastico:5,hlines:5};
     const SCORE_THRESHOLD=70;
 
+    // ── M-04: HLINES GUARD — niveles técnicos del día anterior como filtro activo ──
+    // getLevels() lee los valores manuales ingresados en el panel de strikes.
+    // Si el precio está a ≤0.5% de un nivel clave en la dirección de la señal,
+    // el req de HLines pasa a ok:false → baja el score 5% → señal muestra advertencia.
+    // Umbral ≤1.5%: aparece warning visual en la tarjeta aunque no bloquee el req.
+    const _lv=getLevels(sym);
+    const _hlWarn=(level)=>level&&Math.abs(realPrice-level)/level*100<=1.5; // aviso visual
+    const _hlBlock=(level)=>level&&Math.abs(realPrice-level)/level*100<=0.5; // baja score
+    // CALL: resistencias arriba (Last High, ATH) — el precio puede rebotar ahí
+    const _hlCallOk=!(_hlBlock(_lv.hi)||_hlBlock(_lv.ath)); // true = sin resistencia inmediata
+    // PUT: soporte abajo (Last Low) — el precio puede rebotar ahí
+    const _hlPutOk=!_hlBlock(_lv.lo); // true = sin soporte inmediato
+    // Texto dinámico para el req según el nivel más cercano
+    function _hlCallText(){
+      if(_lv.ath&&_hlBlock(_lv.ath)) return `⚠ ATH a ${(Math.abs(realPrice-_lv.ath)/_lv.ath*100).toFixed(2)}% ($${_lv.ath.toFixed(2)}) — resistencia extrema`;
+      if(_lv.hi&&_hlBlock(_lv.hi))  return `⚠ Last High a ${(Math.abs(realPrice-_lv.hi)/_lv.hi*100).toFixed(2)}% ($${_lv.hi.toFixed(2)}) — posible techo`;
+      return `Sin resistencia cercana (Last High: ${_lv.hi?'$'+_lv.hi.toFixed(2):'no config.'} · ATH: ${_lv.ath?'$'+_lv.ath.toFixed(2):'no config.'})`;
+    }
+    function _hlPutText(){
+      if(_lv.lo&&_hlBlock(_lv.lo)) return `⚠ Last Low a ${(Math.abs(realPrice-_lv.lo)/_lv.lo*100).toFixed(2)}% ($${_lv.lo.toFixed(2)}) — posible piso`;
+      return `Sin soporte cercano (Last Low: ${_lv.lo?'$'+_lv.lo.toFixed(2):'no config.'})`;
+    }
+    // Banner warning text — se usa en la tarjeta de señal
+    const _hlCallWarnBanner=(!_hlCallOk||(_lv.hi&&_hlWarn(_lv.hi))||(_lv.ath&&_hlWarn(_lv.ath)))
+      ?(_lv.ath&&_hlWarn(_lv.ath)?`⚠ ATH $${_lv.ath.toFixed(2)} a ${(Math.abs(realPrice-_lv.ath)/_lv.ath*100).toFixed(2)}%`:
+        _lv.hi&&_hlWarn(_lv.hi)?`⚠ Last High $${_lv.hi.toFixed(2)} a ${(Math.abs(realPrice-_lv.hi)/_lv.hi*100).toFixed(2)}%`:''):'';
+    const _hlPutWarnBanner=(!_hlPutOk||(_lv.lo&&_hlWarn(_lv.lo)))
+      ?(_lv.lo&&_hlWarn(_lv.lo)?`⚠ Last Low $${_lv.lo.toFixed(2)} a ${(Math.abs(realPrice-_lv.lo)/_lv.lo*100).toFixed(2)}%`:''):'';
+
+
     // ── GUARDS DE DIRECCIÓN — previenen señales contradictorias con el precio ──
     // Guard CALL: precio debe estar sobre MA20 15min Y no en momentum bajista fuerte
     // Guard PUT:  precio debe estar bajo MA20 15min Y no en momentum alcista fuerte
@@ -1850,11 +1880,10 @@ async function _buildSignalsCore(){
         {ok:maCallCross,      tf:'H/D',weight:'25%',text:`Contexto alcista: MA20>MA40 en Hora y Día`},
         {ok:volOverLine,      tf:'15m',weight:'5%',text:`Volumen sobre la línea${volLabel}`},
         {ok:stochCallDir,     tf:'15m',weight:'5%',text:`Worden a favor: %K ${lK15.toFixed(0)} > %D ${lD15.toFixed(0)}`},
-        {ok:false,            tf:'H/D',weight:'5%',text:`HLines (techos/pisos) — revisa manual en tu pantalla`,manual:true},
+        {ok:_hlCallOk,        tf:'H/D',weight:'5%',text:_hlCallText(),_hlBanner:_hlCallWarnBanner},
       ]});
     }
     // BB-B: PUT — Bollinger (gate) bajista
-    const bollGatePut=lBBW15>=1.5&&mediaDn&&approachingLower&&bigBodyPut&&_putGuardOk;
     if(_stratEnabled('BB-B')&&bollGatePut){
       let score=W.bollinger;
       if(maPutCross)  score+=W.medias;
@@ -1869,7 +1898,7 @@ async function _buildSignalsCore(){
         {ok:maPutCross,       tf:'H/D',weight:'25%',text:`Contexto bajista: MA40>MA20 en Hora y Día`},
         {ok:volOverLine,      tf:'15m',weight:'5%',text:`Volumen sobre la línea${volLabel}`},
         {ok:stochPutDir,      tf:'15m',weight:'5%',text:`Worden a favor: %K ${lK15.toFixed(0)} < %D ${lD15.toFixed(0)}`},
-        {ok:false,            tf:'H/D',weight:'5%',text:`HLines (techos/pisos) — revisa manual en tu pantalla`,manual:true},
+        {ok:_hlPutOk,         tf:'H/D',weight:'5%',text:_hlPutText(),_hlBanner:_hlPutWarnBanner},
       ]});
     }
     // Patrón C: PUT de regreso — EFECTO IMÁN: vela completa SOBRE la banda superior
@@ -1953,6 +1982,7 @@ async function _buildSignalsCore(){
           {ok:ma20Bull,      tf:'15m',text:`Precio sobre MA20 — soporte confirmado`},
           {ok:stochA,        tf:'15m',text:`Worden: %K (${lK15.toFixed(0)}) > %D (${lD15.toFixed(0)})`},
           {ok:volActive15,   tf:'15m',text:`Volumen activo${volLabel}`},
+          {ok:_hlCallOk,     tf:'H/D',text:_hlCallText(),_hlBanner:_hlCallWarnBanner},
         ]});
       }
     }
@@ -1967,6 +1997,7 @@ async function _buildSignalsCore(){
           {ok:ma20Bear,      tf:'15m',text:`Precio bajo MA20 — resistencia confirmada`},
           {ok:stochB,        tf:'15m',text:`Worden: %K (${lK15.toFixed(0)}) < %D (${lD15.toFixed(0)})`},
           {ok:volActive15,   tf:'15m',text:`Volumen activo${volLabel}`},
+          {ok:_hlPutOk,      tf:'H/D',text:_hlPutText(),_hlBanner:_hlPutWarnBanner},
         ]});
       }
     }
@@ -2003,6 +2034,7 @@ async function _buildSignalsCore(){
             {ok:ctVolConfirm,     tf:'1H', text:`Volumen cruce 1H${_volLbl1h} ≥ 120% del promedio`}, // M-03
             {ok:trend15Bull,      tf:'15m',text:`15min alcista: MA20 ($${lMA20_15.toFixed(2)}) > MA40 ($${lMA40_15.toFixed(2)})`},
             {ok:volActive15,      tf:'15m',text:`Volumen activo${volLabel}`},
+            {ok:_hlCallOk,        tf:'H/D',text:_hlCallText(),_hlBanner:_hlCallWarnBanner},
           ]});
         }
       }
@@ -2018,6 +2050,7 @@ async function _buildSignalsCore(){
             {ok:ctVolConfirm,     tf:'1H', text:`Volumen cruce 1H${_volLbl1h} ≥ 120% del promedio`}, // M-03
             {ok:trend15Bear,      tf:'15m',text:`15min bajista: MA20 ($${lMA20_15.toFixed(2)}) < MA40 ($${lMA40_15.toFixed(2)})`},
             {ok:volActive15,      tf:'15m',text:`Volumen activo${volLabel}`},
+            {ok:_hlPutOk,         tf:'H/D',text:_hlPutText(),_hlBanner:_hlPutWarnBanner},
           ]});
         }
       }
@@ -2058,6 +2091,7 @@ async function _buildSignalsCore(){
           {ok:nearMA20D,          tf:'D',  text:`Precio cerca de MA20 Daily: $${lP1h.toFixed(2)} ± ${_rpmThreshPct.toFixed(1)}% de $${lMA20D.toFixed(2)}`},
           {ok:trend15Bull,        tf:'15m',text:`15min rebota: MA20 ($${lMA20_15.toFixed(2)}) > MA40 ($${lMA40_15.toFixed(2)})`},
           {ok:lP1h>o1h[n1h-1],   tf:'1H', text:`Vela alcista de confirmación en 1H`},
+          {ok:_hlCallOk,          tf:'H/D',text:_hlCallText(),_hlBanner:_hlCallWarnBanner},
         ]});
       }
 
@@ -2071,6 +2105,7 @@ async function _buildSignalsCore(){
           {ok:respectsMA20D_put,  tf:'D',  text:`Precio respeta MA20 Daily (no la cruza hacia arriba)`},
           {ok:trend15Bear,        tf:'15m',text:`15min cae: MA20 ($${lMA20_15.toFixed(2)}) < MA40 ($${lMA40_15.toFixed(2)})`},
           {ok:lP1h<o1h[n1h-1],   tf:'1H', text:`Vela bajista de confirmación en 1H`},
+          {ok:_hlPutOk,           tf:'H/D',text:_hlPutText(),_hlBanner:_hlPutWarnBanner},
         ]});
       }
     }
@@ -2351,6 +2386,18 @@ async function _buildSignalsCore(){
           <div style="font-size:10px;color:var(--text3);margin-bottom:4px;">📈 Precio 1H · BB (azul) · MA20 (amarillo)</div>
           ${chartSvg}
         </div>`:''}
+        ${(()=>{
+          // M-04: HLines warning banner — aparece si algún req tiene _hlBanner con texto
+          const _hlb=s.reqs&&s.reqs.find(r=>r._hlBanner&&r._hlBanner.length>0);
+          if(!_hlb)return '';
+          return `<div style="margin-top:8px;padding:7px 10px;background:rgba(255,194,52,.12);border:1px solid rgba(255,194,52,.35);border-radius:6px;display:flex;align-items:center;gap:6px;">
+            <span style="font-size:14px;">⚠️</span>
+            <div>
+              <div style="font-size:11px;font-weight:700;color:#ffc234;">NIVEL TÉCNICO CERCANO</div>
+              <div style="font-size:11px;color:rgba(255,194,52,.85);margin-top:1px;">${_hlb._hlBanner} — confirma en tu chart antes de entrar</div>
+            </div>
+          </div>`;
+        })()}
         ${!s.isSetup?`<textarea placeholder="📝 Notas..." rows="2"
           style="width:100%;margin-top:8px;background:rgba(0,0,0,.25);border:1px solid rgba(255,255,255,.1);border-radius:6px;color:rgba(255,255,255,.8);font-size:11px;padding:6px 8px;resize:none;outline:none;font-family:var(--sans);box-sizing:border-box;"
           onchange="saveSignalNote('${s.sym}','${s.code}',this.value)">${s._note||''}</textarea>`:''}
@@ -5887,16 +5934,57 @@ async function init(){
     if(_isOpen||_isPre){
       // Precios primero, luego señales (loadLivePrices llama buildSignals internamente)
       await loadLivePrices();
-      // Auto-refresh Finnhub cada 10 min — evita 429 en plan free (60 calls/min)
-      // loadLivePrices con 6 tickers × 1.2s = ~8s total por ciclo
+      // ── W-01: MASTER INTERVAL — consolida _priceInterval y _sigInterval ──────
+      // Un único timer de 10min reemplaza los dos intervalos separados que podían
+      // dispararse casi simultáneamente (mismo intervalo, arrancan juntos en init).
+      // Jitter: arranca con 3-7s de offset aleatorio para desincronizarse del
+      // _tokenInterval (20min) y evitar bursts de API en el mismo tick.
       if(window._priceInterval)clearInterval(window._priceInterval);
-      window._priceInterval=setInterval(async()=>{
-        const _etP=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
-        const _mP=_etP.getHours()*60+_etP.getMinutes(),_dP=_etP.getDay();
-        if(_dP>=1&&_dP<=5&&_mP>=570&&_mP<960){
-          await loadLivePrices(); // también llama buildSignals al terminar
+      if(window._sigInterval)clearInterval(window._sigInterval);
+
+      const _masterTick=async()=>{
+        // Guard: si buildSignals ya está corriendo, saltar este tick
+        if(window._signalsBusy){
+          addLog('debug','Timer','masterInterval: buildSignals ocupado — tick saltado');
+          return;
         }
-      },10*60*1000);
+        const _etM=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+        const _mM=_etM.getHours()*60+_etM.getMinutes(),_dM=_etM.getDay();
+        const _isOpenM=_dM>=1&&_dM<=5&&_mM>=570&&_mM<960;
+        const _isPreM=_dM>=1&&_dM<=5&&_mM>=515&&_mM<570;
+        if(_isOpenM||_isPreM){
+          Object.keys(sessionStorage).filter(k=>k.startsWith('tg_sent_setup_')).forEach(k=>sessionStorage.removeItem(k));
+          const _hasKey=getKey()&&getKey().length>8;
+          if(_hasKey){
+            await loadLivePrices(); // loadLivePrices llama buildSignals al terminar
+          }else{
+            await buildSignals();
+          }
+          await checkMarketBlockMove();
+        }
+      };
+
+      // Arrancar con jitter (3-7s) para desincronizarse de _tokenInterval (20min)
+      const _jitterMs=Math.floor(Math.random()*4000)+3000;
+      setTimeout(()=>{ window._priceInterval=setInterval(_masterTick,10*60*1000); },_jitterMs);
+
+      // ── Page Visibility API — evita burst al volver del background ────────
+      // Cuando el browser throttlea los timers y la pestaña vuelve al frente,
+      // todos los setInterval se disparan casi a la vez. Este listener los re-sincroniza
+      // con 3s de delay para separar el master tick del _tokenInterval.
+      if(!window._visibilityListenerAttached){
+        window._visibilityListenerAttached=true;
+        document.addEventListener('visibilitychange',()=>{
+          if(document.visibilityState==='visible'){
+            addLog('debug','Timer','Tab visible — re-sync timers (3s delay)');
+            if(window._priceInterval)clearInterval(window._priceInterval);
+            setTimeout(()=>{
+              _masterTick(); // tick inmediato al volver
+              window._priceInterval=setInterval(_masterTick,10*60*1000);
+            },3000);
+          }
+        });
+      }
     }else{
       // Mercado cerrado — igual cargamos precios para tenerlos listos (sin buildSignals)
       // loadLivePrices llama buildSignals; este mostrará "mercado cerrado"
@@ -6018,26 +6106,7 @@ async function init(){
     _updateCountdownUI();
   },1000);
 
-  // Auto-refresh señales cada 10 min durante mercado
-  // Nota: el _priceInterval de 5min ya llama loadLivePrices→buildSignals.
-  // Este intervalo de 10min cubre el caso en que _priceInterval no corra (sin key Finnhub).
-  if(window._sigInterval)clearInterval(window._sigInterval);
-  window._sigInterval=setInterval(async()=>{
-    const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
-    const mins=et.getHours()*60+et.getMinutes(),day=et.getDay();
-    const isOpen=day>=1&&day<=5&&mins>=570&&mins<960;
-    const isPre=day>=1&&day<=5&&mins>=515&&mins<570;
-    if(isOpen||isPre){
-      Object.keys(sessionStorage).filter(k=>k.startsWith('tg_sent_setup_')).forEach(k=>sessionStorage.removeItem(k));
-      const _hasKey=getKey()&&getKey().length>8;
-      if(_hasKey){
-        await loadLivePrices();
-      }else{
-        await buildSignals();
-      }
-      await checkMarketBlockMove();
-    }
-  },10*60*1000);
+  // W-01: _sigInterval consolidado en _masterTick dentro de _priceInterval — ver arriba
 }
 init();
 

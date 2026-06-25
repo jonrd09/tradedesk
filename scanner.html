@@ -354,9 +354,9 @@ function forgetKey(){
   document.getElementById('slbl').textContent='sin conectar';
 }
 
-/* ── FINNHUB — header auth (no key in URL) ── */
+/* ── FINNHUB ── */
 async function fh(ep){
-  const r=await fetch(`https://finnhub.io/api/v1${ep}`,{headers:{'X-Finnhub-Token':APIKEY}});
+  const sep=ep.includes('?')?'&':'?'; const r=await fetch(`https://finnhub.io/api/v1${ep}${sep}token=${APIKEY}`);
   if(r.status===429) throw new Error('Rate limit alcanzado. Espera un momento.');
   if(!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
@@ -422,7 +422,8 @@ function computeSignal(price,ma20,ma50,ma100,ma200,rsi,macdObj){
   if(ma50){total++;if(price>ma50)score++;}
   if(ma100){total++;if(price>ma100)score++;}
   if(ma200){total++;if(price>ma200)score++;}
-  if(rsi!==null){total++;if(rsi<40)score++;else if(rsi>60)score--;else score+=0.5;}
+  // RSI: 50-80 = momentum alcista sano (punto completo), 30-50 = zona neutral (medio punto), <30 o >80 = extremos, no sumar
+  if(rsi!==null){total++;if(rsi>50&&rsi<=80)score++;else if(rsi>=30&&rsi<=50)score+=0.5;}
   if(macdObj){total++;if(macdObj.hist>0)score++;else score--;}
   if(total===0)return 'neutral';
   const r=score/total;
@@ -674,7 +675,7 @@ async function loadInd(sym){
   oscEl.innerHTML='<span class="spin"></span>calculando osciladores...';
   try{
     const hist=await getHistory(sym,220),closes=hist.map(x=>x.c),price=closes[closes.length-1];
-    const maDefs=[{p:20,l:'MA20'},{p:40,l:'MA40'},{p:100,l:'MA100'},{p:200,l:'MA200'}];
+    const maDefs=[{p:20,l:'MA20'},{p:50,l:'MA50'},{p:100,l:'MA100'},{p:200,l:'MA200'}];
     let maHTML='<table class="tbl"><tr><th>MA</th><th>Valor</th><th>Distancia</th><th>Señal</th></tr>';
     maHTML+=`<tr><td style="font-family:var(--mono);font-weight:700;color:var(--green);">Precio</td><td class="vneu">$${price.toFixed(2)}</td><td>—</td><td>—</td></tr>`;
     const maVals={};
@@ -686,7 +687,7 @@ async function loadInd(sym){
     maHTML+='</table>';
     maEl.innerHTML=maHTML;
     const rsi=calcRSI(closes,14),macd=calcMACD(closes);
-    const sig=computeSignal(price,maVals[20],maVals[40],maVals[100],maVals[200],rsi,macd);
+    const sig=computeSignal(price,maVals[20],maVals[50],maVals[100],maVals[200],rsi,macd);
     const sigColor=sig==='buy'?'var(--green)':sig==='sell'?'var(--red)':'var(--amber)';
     const rsiN=rsi!==null?rsi.toFixed(1):'—';
     const rsiColor=rsi>70?'var(--red)':rsi<30?'var(--green)':'var(--amber)';

@@ -6655,11 +6655,10 @@ async function init(){
           const _hasKey=getKey()&&getKey().length>8;
           if(_hasKey){await loadLivePrices();}else{await buildSignals();}
           await checkMarketBlockMove();
-          // Actualizar semáforo de futuros en paralelo — no bloquea el tick principal
-          updateFuturesSemaphore().catch(()=>{});
-          // Sincronizar el countdown visual con el tick real
           if(window._resetRefreshCountdown) window._resetRefreshCountdown();
         }
+        // Futuros cotizan 23h — actualizar semáforo en cualquier horario activo
+        updateFuturesSemaphore().catch(()=>{});
       };
 
       // Arrancar con jitter (3-7s) para desincronizarse de _tokenInterval (20min)
@@ -7107,68 +7106,62 @@ async function _pmPDF(id){
 // duplicar llamadas si buildSignals también corre cerca.
 // ═══════════════════════════════════════════════════════════════
 const _FUT_SYMBOLS=['/ES','/NQ'];
-const _futCache={}; // sym → {bias, esPrice, nqPrice, ts}
+const _futCache={}; // sym → {bias, price, prevClose, pct, ts}
 
-// Calcula sesgo: 'bull' | 'bear' | 'neutral' según precio vs MA20 de 5min
+// ── Schwab /quotes soporta futuros con /ES y /NQ (encodeURIComponent maneja el /)
+// No usar /pricehistory — Schwab NO provee histórico de barras para futuros.
+// Sesgo: precio vs cierre anterior del contrato (openPrice del quote de Schwab).
+// Umbral: >0.15% sobre prev = bull, <-0.15% = bear, medio = neutral.
 async function _fetchFuturesBias(){
   const token=await getSchwabToken();
   if(!token)return null;
 
-  const results={};
-  for(const sym of _FUT_SYMBOLS){
-    // Cache válido por 9 min — no duplicar llamadas entre masterTick y buildSignals
-    if(_futCache[sym]&&Date.now()-_futCache[sym].ts<9*60*1000){
-      results[sym]=_futCache[sym];
-      continue;
-    }
-    try{
-      // Pedir 25 velas de 5min — suficiente para MA20 de la sesión actual
-      const endMs=Date.now();
-      const startMs=endMs-(2*24*60*60*1000); // 2 días atrás — Schwab filtra por horario
-      const url=`${SCHWAB_API_BASE}/pricehistory?symbol=${encodeURIComponent(sym)}&periodType=day&period=2&frequencyType=minute&frequency=5&startDate=${startMs}&endDate=${endMs}&needExtendedHoursData=true`;
-      const r=await fetch(url,{
-        headers:{'Authorization':'Bearer '+token},
-        signal:AbortSignal.timeout(6000)
-      });
-      if(!r.ok){
-        addLog('warn','Futuros',`${sym} → HTTP ${r.status}`);
-        continue;
-      }
-      const d=await r.json();
-      if(!d.candles||d.candles.length<5)continue;
-
-      const cls=d.candles.map(c=>c.close);
-      const last=cls[cls.length-1];
-      // MA20 sobre los últimos 20 cierres disponibles (mínimo 5)
-      const window=Math.min(20,cls.length);
-      const ma20=cls.slice(-window).reduce((a,b)=>a+b,0)/window;
-      // Distancia % del precio a la MA20
-      const distPct=(last-ma20)/ma20*100;
-      // Sesgo: >0.15% sobre MA20 = bull, <-0.15% = bear, resto = neutral
-      const bias=distPct>0.15?'bull':distPct<-0.15?'bear':'neutral';
-      // Variación del día: comparar con primer candle del día
-      const etNow=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
-      const todayStr=etNow.toDateString();
-      const todayCandles=d.candles.filter(c=>{
-        const dt=new Date(new Date(c.datetime).toLocaleString('en-US',{timeZone:'America/New_York'}));
-        return dt.toDateString()===todayStr;
-      });
-      const dayOpen=todayCandles.length?todayCandles[0].open:last;
-      const dayPct=dayOpen>0?((last-dayOpen)/dayOpen*100):0;
-
-      _futCache[sym]={bias,price:last,ma20,distPct,dayPct,ts:Date.now()};
-      results[sym]=_futCache[sym];
-      addLog('debug','Futuros',`${sym} $${last.toFixed(2)} vs MA20 $${ma20.toFixed(2)} → ${bias} (${distPct>=0?'+':''}${distPct.toFixed(2)}%)`);
-    }catch(e){
-      addLog('warn','Futuros',`${sym} error: ${e.message}`);
-    }
-    // Pequeño delay entre las dos llamadas para no saturar
-    await new Promise(r=>setTimeout(r,400));
+  // Una sola llamada con ambos símbolos — más eficiente
+  const cached=_FUT_SYMBOLS.every(s=>_futCache[s]&&Date.now()-_futCache[s].ts<9*60*1000);
+  if(cached){
+    return{'/ES':_futCache['/ES'],'/NQ':_futCache['/NQ']};
   }
-  return results;
+
+  try{
+    // Schwab quotes endpoint acepta múltiples símbolos separados por coma
+    // encodeURIComponent convierte '/' en '%2F' — necesario para futuros
+    const symsParam=_FUT_SYMBOLS.map(s=>encodeURIComponent(s)).join('%2C');
+    const url=`${SCHWAB_API_BASE}/quotes?symbols=${symsParam}&fields=quote`;
+    const r=await fetch(url,{
+      headers:{'Authorization':'Bearer '+token},
+      signal:AbortSignal.timeout(6000)
+    });
+    if(!r.ok){
+      addLog('warn','Futuros',`quotes HTTP ${r.status}`);
+      return null;
+    }
+    const d=await r.json();
+    const results={};
+    for(const sym of _FUT_SYMBOLS){
+      // Schwab puede devolver la key con o sin la barra — buscar ambas
+      const entry=d[sym]||d[sym.replace('/','')]||null;
+      const q=entry?.quote||entry?.fundamental||null;
+      if(!q)continue;
+      // lastPrice = precio actual; closePrice o openPrice = referencia anterior
+      const last=q.lastPrice||q.mark||0;
+      const prev=q.closePrice||q.openPrice||last;
+      if(!last||last<=0)continue;
+      const pct=prev>0?((last-prev)/prev*100):0;
+      // Sesgo basado en variación respecto al cierre anterior
+      const bias=pct>0.15?'bull':pct<-0.15?'bear':'neutral';
+      _futCache[sym]={bias,price:last,prev,pct,ts:Date.now()};
+      results[sym]=_futCache[sym];
+      addLog('debug','Futuros',`${sym} $${last.toFixed(2)} prev $${prev.toFixed(2)} → ${pct>=0?'+':''}${pct.toFixed(2)}% → ${bias}`);
+    }
+    return Object.keys(results).length===2?results:null;
+  }catch(e){
+    addLog('warn','Futuros',`_fetchFuturesBias: ${e.message}`);
+    return null;
+  }
 }
 
 // Renderiza el pill en el topbar — compacto, sin tarjetas
+// Visible en premarket, sesión regular Y after-hours
 function _renderFuturesSemaphore(data){
   const el=document.getElementById('futuresSemaphore');
   if(!el)return;
@@ -7177,44 +7170,34 @@ function _renderFuturesSemaphore(data){
     return;
   }
   const es=data['/ES'],nq=data['/NQ'];
-
-  // Determinar sesgo combinado
   const bullCount=[es,nq].filter(f=>f.bias==='bull').length;
   const bearCount=[es,nq].filter(f=>f.bias==='bear').length;
-  let combinedBias,bgColor,borderColor,textColor,dot;
+  let bgColor,borderColor,textColor,dot;
   if(bullCount===2){
-    combinedBias='BULL';bgColor='rgba(0,209,122,.12)';
-    borderColor='rgba(0,209,122,.35)';textColor='var(--green)';dot='▲';
+    bgColor='rgba(0,209,122,.12)';borderColor='rgba(0,209,122,.35)';
+    textColor='var(--green)';dot='▲';
   }else if(bearCount===2){
-    combinedBias='BEAR';bgColor='rgba(255,77,109,.12)';
-    borderColor='rgba(255,77,109,.35)';textColor='var(--red)';dot='▼';
+    bgColor='rgba(255,77,109,.12)';borderColor='rgba(255,77,109,.35)';
+    textColor='var(--red)';dot='▼';
   }else{
-    combinedBias='MIX';bgColor='rgba(255,194,52,.1)';
-    borderColor='rgba(255,194,52,.3)';textColor='var(--yellow)';dot='◆';
+    bgColor='rgba(255,194,52,.1)';borderColor='rgba(255,194,52,.3)';
+    textColor='var(--yellow)';dot='◆';
   }
-
-  // Formato: dot + ES% + NQ% — mínimo de caracteres
-  const esPct=(es.dayPct>=0?'+':'')+es.dayPct.toFixed(2)+'%';
-  const nqPct=(nq.dayPct>=0?'+':'')+nq.dayPct.toFixed(2)+'%';
-
-  el.style.display='inline-flex';
-  el.style.alignItems='center';
-  el.style.gap='5px';
-  el.style.background=bgColor;
-  el.style.borderColor=borderColor;
-  el.style.color=textColor;
-  el.title=`Sesgo futuros — /ES $${es.price.toFixed(0)} vs MA20 $${es.ma20.toFixed(0)} · /NQ $${nq.price.toFixed(0)} vs MA20 $${nq.ma20.toFixed(0)}\nDistancia: ES ${es.distPct>=0?'+':''}${es.distPct.toFixed(2)}% · NQ ${nq.distPct>=0?'+':''}${nq.distPct.toFixed(2)}%\nSesgo combinado: ${combinedBias}`;
+  const esPct=(es.pct>=0?'+':'')+es.pct.toFixed(2)+'%';
+  const nqPct=(nq.pct>=0?'+':'')+nq.pct.toFixed(2)+'%';
+  el.style.cssText=`display:inline-flex;align-items:center;gap:5px;background:${bgColor};border-color:${borderColor};color:${textColor};font-family:var(--mono);font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap;cursor:default;border:1px solid ${borderColor};`;
+  el.title=`Sesgo futuros (vs cierre anterior)\n/ES $${es.price.toFixed(2)} → ${esPct}\n/NQ $${nq.price.toFixed(2)} → ${nqPct}\nFuente: Schwab quotes`;
   el.textContent=`${dot} ES ${esPct}  NQ ${nqPct}`;
 }
 
-// Punto de entrada: fetch + render. Llamado por masterTick y al init.
-// Silencioso — no bloquea nada si Schwab no está conectado.
+// Punto de entrada — silencioso, no bloquea nada si Schwab no está conectado.
+// Se muestra en cualquier horario donde Schwab tenga token válido
+// (premarket, sesión regular, after-hours — futuros cotizan 23h)
 async function updateFuturesSemaphore(){
   try{
     const tok=localStorage.getItem('schwab_access_token');
     const exp=parseInt(localStorage.getItem('schwab_token_expiry')||'0');
-    if(!tok||Date.now()>exp){
-      // Sin Schwab conectado — ocultar el pill
+    if(!tok||Date.now()>exp-60000){
       const el=document.getElementById('futuresSemaphore');
       if(el)el.style.display='none';
       return;
@@ -7222,7 +7205,7 @@ async function updateFuturesSemaphore(){
     const data=await _fetchFuturesBias();
     _renderFuturesSemaphore(data);
   }catch(e){
-    addLog('debug','Futuros',`updateFuturesSemaphore error: ${e.message}`);
+    addLog('debug','Futuros',`updateFuturesSemaphore: ${e.message}`);
   }
 }
 </script>

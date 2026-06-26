@@ -1813,6 +1813,12 @@ async function _buildSignalsCore(){
     const distToLowerPct=(lL15-lLow15)/lP15*100; // qué tan cerca está el low de la banda inf
     const approachingUpper=lH15<=lUp15&&distToUpperPct>=0&&distToUpperPct<0.3; // cerca, aún adentro
     const approachingLower=lL15>=lLow15&&distToLowerPct>=0&&distToLowerPct<0.3; // cerca, aún adentro
+    // Precio PERFORANDO la banda — vela ya salió por afuera (el trade clave que queremos capturar)
+    const piercingUpper=lH15>lUp15&&lP15>lUp15*0.998; // high y close sobre la banda superior
+    const piercingLower=lL15<lLow15&&lP15<lLow15*1.002; // low y close bajo la banda inferior
+    // BB-A/BB-B disparan en AMBOS casos: acercándose O perforando
+    const bbCallTrigger=approachingUpper||piercingUpper;
+    const bbPutTrigger=approachingLower||piercingLower;
 
     // Pesos del modelo ponderado
     const W={bollinger:60,medias:25,volumen:5,estocastico:5,hlines:5};
@@ -1869,7 +1875,7 @@ async function _buildSignalsCore(){
     const _putGuardOk=!(_priceAboveMA20_15&&_bullMomentum3&&_distFromMA20_15pct>0.3)&&!(_openingGapBlock&&_priceAboveMA20_15);
 
     // BB-A: CALL — Bollinger (gate) alcista
-    const bollGateCall=lBBW15>=1.5&&mediaUp&&approachingUpper&&bigBodyCall&&_callGuardOk;
+    const bollGateCall=lBBW15>=1.5&&mediaUp&&bbCallTrigger&&bigBodyCall&&_callGuardOk;
     if(_stratEnabled('BB-A')&&bollGateCall){
       let score=W.bollinger;            // gate cumplido → 60
       if(maCallCross)  score+=W.medias; // +25
@@ -1880,7 +1886,7 @@ async function _buildSignalsCore(){
         weighted:true,score,threshold:SCORE_THRESHOLD,reqs:[
         {ok:lBBW15>=1.5,      tf:'15m',weight:'BB',text:`Alta volatilidad: bandas abiertas (BBW ${lBBW15.toFixed(1)}%)`},
         {ok:mediaUp,          tf:'15m',weight:'BB',text:`Media de Bollinger apuntando arriba: $${lMA20_15.toFixed(2)}`},
-        {ok:approachingUpper, tf:'15m',weight:'BB',text:`Precio acercándose a banda superior desde adentro ($${lH15.toFixed(2)} → $${lUp15.toFixed(2)})`},
+        {ok:bbCallTrigger,    tf:'15m',weight:'BB',text:piercingUpper?`Vela perforando banda superior ($${lUp15.toFixed(2)}) — precio $${lP15.toFixed(2)}`:`Precio acercándose a banda superior desde adentro ($${lH15.toFixed(2)} → $${lUp15.toFixed(2)})`},
         {ok:bigBodyCall,      tf:'15m',weight:'BB',text:`Vela verde con cuerpo ${candleBody15.toFixed(2)}%`},
         {ok:maCallCross,      tf:'H/D',weight:'25%',text:`Contexto alcista: MA20>MA40 en Hora y Día`},
         {ok:volOverLine,      tf:'15m',weight:'5%',text:`Volumen sobre la línea${volLabel}`},
@@ -1889,7 +1895,7 @@ async function _buildSignalsCore(){
       ]});
     }
     // BB-B: PUT — Bollinger (gate) bajista
-    const bollGatePut=lBBW15>=1.5&&mediaDn&&approachingLower&&bigBodyPut&&_putGuardOk;
+    const bollGatePut=lBBW15>=1.5&&mediaDn&&bbPutTrigger&&bigBodyPut&&_putGuardOk;
     if(_stratEnabled('BB-B')&&bollGatePut){
       let score=W.bollinger;
       if(maPutCross)  score+=W.medias;
@@ -1899,7 +1905,7 @@ async function _buildSignalsCore(){
         weighted:true,score,threshold:SCORE_THRESHOLD,reqs:[
         {ok:lBBW15>=1.5,      tf:'15m',weight:'BB',text:`Alta volatilidad: bandas abiertas (BBW ${lBBW15.toFixed(1)}%)`},
         {ok:mediaDn,          tf:'15m',weight:'BB',text:`Media de Bollinger apuntando abajo: $${lMA20_15.toFixed(2)}`},
-        {ok:approachingLower, tf:'15m',weight:'BB',text:`Precio acercándose a banda inferior desde adentro ($${lL15.toFixed(2)} → $${lLow15.toFixed(2)})`},
+        {ok:bbPutTrigger,     tf:'15m',weight:'BB',text:piercingLower?`Vela perforando banda inferior ($${lLow15.toFixed(2)}) — precio $${lP15.toFixed(2)}`:`Precio acercándose a banda inferior desde adentro ($${lL15.toFixed(2)} → $${lLow15.toFixed(2)})`},
         {ok:bigBodyPut,       tf:'15m',weight:'BB',text:`Vela roja con cuerpo ${candleBody15.toFixed(2)}%`},
         {ok:maPutCross,       tf:'H/D',weight:'25%',text:`Contexto bajista: MA40>MA20 en Hora y Día`},
         {ok:volOverLine,      tf:'15m',weight:'5%',text:`Volumen sobre la línea${volLabel}`},
@@ -2244,7 +2250,9 @@ async function _buildSignalsCore(){
   else if(puts>0&&calls===0){dir='🔻 SOLO PUT — tendencia bajista';dirCol='var(--red)';}
   else{dir=`⚡ MIXTO — ${calls} CALL · ${puts} PUT`;dirCol='var(--yellow)';}
 
-  let html=`<div style="text-align:center;padding:10px 0;border-bottom:1px solid var(--border);margin-bottom:12px;">
+  let html=[];
+  // Header string — rendered separately
+  const _headerHtml=`<div style="text-align:center;padding:10px 0;border-bottom:1px solid var(--border);margin-bottom:12px;">
     <div style="font-size:12px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:4px;">SEÑALES ACTIVAS — BB BREAKOUT 15MIN</div>
     <div style="font-family:var(--mono);font-size:32px;font-weight:700;color:#fff;">${active.length}</div>
     <div style="font-size:12px;color:${dirCol};margin-top:4px;">${dir}</div>
@@ -2356,8 +2364,8 @@ async function _buildSignalsCore(){
       ?`<span style="background:rgba(0,209,122,.35);color:#00d17a;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;">✅ COMPLETA</span>`
       :`<span style="background:rgba(255,194,52,.25);color:#ffc234;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;">★ ${pctLabel}% — EN FORMACIÓN</span>`;
 
-    html+=`<div class="sig-card" style="margin-bottom:12px;${fullSignal?`box-shadow:0 0 0 2px ${accentCol};`:''}">
-      <div class="sig-hdr ${hdr}" style="padding:12px 14px;">
+    html.push(`<div class="sig-card" data-sigkey="${s.sym}_${s.code}_${s.type}" style="margin-bottom:12px;${fullSignal?`box-shadow:0 0 0 2px ${accentCol};`:''}">
+      <div class="sig-hdr ${hdr}" data-card-header style="padding:12px 14px;">
         <div style="flex:1;min-width:0;">
           <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:4px;">
             <span style="font-family:var(--mono);font-size:18px;font-weight:700;color:#fff;">${s.sym}</span>
@@ -2365,7 +2373,7 @@ async function _buildSignalsCore(){
             ${pctBadge}
           </div>
           <div style="font-size:12px;color:rgba(255,255,255,.8);font-weight:600;">${s.name}</div>
-          <div style="font-size:11px;color:rgba(255,255,255,.55);margin-top:2px;">
+          <div data-card-price style="font-size:11px;color:rgba(255,255,255,.55);margin-top:2px;">
             $${s.price.toFixed(2)} ${s._pctReliable!==false?`<span style="color:${s.pct>=0?'rgba(0,209,122,.9)':'rgba(255,77,109,.9)'}">(${s.pct>=0?'+':''}${s.pct.toFixed(2)}%)</span>`:`<span style="color:var(--yellow);font-size:10px;" title="% diario no confiable — Finnhub devolvió referencia incorrecta (after-hours)">⚠ % n/d</span>`} · ${s.dataLabel}${s._priceStale?` <span style="color:var(--yellow);font-size:10px;" title="Precio de Finnhub no disponible — usando último close de Schwab">⚠ precio est.</span>`:''}
             ${s._timeET?`<span style="color:rgba(255,194,52,.8);margin-left:4px;">· ${s._timeET} ET</span>`:''}
           </div>
@@ -2441,16 +2449,77 @@ async function _buildSignalsCore(){
             <span>📤</span><span>Enviar Fix a GitHub</span>
           </button>
         </div>`:''}\n      </div>
-    </div>`;
+    </div>`);
   });
-  area.innerHTML=html;
-}
+  // ── Smart render — no borrar tarjetas existentes ─────────────────────────
+  const _existingKeys=new Set(
+    [...area.querySelectorAll('[data-sigkey]')].map(el=>el.dataset.sigkey)
+  );
+  const _activeKeys=new Set(active.map(s=>`${s.sym}_${s.code}_${s.type}`));
 
-// ═══════════════════════════════════════════════════════════════
-// MOMENTUM SCANNER
-// ═══════════════════════════════════════════════════════════════
-async function buildMomentum(){
-  const area=document.getElementById('momentumArea');
+  // Primera carga (área vacía) — render completo normal
+  if(_existingKeys.size===0){
+    area.innerHTML=`<div data-signal-header>${_headerHtml}</div>`+html.join('');
+    return;
+  }
+
+  // Actualizar el contador del header
+  const _hdrEl=area.querySelector('[data-signal-header]');
+  if(_hdrEl) _hdrEl.innerHTML=_headerHtml;
+
+  // Marcar como expiradas las tarjetas que ya no están activas
+  area.querySelectorAll('[data-sigkey]').forEach(el=>{
+    const k=el.dataset.sigkey;
+    if(!_activeKeys.has(k)&&!el.dataset.expired){
+      el.dataset.expired='1';
+      const hdr=el.querySelector('[data-card-header]');
+      if(hdr&&!hdr.querySelector('.exp-badge')){
+        const expBadge=document.createElement('span');
+        expBadge.className='exp-badge';
+        expBadge.textContent='EXPIRADA';
+        expBadge.style.cssText='font-size:9px;padding:2px 6px;background:rgba(130,145,165,.2);border:1px solid rgba(130,145,165,.3);border-radius:4px;color:rgba(130,145,165,.7);margin-left:6px;vertical-align:middle;';
+        hdr.appendChild(expBadge);
+      }
+      el.style.opacity='0.55';
+    }
+  });
+
+  // Actualizar precio en tarjetas existentes activas
+  active.forEach(s=>{
+    const k=`${s.sym}_${s.code}_${s.type}`;
+    const existing=area.querySelector(`[data-sigkey="${k}"]`);
+    if(existing){
+      const priceEl=existing.querySelector('[data-card-price]');
+      if(priceEl){
+        const pctDisplay=s._pctReliable!==false
+          ?`<span style="color:${s.pct>=0?'rgba(0,209,122,.9)':'rgba(255,77,109,.9)'}">(${s.pct>=0?'+':''}${s.pct.toFixed(2)}%)</span>`
+          :`<span style="color:var(--yellow);font-size:10px;">⚠ % n/d</span>`;
+        priceEl.innerHTML=`$${s.price.toFixed(2)} ${pctDisplay} · ${s.dataLabel}${s._priceStale?` <span style="color:var(--yellow);font-size:10px;">⚠ precio est.</span>`:''}${s._timeET?` <span style="color:rgba(255,194,52,.8);margin-left:4px;">· ${s._timeET} ET</span>`:''}`;
+      }
+      if(existing.dataset.expired){
+        delete existing.dataset.expired;
+        existing.style.opacity='1';
+        existing.querySelectorAll('.exp-badge').forEach(sp=>sp.remove());
+      }
+    }
+  });
+
+  // Prepend nuevas señales al tope (después del header)
+  const newSignals=active.filter(s=>!_existingKeys.has(`${s.sym}_${s.code}_${s.type}`));
+  newSignals.reverse().forEach(s=>{
+    const idx=active.indexOf(s);
+    if(html[idx]!==undefined){
+      const tmp=document.createElement('div');
+      tmp.innerHTML=html[idx];
+      const card=tmp.firstElementChild;
+      if(card){
+        const hdrEl=area.querySelector('[data-signal-header]');
+        if(hdrEl&&hdrEl.nextSibling) area.insertBefore(card,hdrEl.nextSibling);
+        else area.appendChild(card);
+      }
+    }
+  });
+
   if(!area)return; // Morning Scanner replaced momentum panel
   const results=[];
   const _momSkipped=[];

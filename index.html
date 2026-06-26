@@ -1794,10 +1794,19 @@ async function _buildSignalsCore(){
     const _bodyThresh=Math.max(0.1, _avgRangePct*0.25); // 25% del rango típico, mín 0.1%
     const bigBodyCall=lP15>lO15&&candleBody15>=_bodyThresh;
     const bigBodyPut =lP15<lO15&&candleBody15>=_bodyThresh;
-    // Pendiente PURA de la media de Bollinger (línea amarilla) — últimas 4 velas.
+    // Pendiente de la media de Bollinger — dos lecturas:
+    // _ma4: últimas 4 velas (60min) — para confirmar tendencia establecida
+    // _ma2: últimas 2 velas (30min) — para detectar giro rápido en ruptura
     const _ma4=ma20_15.filter(v=>v!=null).slice(-4)[0];
-    const mediaUp=_ma4!=null&&lMA20_15>_ma4; // media subiendo
-    const mediaDn=_ma4!=null&&lMA20_15<_ma4; // media bajando
+    const _ma2=ma20_15.filter(v=>v!=null).slice(-2)[0];
+    // mediaUp: la media sube en las últimas 4 velas (tendencia) O en las últimas 2 (giro rápido)
+    // Cuando hay piercingUpper (vela rompiendo banda con fuerza), el giro de 2 velas es suficiente
+    const mediaUpStrong=_ma4!=null&&lMA20_15>_ma4;              // giro confirmado (4 velas)
+    const mediaUpFast  =_ma2!=null&&lMA20_15>_ma2;              // giro rápido (2 velas)
+    const mediaUp=mediaUpStrong||mediaUpFast;                    // cualquiera de los dos
+    const mediaDnStrong=_ma4!=null&&lMA20_15<_ma4;
+    const mediaDnFast  =_ma2!=null&&lMA20_15<_ma2;
+    const mediaDn=mediaDnStrong||mediaDnFast;
     // Cruce de medias — CONTEXTO en Hora y Día (no en 15min).
     const maCallCross=lMA20_1h>lMA40_1h&&lMA20D>lMA40D; // alcista: MA20 sobre MA40 en 1H y Día
     const maPutCross =lMA40_1h>lMA20_1h&&lMA40D>lMA20D; // bajista: MA40 sobre MA20 en 1H y Día

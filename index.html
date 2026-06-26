@@ -2434,6 +2434,12 @@ async function _buildSignalsCore(){
             onmouseover="this.style.background='rgba(0,209,122,.22)'" onmouseout="this.style.background='rgba(0,209,122,.12)'">
             <span>📥</span><span>Descargar PDF + Limpiar</span>
           </button>
+          <button id="claude-sendfix-${s.sym}-${s.code}"
+            onclick="sendFixToGithub(this,'${s.sym}','${s.code}','${s.type}')"
+            style="display:none;width:100%;margin-top:6px;padding:7px 10px;background:rgba(255,194,52,.12);border:1px solid rgba(255,194,52,.35);border-radius:6px;color:rgba(255,194,52,.9);font-size:11px;font-weight:600;cursor:pointer;font-family:var(--sans);align-items:center;justify-content:center;gap:6px;"
+            onmouseover="this.style.background='rgba(255,194,52,.22)'" onmouseout="this.style.background='rgba(255,194,52,.12)'">
+            <span>📤</span><span>Enviar Fix a GitHub</span>
+          </button>
         </div>`:''}\n      </div>
     </div>`;
   });
@@ -4357,6 +4363,85 @@ function _sendWebNotif(sym, type, code, pct, price){
   }catch(e){addLog('debug','Notif','Web notif error: '+e.message);}
 }
 
+// ── _claudeContextScan — escaneo de catalizadores antes de enviar Telegram ───
+// Llama a Claude con web_search para buscar noticias, earnings, macro del ticker.
+// Si no hay API key o falla, retorna '' y el Telegram sale normal sin el scan.
+// Dedup por sym+type+hora para no repetir el scan en cada tick.
+const _scanCache={};
+async function _claudeContextScan(sym, type, code, price){
+  const key=getAnthropicKey();
+  if(!key||!key.startsWith('sk-')) return '';
+
+  // Dedup: no escanear el mismo sym+type más de 1 vez por hora
+  const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+  const scanKey=`${sym}_${type}_${et.toLocaleDateString('es-PR')}_${et.getHours()}`;
+  if(_scanCache[scanKey]) return _scanCache[scanKey];
+
+  const dir=type==='call'?'ALCISTA (CALL)':'BAJISTA (PUT)';
+  const today=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+  const todayStr=today.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+  const prompt=`Eres un analista de mercado experto en catalizadores de precio. Analiza ${sym} con contexto de 3 días pasados y 3 días futuros.
+
+SEÑAL ACTIVA: ${sym} ${dir} a $${price} — Fecha: ${todayStr}
+
+BUSCA Y ANALIZA:
+
+📅 ÚLTIMOS 3 DÍAS (pasado — "sell the news"):
+- Noticias recientes: earnings reportados, demandas, upgrades/downgrades, partnerships, contratos, FDA
+- ¿Ya ocurrió algún evento que el mercado ya descontó? (el movimiento puede estar agotado)
+
+📅 PRÓXIMOS 3 DÍAS (futuro — "buy the rumor"):
+- Earnings pendientes de ${sym} esta semana
+- Eventos macro próximos: FOMC, CPI, NFP, datos económicos que puedan mover el sector
+- Fechas de vencimiento de opciones, splits, dividendos anunciados
+- Conferencias o presentaciones del management programadas
+
+📊 MERCADO AHORA:
+- Dirección actual de S&P500, QQQ, DIA, IWM — ¿alinean con la señal ${dir}?
+
+Responde EXACTAMENTE en este formato (máximo 130 palabras):
+
+📰 PASADO (3d): [evento clave reciente o "Sin eventos relevantes" — ¿ya fue descontado?]
+🔮 FUTURO (3d): [próximo catalizador o "Sin eventos programados" — fecha si la conoces]
+📈 MERCADO: [índices vs señal — favorable/neutro/contrario]
+⚡ VEREDICTO: [REFUERZA / NEUTRAL / CONTRADICE] — [1 oración con la razón principal]
+
+Sin introducciones. Solo los 4 puntos.`;
+
+  try{
+    const proxyUrl=(localStorage.getItem('proxy_url')||'').trim();
+    const _proxyValid=proxyUrl.startsWith('http');
+    const endpoint=_proxyValid?`${proxyUrl}/anthropic`:'https://api.anthropic.com/v1/messages';
+    const headers={'Content-Type':'application/json'};
+    if(!_proxyValid){
+      headers['x-api-key']=key;
+      headers['anthropic-version']='2023-06-01';
+      headers['anthropic-dangerous-direct-browser-access']='true';
+    }
+    const resp=await fetch(endpoint,{
+      method:'POST',headers,
+      signal:AbortSignal.timeout(15000), // 15s max — no bloquear el Telegram
+      body:JSON.stringify({
+        model:'claude-sonnet-4-6',
+        max_tokens:350,
+        tools:[{type:'web_search_20250305',name:'web_search'}],
+        messages:[{role:'user',content:prompt}]
+      })
+    });
+    if(!resp.ok) return '';
+    const res=await resp.json();
+    // Extraer solo el bloque de texto final (después de los tool_use)
+    const txt=res.content?.filter(b=>b.type==='text').map(b=>b.text).join('').trim()||'';
+    if(!txt) return '';
+    _scanCache[scanKey]=txt;
+    addLog('debug','Claude',`Context scan ${sym} completado`);
+    return txt;
+  }catch(e){
+    addLog('debug','Claude',`Context scan ${sym} omitido: ${e.message}`);
+    return ''; // fallo silencioso — el Telegram sale igual sin el scan
+  }
+}
+
 async function notifySignal(sym, code, name, type, pct, price, pctChange){
   if(!isTgEnabled())return;
   const tok=getTgToken(),chat=getTgChat();
@@ -4365,6 +4450,12 @@ async function notifySignal(sym, code, name, type, pct, price, pctChange){
   const emoji=type==='call'?'🚀':'🔻';
   const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
   const time=et.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true});
+
+  // ── Context Scanner — busca catalizadores antes de armar el mensaje ────────
+  // Corre en paralelo con la construcción del mensaje para no añadir latencia
+  // Si no hay API key o falla, contextBlock queda '' y el Telegram sale normal
+  const contextBlock=await _claudeContextScan(sym, type, code, price).catch(()=>'');
+
   // Aviso de nivel técnico (a 2%): CALL mira techos (LAST HIGH/ATH), PUT mira piso (LAST LOW)
   let levelWarn='';
   const lv=getLevels(sym);
@@ -4387,7 +4478,9 @@ async function notifySignal(sym, code, name, type, pct, price, pctChange){
     `💰 Precio: *$${price.toFixed(2)}* ✅ ${pctChange!==null&&pctChange!==undefined?'('+( pctChange>=0?'+':'')+pctChange.toFixed(2)+'%)':'(% n/d)'}`+
     `🎯 Confianza: *${pct}%*
 `+
-    `🕐 ${time} ET`+levelWarn+`
+    `🕐 ${time} ET`+levelWarn+
+    (contextBlock?`\n\n━━━━━━━━━━━━━━━━━━━━\n🔍 *CONTEXTO DE MERCADO*\n${contextBlock}`:'')+
+    `\n\n`+
 
 `+
     `_TradeDesk Pro — jonrd09.github.io/tradedesk/_`;
@@ -5645,9 +5738,21 @@ Sin explicaciones adicionales. Solo el fix.`;
     doc.text(`${p}/${totalPages}`,W-12,H-4,{align:'right'});
   }
 
-  // Descargar
+  // Descargar PDF
   const fname=`TDP_${sym}_${code}_${type.toUpperCase()}_${new Date().toISOString().slice(0,10)}.pdf`;
   doc.save(fname);
+
+  // ── Mostrar botón "Enviar Fix a GitHub" ──────────────────────────────────
+  // El botón aparece en la tarjeta después de descargar el PDF
+  // Solo si hay un fix real generado por Claude
+  if(fixText&&!fixText.includes('Error')&&!fixText.includes('No se pudo')){
+    const sendFixBtn=document.getElementById(`claude-sendfix-${sym}-${code}`);
+    if(sendFixBtn){
+      sendFixBtn.style.display='flex';
+      sendFixBtn.dataset.fix=encodeURIComponent(fixText);
+      sendFixBtn.dataset.analysis=encodeURIComponent(analysisText);
+    }
+  }
 
   // ── Limpiar tarjeta ───────────────────────────────────────────────────────
   setTimeout(()=>{
@@ -5658,6 +5763,98 @@ Sin explicaciones adicionales. Solo el fix.`;
     if(pdfBtn){pdfBtn.style.display='none';pdfBtn.querySelector('span:last-child').textContent='Descargar PDF + Limpiar';pdfBtn.disabled=false;}
     addLog('debug','Claude',`PDF ${fname} descargado — tarjeta limpiada`);
   },1000);
+}
+
+// ── sendFixToGithub — envía el fix sugerido al Worker → GitHub PR ────────────
+async function sendFixToGithub(btn, sym, code, type){
+  const proxyUrl=(localStorage.getItem('proxy_url')||'').trim();
+  if(!proxyUrl||!proxyUrl.startsWith('http')){
+    alert('Configura el Proxy URL del Worker en Configuración → APIs.\n\nNecesitas: https://tradedeskpro.genoidpc.workers.dev');
+    return;
+  }
+
+  const fixText=decodeURIComponent(btn.dataset.fix||'');
+  const analysisText=decodeURIComponent(btn.dataset.analysis||'');
+
+  if(!fixText){
+    alert('No hay fix disponible para enviar. Genera el análisis y PDF primero.');
+    return;
+  }
+
+  // Confirm before sending PR
+  const ok=confirm(
+    `📤 CREAR PULL REQUEST EN GITHUB\n\n`+
+    `Esto creará un PR en tu repositorio con el fix sugerido:\n\n`+
+    `Ticker: ${sym} ${type?.toUpperCase()||''} · ${code}\n\n`+
+    `⚠️ El PR NO se aplicará automáticamente — debes revisarlo y hacer merge manualmente.\n\n`+
+    `¿Continuar?`
+  );
+  if(!ok) return;
+
+  btn.disabled=true;
+  btn.querySelector('span:last-child').textContent='Creando PR...';
+  btn.style.opacity='0.6';
+
+  try{
+    const resp=await fetch(`${proxyUrl}/github-fix`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        sym, code, type,
+        fixText,
+        analysisText,
+        timestamp:new Date().toISOString()
+      }),
+      signal:AbortSignal.timeout(20000)
+    });
+
+    const data=await resp.json();
+
+    if(!resp.ok||data.error){
+      throw new Error(data.error||`HTTP ${resp.status}`);
+    }
+
+    // Éxito — mostrar link al PR
+    btn.querySelector('span:last-child').textContent='✅ PR Creado';
+    btn.style.background='rgba(0,209,122,.2)';
+    btn.style.borderColor='rgba(0,209,122,.5)';
+    btn.style.color='rgba(0,209,122,.9)';
+    btn.style.opacity='1';
+
+    // Mostrar notificación con link
+    const outEl=document.getElementById(`claude-out-${sym}-${code}`);
+    if(outEl){
+      outEl.style.display='block';
+      outEl.innerHTML=`<div style="font-size:11px;line-height:1.7;">
+        <div style="color:var(--green);font-weight:700;margin-bottom:6px;">✅ Pull Request creado exitosamente</div>
+        <div style="color:var(--text2);margin-bottom:4px;">PR #${data.pr_number} en rama <code style="background:rgba(255,255,255,.1);padding:1px 5px;border-radius:3px;">${data.branch}</code></div>
+        <a href="${data.pr_url}" target="_blank"
+          style="display:inline-block;margin-top:6px;padding:5px 12px;background:rgba(139,92,246,.2);border:1px solid rgba(139,92,246,.4);border-radius:6px;color:rgba(139,92,246,.9);font-size:11px;text-decoration:none;">
+          🔗 Ver PR en GitHub →
+        </a>
+        <div style="color:var(--text3);font-size:10px;margin-top:8px;">⚠️ Revisa el código antes de hacer merge — el fix fue generado por Claude</div>
+      </div>`;
+    }
+
+    addLog('debug','GitHub',`PR #${data.pr_number} creado: ${data.pr_url}`);
+
+    // Enviar link por Telegram también
+    const tok=getTgToken(),chat=getTgChat();
+    if(tok&&chat){
+      const msg=`🔧 *Fix pendiente — ${sym} ${(type||'').toUpperCase()} · ${code}*\n\n`+
+        `PR #${data.pr_number} creado en GitHub\n`+
+        `🔗 [Ver Pull Request](${data.pr_url})\n\n`+
+        `_Revisa y aprueba el merge si el fix es correcto_`;
+      sendTelegram(msg,tok,chat);
+    }
+
+  }catch(e){
+    btn.querySelector('span:last-child').textContent='❌ Error — Reintentar';
+    btn.style.opacity='1';
+    btn.disabled=false;
+    addLog('error','GitHub',`Error creando PR: ${e.message}`);
+    alert(`Error creando PR: ${e.message}\n\nVerifica que el Worker tenga GITHUB_TOKEN configurado.`);
+  }
 }
 
 function saveSignalNote(sym,code,note){

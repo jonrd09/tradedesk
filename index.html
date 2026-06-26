@@ -165,6 +165,12 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
     ⟳ —:——
   </button>
 
+  <!-- Futures semaphore — /ES y /NQ como sesgo de mercado (solo Schwab, sin tarjetas) -->
+  <span id="futuresSemaphore"
+    title="Sesgo de mercado — /ES (S&P500 futuro) y /NQ (Nasdaq futuro)"
+    style="display:none;font-family:var(--mono);font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap;cursor:default;border:1px solid transparent;">
+  </span>
+
   <!-- Market status + clock -->
   <span id="mktStatus" class="mkt-closed">● —</span>
   <span class="clock" id="clockEl">—</span>
@@ -1957,7 +1963,6 @@ async function _buildSignalsCore(){
         {ok:volActive15,  tf:'15m',text:`Volumen activo${volLabel}`},
         {ok:bbCompressed15,tf:'15m',text:`BB comprimido sin volatilidad (BBW ${lBBW15.toFixed(1)}% < 1.5%)`},
         {ok:_imanWindow,  tf:'15m',text:`Ventana apertura 9:30–10:00 AM ET`},
-        {ok:_hlPutOk,     tf:'H/D',text:_hlPutText(),_hlBanner:_hlPutWarnBanner},
       ]});
     }
     const pD_below=lH15<lLow15&&bbCompressed15&&lK15<25, pD_ret=lP15>lO15;
@@ -1969,7 +1974,6 @@ async function _buildSignalsCore(){
         {ok:volActive15,  tf:'15m',text:`Volumen activo${volLabel}`},
         {ok:bbCompressed15,tf:'15m',text:`BB comprimido sin volatilidad (BBW ${lBBW15.toFixed(1)}% < 1.5%)`},
         {ok:_imanWindow,  tf:'15m',text:`Ventana apertura 9:30–10:00 AM ET`},
-        {ok:_hlCallOk,    tf:'H/D',text:_hlCallText(),_hlBanner:_hlCallWarnBanner},
       ]});
     }
 
@@ -4443,9 +4447,9 @@ function _sendWebNotif(sym, type, code, pct, price){
 }
 
 // ── _claudeContextScan — escaneo de catalizadores antes de enviar Telegram ───
-// Llama a Claude con web_search SOLO si detecta Earnings hoy/post-market o demanda millonaria.
-// Si ninguna condición aplica, retorna '' y el Telegram sale sin bloque de contexto.
-// Dedup por sym+tipo+hora para no repetir el scan en cada tick.
+// Llama a Claude con web_search para buscar noticias, earnings, macro del ticker.
+// Si no hay API key o falla, retorna '' y el Telegram sale normal sin el scan.
+// Dedup por sym+type+hora para no repetir el scan en cada tick.
 const _scanCache={};
 async function _claudeContextScan(sym, type, code, price){
   const key=getAnthropicKey();
@@ -4456,20 +4460,36 @@ async function _claudeContextScan(sym, type, code, price){
   const scanKey=`${sym}_${type}_${et.toLocaleDateString('es-PR')}_${et.getHours()}`;
   if(_scanCache[scanKey]) return _scanCache[scanKey];
 
-  const todayStr=et.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+  const dir=type==='call'?'ALCISTA (CALL)':'BAJISTA (PUT)';
+  const today=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+  const todayStr=today.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+  const prompt=`Eres un analista de mercado experto en catalizadores de precio. Analiza ${sym} con contexto de 3 días pasados y 3 días futuros.
 
-  // Prompt ultra-focalizado: SOLO dos condiciones de alto impacto
-  const prompt=`Search for ${sym} today (${todayStr}) and answer ONLY these two questions:
+SEÑAL ACTIVA: ${sym} ${dir} a $${price} — Fecha: ${todayStr}
 
-1. EARNINGS: Does ${sym} report earnings TODAY (before market, during market, or after market close today)?
-2. LAWSUIT: Is there a major lawsuit or legal settlement announced in the LAST 48 HOURS for ${sym} involving $500M or more?
+BUSCA Y ANALIZA:
 
-RULES:
-- If NEITHER condition is true → respond with exactly: NONE
-- If earnings TODAY → respond with exactly: EARNINGS [BMO/AMC/intraday] [brief detail, max 8 words]
-- If major lawsuit ($500M+) → respond with exactly: LAWSUIT [brief detail, max 8 words]
-- If both → list both, one per line
-- NO other information. NO market commentary. NO other news. ONLY these two conditions.`;
+📅 ÚLTIMOS 3 DÍAS (pasado — "sell the news"):
+- Noticias recientes: earnings reportados, demandas, upgrades/downgrades, partnerships, contratos, FDA
+- ¿Ya ocurrió algún evento que el mercado ya descontó? (el movimiento puede estar agotado)
+
+📅 PRÓXIMOS 3 DÍAS (futuro — "buy the rumor"):
+- Earnings pendientes de ${sym} esta semana
+- Eventos macro próximos: FOMC, CPI, NFP, datos económicos que puedan mover el sector
+- Fechas de vencimiento de opciones, splits, dividendos anunciados
+- Conferencias o presentaciones del management programadas
+
+📊 MERCADO AHORA:
+- Dirección actual de S&P500, QQQ, DIA, IWM — ¿alinean con la señal ${dir}?
+
+Responde EXACTAMENTE en este formato (máximo 130 palabras):
+
+📰 PASADO (3d): [evento clave reciente o "Sin eventos relevantes" — ¿ya fue descontado?]
+🔮 FUTURO (3d): [próximo catalizador o "Sin eventos programados" — fecha si la conoces]
+📈 MERCADO: [índices vs señal — favorable/neutro/contrario]
+⚡ VEREDICTO: [REFUERZA / NEUTRAL / CONTRADICE] — [1 oración con la razón principal]
+
+Sin introducciones. Solo los 4 puntos.`;
 
   try{
     const proxyUrl=(localStorage.getItem('proxy_url')||'').trim();
@@ -4483,31 +4503,25 @@ RULES:
     }
     const resp=await fetch(endpoint,{
       method:'POST',headers,
-      signal:AbortSignal.timeout(15000),
+      signal:AbortSignal.timeout(15000), // 15s max — no bloquear el Telegram
       body:JSON.stringify({
         model:'claude-sonnet-4-6',
-        max_tokens:120,
+        max_tokens:350,
         tools:[{type:'web_search_20250305',name:'web_search'}],
         messages:[{role:'user',content:prompt}]
       })
     });
     if(!resp.ok) return '';
     const res=await resp.json();
+    // Extraer solo el bloque de texto final (después de los tool_use)
     const txt=res.content?.filter(b=>b.type==='text').map(b=>b.text).join('').trim()||'';
-    // Si Claude respondió NONE o está vacío — no añadir nada al Telegram
-    if(!txt||txt.trim().toUpperCase()==='NONE'||txt.trim().startsWith('NONE')) return '';
-    // Formatear para Telegram: añadir emoji según tipo
-    const formatted=txt.split('\n').filter(l=>l.trim()).map(l=>{
-      if(l.startsWith('EARNINGS')) return `📅 *Earnings hoy* — ${l.replace('EARNINGS','').trim()}`;
-      if(l.startsWith('LAWSUIT'))  return `⚖️ *Demanda millonaria* — ${l.replace('LAWSUIT','').trim()}`;
-      return l;
-    }).join('\n');
-    _scanCache[scanKey]=formatted;
-    addLog('debug','Claude',`Context scan ${sym}: ${formatted}`);
-    return formatted;
+    if(!txt) return '';
+    _scanCache[scanKey]=txt;
+    addLog('debug','Claude',`Context scan ${sym} completado`);
+    return txt;
   }catch(e){
     addLog('debug','Claude',`Context scan ${sym} omitido: ${e.message}`);
-    return '';
+    return ''; // fallo silencioso — el Telegram sale igual sin el scan
   }
 }
 
@@ -4525,18 +4539,16 @@ async function notifySignal(sym, code, name, type, pct, price, pctChange){
   // Si no hay API key o falla, contextBlock queda '' y el Telegram sale normal
   const contextBlock=await _claudeContextScan(sym, type, code, price).catch(()=>'');
 
-  // Aviso de nivel técnico — CALL: techo (LH/ATH), PUT: piso (LL)
-  // Umbral 2% — si está más lejos no es relevante para la entrada inmediata
+  // Aviso de nivel técnico (a 2%): CALL mira techos (LAST HIGH/ATH), PUT mira piso (LAST LOW)
   let levelWarn='';
   const lv=getLevels(sym);
   if(price&&lv){
-    const distPct=(t)=>t?((Math.abs(t-price)/t)*100).toFixed(2):null;
     const within=(t)=>t&&Math.abs(t-price)/t*100<=2;
     if(type==='call'){
-      if(within(lv.hi))  levelWarn+=`\n⚠️ *Próx a LH* $${lv.hi.toFixed(2)} (a ${distPct(lv.hi)}% — posible techo)`;
-      if(within(lv.ath)) levelWarn+=`\n⚠️ *Próx a ATH* $${lv.ath.toFixed(2)} (a ${distPct(lv.ath)}% — resistencia extrema)`;
+      if(within(lv.hi)) levelWarn+='\n⬆️ *LAST HIGH POSIBLE* ($'+lv.hi.toFixed(2)+')';
+      if(within(lv.ath))levelWarn+='\n⬆️ *ATH POSIBLE* ($'+lv.ath.toFixed(2)+')';
     }else{
-      if(within(lv.lo))  levelWarn+=`\n⚠️ *Próx a LL* $${lv.lo.toFixed(2)} (a ${distPct(lv.lo)}% — posible piso)`;
+      if(within(lv.lo)) levelWarn+='\n⬇️ *LAST LOW POSIBLE* ($'+lv.lo.toFixed(2)+')';
     }
   }
   // FIX 3: precio siempre viene de Finnhub cuando llegamos aquí
@@ -4550,7 +4562,7 @@ async function notifySignal(sym, code, name, type, pct, price, pctChange){
     `🎯 Confianza: *${pct}%*
 `+
     `🕐 ${time} ET`+levelWarn+
-    (contextBlock?`\n\n━━━━━━━━━━━━━━━━━━━━\n🚨 *ALERTA CATALÍTICA*\n${contextBlock}`:'')+
+    (contextBlock?`\n\n━━━━━━━━━━━━━━━━━━━━\n🔍 *CONTEXTO DE MERCADO*\n${contextBlock}`:'')+
     `\n\n`+
     `_TradeDesk Pro — jonrd09.github.io/tradedesk/_`;
   await sendTelegram(msg, tok, chat);
@@ -6643,6 +6655,8 @@ async function init(){
           const _hasKey=getKey()&&getKey().length>8;
           if(_hasKey){await loadLivePrices();}else{await buildSignals();}
           await checkMarketBlockMove();
+          // Actualizar semáforo de futuros en paralelo — no bloquea el tick principal
+          updateFuturesSemaphore().catch(()=>{});
           // Sincronizar el countdown visual con el tick real
           if(window._resetRefreshCountdown) window._resetRefreshCountdown();
         }
@@ -6678,6 +6692,8 @@ async function init(){
 
     // Delay rotation load to avoid rate limit burst on startup
     setTimeout(()=>checkMarketBlockMove(),8000);
+    // Futuros semáforo — arrancar 12s después para no competir con el burst inicial
+    setTimeout(()=>updateFuturesSemaphore().catch(()=>{}),12000);
   }else{
     // No key — don't make any API calls
     document.getElementById('signalArea').innerHTML='<div style="text-align:center;padding:30px;color:var(--text2);font-size:13px;"><div style="font-size:28px;margin-bottom:10px">🔑</div><div style="font-weight:600;">Configura tu API key</div><div style="font-size:11px;margin-top:6px;color:var(--text3)">Haz clic en el botón Finnhub en el topbar</div></div>';
@@ -7081,6 +7097,134 @@ async function _pmPDF(id){
   },800);
 }
 // ── fin post-mortem ──
+
+// ═══════════════════════════════════════════════════════════════
+// FUTURES SEMAPHORE — /ES y /NQ como sesgo de mercado invisible
+// Sin tarjetas, sin paneles. Solo un pill compacto en el topbar.
+// Fuente: Schwab quotes API (misma conexión ya establecida).
+// Lógica: precio vs MA20 de los últimos 20 bars de 5min = sesión actual.
+// Actualiza cada 10 min junto al masterTick. Cache de 9 min para no
+// duplicar llamadas si buildSignals también corre cerca.
+// ═══════════════════════════════════════════════════════════════
+const _FUT_SYMBOLS=['/ES','/NQ'];
+const _futCache={}; // sym → {bias, esPrice, nqPrice, ts}
+
+// Calcula sesgo: 'bull' | 'bear' | 'neutral' según precio vs MA20 de 5min
+async function _fetchFuturesBias(){
+  const token=await getSchwabToken();
+  if(!token)return null;
+
+  const results={};
+  for(const sym of _FUT_SYMBOLS){
+    // Cache válido por 9 min — no duplicar llamadas entre masterTick y buildSignals
+    if(_futCache[sym]&&Date.now()-_futCache[sym].ts<9*60*1000){
+      results[sym]=_futCache[sym];
+      continue;
+    }
+    try{
+      // Pedir 25 velas de 5min — suficiente para MA20 de la sesión actual
+      const endMs=Date.now();
+      const startMs=endMs-(2*24*60*60*1000); // 2 días atrás — Schwab filtra por horario
+      const url=`${SCHWAB_API_BASE}/pricehistory?symbol=${encodeURIComponent(sym)}&periodType=day&period=2&frequencyType=minute&frequency=5&startDate=${startMs}&endDate=${endMs}&needExtendedHoursData=true`;
+      const r=await fetch(url,{
+        headers:{'Authorization':'Bearer '+token},
+        signal:AbortSignal.timeout(6000)
+      });
+      if(!r.ok){
+        addLog('warn','Futuros',`${sym} → HTTP ${r.status}`);
+        continue;
+      }
+      const d=await r.json();
+      if(!d.candles||d.candles.length<5)continue;
+
+      const cls=d.candles.map(c=>c.close);
+      const last=cls[cls.length-1];
+      // MA20 sobre los últimos 20 cierres disponibles (mínimo 5)
+      const window=Math.min(20,cls.length);
+      const ma20=cls.slice(-window).reduce((a,b)=>a+b,0)/window;
+      // Distancia % del precio a la MA20
+      const distPct=(last-ma20)/ma20*100;
+      // Sesgo: >0.15% sobre MA20 = bull, <-0.15% = bear, resto = neutral
+      const bias=distPct>0.15?'bull':distPct<-0.15?'bear':'neutral';
+      // Variación del día: comparar con primer candle del día
+      const etNow=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+      const todayStr=etNow.toDateString();
+      const todayCandles=d.candles.filter(c=>{
+        const dt=new Date(new Date(c.datetime).toLocaleString('en-US',{timeZone:'America/New_York'}));
+        return dt.toDateString()===todayStr;
+      });
+      const dayOpen=todayCandles.length?todayCandles[0].open:last;
+      const dayPct=dayOpen>0?((last-dayOpen)/dayOpen*100):0;
+
+      _futCache[sym]={bias,price:last,ma20,distPct,dayPct,ts:Date.now()};
+      results[sym]=_futCache[sym];
+      addLog('debug','Futuros',`${sym} $${last.toFixed(2)} vs MA20 $${ma20.toFixed(2)} → ${bias} (${distPct>=0?'+':''}${distPct.toFixed(2)}%)`);
+    }catch(e){
+      addLog('warn','Futuros',`${sym} error: ${e.message}`);
+    }
+    // Pequeño delay entre las dos llamadas para no saturar
+    await new Promise(r=>setTimeout(r,400));
+  }
+  return results;
+}
+
+// Renderiza el pill en el topbar — compacto, sin tarjetas
+function _renderFuturesSemaphore(data){
+  const el=document.getElementById('futuresSemaphore');
+  if(!el)return;
+  if(!data||!data['/ES']||!data['/NQ']){
+    el.style.display='none';
+    return;
+  }
+  const es=data['/ES'],nq=data['/NQ'];
+
+  // Determinar sesgo combinado
+  const bullCount=[es,nq].filter(f=>f.bias==='bull').length;
+  const bearCount=[es,nq].filter(f=>f.bias==='bear').length;
+  let combinedBias,bgColor,borderColor,textColor,dot;
+  if(bullCount===2){
+    combinedBias='BULL';bgColor='rgba(0,209,122,.12)';
+    borderColor='rgba(0,209,122,.35)';textColor='var(--green)';dot='▲';
+  }else if(bearCount===2){
+    combinedBias='BEAR';bgColor='rgba(255,77,109,.12)';
+    borderColor='rgba(255,77,109,.35)';textColor='var(--red)';dot='▼';
+  }else{
+    combinedBias='MIX';bgColor='rgba(255,194,52,.1)';
+    borderColor='rgba(255,194,52,.3)';textColor='var(--yellow)';dot='◆';
+  }
+
+  // Formato: dot + ES% + NQ% — mínimo de caracteres
+  const esPct=(es.dayPct>=0?'+':'')+es.dayPct.toFixed(2)+'%';
+  const nqPct=(nq.dayPct>=0?'+':'')+nq.dayPct.toFixed(2)+'%';
+
+  el.style.display='inline-flex';
+  el.style.alignItems='center';
+  el.style.gap='5px';
+  el.style.background=bgColor;
+  el.style.borderColor=borderColor;
+  el.style.color=textColor;
+  el.title=`Sesgo futuros — /ES $${es.price.toFixed(0)} vs MA20 $${es.ma20.toFixed(0)} · /NQ $${nq.price.toFixed(0)} vs MA20 $${nq.ma20.toFixed(0)}\nDistancia: ES ${es.distPct>=0?'+':''}${es.distPct.toFixed(2)}% · NQ ${nq.distPct>=0?'+':''}${nq.distPct.toFixed(2)}%\nSesgo combinado: ${combinedBias}`;
+  el.textContent=`${dot} ES ${esPct}  NQ ${nqPct}`;
+}
+
+// Punto de entrada: fetch + render. Llamado por masterTick y al init.
+// Silencioso — no bloquea nada si Schwab no está conectado.
+async function updateFuturesSemaphore(){
+  try{
+    const tok=localStorage.getItem('schwab_access_token');
+    const exp=parseInt(localStorage.getItem('schwab_token_expiry')||'0');
+    if(!tok||Date.now()>exp){
+      // Sin Schwab conectado — ocultar el pill
+      const el=document.getElementById('futuresSemaphore');
+      if(el)el.style.display='none';
+      return;
+    }
+    const data=await _fetchFuturesBias();
+    _renderFuturesSemaphore(data);
+  }catch(e){
+    addLog('debug','Futuros',`updateFuturesSemaphore error: ${e.message}`);
+  }
+}
 </script>
 <!-- ══════════════════════════════════════════════════════
      PREMARKET MODAL

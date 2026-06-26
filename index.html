@@ -336,7 +336,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
     if(k&&k.length>8){
       window._fk=k;
       try{localStorage.setItem('finnhub_key',k)}catch(e){}
-  try{localStorage.setItem('ms_fh_key',k)}catch(e){} // plain copy for Morning Scanner
+      // C-SEC-02: ms_fh_key eliminado — Morning Scanner ahora usa _loadKey('finnhub_key') directamente
       // C-04: Add Secure flag — cookie only sent over HTTPS
       document.cookie='fk='+encodeURIComponent(k)+';max-age='+365*24*3600+';path=/;SameSite=Lax;Secure';
     }
@@ -470,7 +470,7 @@ function saveKeyModal(){
   window._fk=k;
   try{_storeKey('finnhub_key',k)}catch(e){}
   try{sessionStorage.setItem('finnhub_key',k)}catch(e){}
-  try{localStorage.setItem('ms_fh_key',k)}catch(e){} // plain copy for Morning Scanner
+  // C-SEC-02: ms_fh_key eliminado — copia plaintext innecesaria
   document.cookie='fk='+encodeURIComponent(k)+';max-age='+365*24*3600+';path=/;SameSite=Lax;Secure';
   // keyModal removed
   
@@ -542,7 +542,8 @@ function saveSchwabKeys(){
   err.style.display='none';
   try{
     localStorage.setItem('schwab_client_id',cid);
-    localStorage.setItem('schwab_client_secret',sec);
+    // C-SEC-01: client_secret ofuscado con XOR+b64 — igual que finnhub_key
+    _storeKey('schwab_client_secret',sec);
     if(proxy)localStorage.setItem('proxy_url',proxy);
     else localStorage.removeItem('proxy_url');
   }catch(e){}
@@ -562,7 +563,7 @@ async function handleSchwabCallback(){
   const params=new URLSearchParams(window.location.search);
   const code=params.get('code');
   if(!code)return;
-  const secret=localStorage.getItem('schwab_client_secret')||'';
+  const secret=_loadKey('schwab_client_secret')||'';
   if(!secret)return;
   try{
     const proxyUrl=localStorage.getItem('proxy_url')||'';
@@ -609,7 +610,7 @@ async function getSchwabToken(){
   if(valid)return token;
   if(token&&Date.now()<expiry)addLog('warn','Schwab','Token expira en <5min — renovando automáticamente');
   const refresh=localStorage.getItem('schwab_refresh_token')||'';
-  const secret=localStorage.getItem('schwab_client_secret')||'';
+  const secret=_loadKey('schwab_client_secret')||'';
   if(!refresh||!secret){
     addLog('error','Schwab','No hay refresh_token o client_secret — reconecta Schwab');
     return null;
@@ -725,6 +726,51 @@ async function fetchSchwabCandles(sym,freqType,freq,bars=50){
     return null;
   }
 
+  // ENG-01: _injectTodayCandle definida FUERA del loop para no recrearla en cada iteración.
+  // Recibe cfg como parámetro para acceder a frequencyType sin capturar el closure del loop.
+  async function _injectTodayCandle(candles, cfg){
+    if(cfg.frequencyType!=='minute')return candles;
+    const last=candles[candles.length-1];
+    if(!last)return candles;
+    const lastDt=new Date(last.datetime);
+    const lastEt=new Date(lastDt.toLocaleString('en-US',{timeZone:'America/New_York'}));
+    const nowEt=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+    // Si la última vela es de hoy → no necesita inyección
+    if(lastEt.toDateString()===nowEt.toDateString())return candles;
+    // Mercado debe estar abierto para que tenga sentido inyectar
+    const nowMins=nowEt.getHours()*60+nowEt.getMinutes();
+    if(nowMins<570||nowMins>=960)return candles; // fuera de horario
+    try{
+      const tok=await getSchwabToken();
+      if(!tok)return candles;
+      const qr=await fetch(`${SCHWAB_API_BASE}/quotes?symbols=${sym}&fields=quote`,{
+        headers:{'Authorization':'Bearer '+tok},signal:AbortSignal.timeout(5000)
+      });
+      if(!qr.ok)return candles;
+      const qd=await qr.json();
+      const q=qd[sym]?.quote;
+      if(!q||!q.lastPrice)return candles;
+      // Crear vela sintética con los datos del día actual
+      // Calcular volumen promedio de las últimas 10 velas para normalizar
+      const _recentVols=candles.slice(-10).map(c=>c.volume||0).filter(v=>v>0);
+      const _avgVol=_recentVols.length?_recentVols.reduce((a,b)=>a+b,0)/_recentVols.length:0;
+      // Usar 110% del promedio como volumen de la vela sintética (activo pero no exagerado)
+      const _syntheticVol=_avgVol>0?Math.round(_avgVol*1.1):(q.totalVolume||0);
+      const todayCandle={
+        datetime:Date.now(),
+        open:q.openPrice>0?q.openPrice:candles[candles.length-1].close, // H-02: never use 0 as open
+        high:q.highPrice||q.lastPrice,
+        low:q.lowPrice||q.lastPrice,
+        close:q.lastPrice,
+        volume:_syntheticVol,
+        _synthetic:true,
+        _syntheticOpen:!(q.openPrice>0) // flag if open was estimated
+      };
+      addLog('debug','Schwab',`${sym} vela hoy inyectada: $${q.lastPrice} (O:${q.openPrice} H:${q.highPrice} L:${q.lowPrice})`);
+      return[...candles,todayCandle];
+    }catch(e){return candles;}
+  }
+
   for(const cfg of configs){
     try{
       const fetchBars=cfg._merge1h?bars*2:bars;
@@ -745,50 +791,6 @@ async function fetchSchwabCandles(sym,freqType,freq,bars=50){
         // Daily: extended hours no aplica, solo pedir datos normales
         url+=`&needExtendedHoursData=false`;
       }
-      // Inyectar vela de hoy si los datos históricos son de ayer o antes (solo para intraday)
-      // Schwab /pricehistory tiene delay en el día actual — usamos /quotes para la vela actual
-      async function _injectTodayCandle(candles){
-        if(cfg.frequencyType!=='minute')return candles;
-        const last=candles[candles.length-1];
-        if(!last)return candles;
-        const lastDt=new Date(last.datetime);
-        const lastEt=new Date(lastDt.toLocaleString('en-US',{timeZone:'America/New_York'}));
-        const nowEt=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
-        // Si la última vela es de hoy → no necesita inyección
-        if(lastEt.toDateString()===nowEt.toDateString())return candles;
-        // Mercado debe estar abierto para que tenga sentido inyectar
-        const nowMins=nowEt.getHours()*60+nowEt.getMinutes();
-        if(nowMins<570||nowMins>=960)return candles; // fuera de horario
-        try{
-          const tok=await getSchwabToken();
-          if(!tok)return candles;
-          const qr=await fetch(`${SCHWAB_API_BASE}/quotes?symbols=${sym}&fields=quote`,{
-            headers:{'Authorization':'Bearer '+tok},signal:AbortSignal.timeout(5000)
-          });
-          if(!qr.ok)return candles;
-          const qd=await qr.json();
-          const q=qd[sym]?.quote;
-          if(!q||!q.lastPrice)return candles;
-          // Crear vela sintética con los datos del día actual
-          // Calcular volumen promedio de las últimas 10 velas para normalizar
-          const _recentVols=candles.slice(-10).map(c=>c.volume||0).filter(v=>v>0);
-          const _avgVol=_recentVols.length?_recentVols.reduce((a,b)=>a+b,0)/_recentVols.length:0;
-          // Usar 110% del promedio como volumen de la vela sintética (activo pero no exagerado)
-          const _syntheticVol=_avgVol>0?Math.round(_avgVol*1.1):(q.totalVolume||0);
-          const todayCandle={
-            datetime:Date.now(),
-            open:q.openPrice>0?q.openPrice:candles[candles.length-1].close, // H-02: never use 0 as open
-            high:q.highPrice||q.lastPrice,
-            low:q.lowPrice||q.lastPrice,
-            close:q.lastPrice,
-            volume:_syntheticVol,
-            _synthetic:true,
-            _syntheticOpen:!(q.openPrice>0) // flag if open was estimated
-          };
-          addLog('debug','Schwab',`${sym} vela hoy inyectada: $${q.lastPrice} (O:${q.openPrice} H:${q.highPrice} L:${q.lowPrice})`);
-          return[...candles,todayCandle];
-        }catch(e){return candles;}
-      }
       const r=await fetch(url,{headers:{'Authorization':'Bearer '+token},signal:AbortSignal.timeout(7000)});
       if(!r.ok){
         // Only log if this is the LAST config (no more fallbacks)
@@ -801,7 +803,7 @@ async function fetchSchwabCandles(sym,freqType,freq,bars=50){
       const d=await r.json();
       if(!d.candles||!d.candles.length){continue;}
       let candles=d.candles;
-      candles=await _injectTodayCandle(candles);
+      candles=await _injectTodayCandle(candles, cfg);
       // M-04: Merge 30min → 1H aligned by datetime (not array index parity)
       // Schwab 30min candles: group by hour boundary using datetime field
       if(cfg._merge1h&&cfg.frequency===30){
@@ -1141,9 +1143,9 @@ function pinPress(d){
         if(_pinCallback)_pinCallback();
       }else{
         _pinFailCount++;
-        // Show emergency reset after 2 failed attempts
+        // Show emergency reset only after 5 failed attempts (not 2)
         const _emg=document.getElementById('pinEmergency');
-        if(_emg&&_pinFailCount>=2)_emg.style.display='block';
+        if(_emg&&_pinFailCount>=5)_emg.style.display='block';
         // Show diagnostic hint
         const _stored=localStorage.getItem('app_pin');
         const _fmt=_stored?(_stored.length<50?'legacy':'PBKDF2'):'no PIN';
@@ -2867,7 +2869,7 @@ function _updateApiStatus(){
 function _loadCfgFields(){
   // APIs
   const cid=localStorage.getItem('schwab_client_id')||'';
-  const csec=localStorage.getItem('schwab_client_secret')||'';
+  const csec=_loadKey('schwab_client_secret')||'';
   const proxy=localStorage.getItem('proxy_url')||'';
   const fhk=_loadKey('finnhub_key')||_loadKey('levetf_apikey')||'';
   const clk=_loadKey('anthropic_api_key')||'';
@@ -2932,7 +2934,8 @@ function saveCfgSchwab(){
     return;
   }
   try{localStorage.setItem('schwab_client_id',cid);}catch(e){}
-  try{localStorage.setItem('schwab_client_secret',csec);}catch(e){}
+  // C-SEC-01: secret ofuscado con XOR+b64
+  try{_storeKey('schwab_client_secret',csec);}catch(e){}
   if(proxy)try{localStorage.setItem('proxy_url',proxy);}catch(e){}
   else localStorage.removeItem('proxy_url');
   _updateApiStatus();
@@ -4708,7 +4711,7 @@ async function msConnect() {
     if (!d.c) throw new Error('Respuesta inválida — verifica tu API key');
     APIKEY = k;
     saveKey(k); // handles _storeKey obfuscation automatically
-    try{localStorage.setItem('ms_fh_key', k);}catch(e){}
+    // C-SEC-02: ms_fh_key eliminado — Morning Scanner usa _loadKey('finnhub_key') directo
     const btn=document.getElementById('scanbtn');
     if(btn){btn.disabled=false;btn.style.opacity='1';}
     showKeyPill();
@@ -4761,10 +4764,15 @@ function ms_rsi(a,p=14){
 }
 function ms_macd(a){
   if(a.length<40)return null;
-  const e12=ms_ema(a,12),e26=ms_ema(a,26); if(!e12||!e26)return null;
-  const mv=e12-e26, ms=[];
-  for(let i=26;i<=a.length;i++){const e1=ema(a.slice(0,i),12),e2=ema(a.slice(0,i),26);if(e1&&e2)ms.push(e1-e2);}
-  const sig=ms.length>=9?ms_ema(ms_arr,9):null;
+  const e12=ms_ms_ema(a,12),e26=ms_ms_ema(a,26); if(!e12||!e26)return null;
+  const mv=e12-e26;
+  const ms_hist=[];
+  for(let i=26;i<=a.length;i++){
+    const e1=ms_ms_ema(a.slice(0,i),12),e2=ms_ms_ema(a.slice(0,i),26);
+    if(e1&&e2)ms_hist.push(e1-e2);
+  }
+  // ENG-02: ms_arr y ema() no definidos en este scope — usar ms_hist y ms_ms_ema
+  const sig=ms_hist.length>=9?ms_ms_ema(ms_hist,9):null;
   return{macd:mv,signal:sig,hist:sig!==null?mv-sig:null};
 }
 
@@ -5267,11 +5275,10 @@ async function manualScan(){
 ═══════════════════════════════ */
 (function(){
   function msAutoInit(){
-    // Use TradeDesk's getKey() which handles decryption properly
-    // ms_fh_key is plain for scanner; obfuscated keys go through _loadKey
-    const saved = localStorage.getItem('ms_fh_key') ||
-                  (typeof _loadKey==='function'?_loadKey('levetf_apikey'):localStorage.getItem('levetf_apikey')) ||
-                  (typeof _loadKey==='function'?_loadKey('finnhub_key'):localStorage.getItem('finnhub_key')) || '';
+    // C-SEC-02: usar _loadKey('finnhub_key') directamente — ms_fh_key eliminado
+    const saved =
+      (typeof _loadKey==='function'?_loadKey('finnhub_key'):localStorage.getItem('finnhub_key')) ||
+      (typeof _loadKey==='function'?_loadKey('levetf_apikey'):localStorage.getItem('levetf_apikey')) || '';
     if(saved && saved.length > 8){
       APIKEY = saved;
       saveKey(saved);
@@ -5975,6 +5982,37 @@ function clearHistorial(){
   updateHistBadge();
 }
 
+// ── Auto-cleanup historial a las 9:00 PM ET ─────────────────────────────────
+// Corre en background: cada minuto verifica si son las 21:00 ET.
+// Guarda la fecha del último cleanup para no limpiar dos veces el mismo día.
+const HIST_CLEANUP_KEY='tdp_hist_last_cleanup';
+function _scheduleHistorialCleanup(){
+  setInterval(()=>{
+    try{
+      const etNow=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+      const hh=etNow.getHours(), mm=etNow.getMinutes();
+      // Ventana de limpieza: 21:00–21:01 ET (1 minuto exacto para no limpiar dos veces)
+      if(hh!==21||mm!==0)return;
+      // Verificar que no se haya limpiado ya hoy
+      const todayKey=`${etNow.getFullYear()}-${etNow.getMonth()+1}-${etNow.getDate()}`;
+      const lastCleanup=localStorage.getItem(HIST_CLEANUP_KEY)||'';
+      if(lastCleanup===todayKey)return;
+      // Ejecutar limpieza
+      localStorage.removeItem(HIST_KEY);
+      localStorage.setItem(HIST_CLEANUP_KEY,todayKey);
+      updateHistBadge();
+      // Refrescar panel si está abierto
+      const modal=document.getElementById('historialModal');
+      if(modal&&modal.style.display==='flex')renderHistorialList('all');
+      // Log y notificación opcional
+      addLog('info','Historial','🧹 Auto-cleanup 9:00 PM ET — historial del día borrado');
+      addLog('debug','Historial',`Cleanup ejecutado: ${todayKey}`);
+    }catch(e){}
+  },60000); // chequea cada 60 segundos
+}
+// Iniciar el scheduler al cargar la app
+_scheduleHistorialCleanup();
+
 // ═══════════════════════════════════════════════════════════════
 // NEWS PANEL — Yahoo Finance RSS via allorigins proxy
 // ═══════════════════════════════════════════════════════════════
@@ -6582,7 +6620,7 @@ async function init(){
 
   // Restore Schwab status
   const sid=localStorage.getItem('schwab_client_id');
-  const ssec=localStorage.getItem('schwab_client_secret');
+  const ssec=_loadKey('schwab_client_secret');
   if(sid)window._schwabId=sid;if(ssec)window._schwabSec=ssec;
   updateSchwabStatus();
 
@@ -7673,12 +7711,12 @@ async function _pmPDF(id){
       <button class="pin-key" onclick="pinPress('0')">0</button>
       <button class="pin-key" onclick="closePinModal()" style="font-size:11px;color:var(--text3);">✕</button>
     </div>
-    <!-- Emergency reset — visible after 2 failed attempts -->
+    <!-- Emergency reset — visible after 5 failed attempts -->
     <div id="pinEmergency" style="display:none;margin-top:10px;text-align:center;">
       <button onclick="emergencyPinReset()"
         style="background:none;border:none;color:var(--text3);font-size:11px;
         cursor:pointer;text-decoration:underline;padding:4px 8px;">
-        ¿Olvidaste tu PIN? Resetear a 2122
+        ¿Olvidaste tu PIN? Contacta soporte para resetear
       </button>
     </div>
   </div>

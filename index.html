@@ -2136,8 +2136,13 @@ async function _buildSignalsCore(){
     const imanPutOk  = lP15<lO15;          // vela bajista — precio bajando, no rebotando
     // Guard de gap excesivo: caída >4% es pánico, no imán — bloquear CALL
     const imanGapSafe = Math.abs(distFromMA20_15)<=4.5;
+    // FIX PR#1 — Critical guards: volumen Y vela confirmada son obligatorios para IMAN
+    // (traducción de fix sugerido por Claude en PR #1 a arquitectura real de TradeDesk Pro)
+    // Sin volumen institucional + sin vela confirmada = señal de baja convicción, bloquear
+    const imanPutCritical  = volActive15 && imanPutOk;  // AMBOS requeridos para PUT
+    const imanCallCritical = volActive15 && imanCallOk; // AMBOS requeridos para CALL
 
-    if((_imanWindowExt||_testMode||_debugMode)&&gapUp15){
+    if((_imanWindowExt||_testMode||_debugMode)&&gapUp15&&imanPutCritical){
       all.push({...meta,code:'IMAN',name:'Efecto Imán Apertura — PUT',type:'put',reqs:[
         {ok:gapUp15,       tf:'15m',text:`Precio $${lP15.toFixed(2)} está ${distFromMA20_15.toFixed(1)}% sobre MA20 ($${lMA20_15.toFixed(2)})`},
         {ok:_imanWindowExt||_testMode||_debugMode,tf:'15m',text:`Ventana de apertura 9:30–10:00 AM ET`},
@@ -2147,7 +2152,7 @@ async function _buildSignalsCore(){
         {ok:imanPutOk,     tf:'15m',text:`Vela bajista confirmada: cierre $${lP15.toFixed(2)} < apertura $${lO15.toFixed(2)}`},
       ]});
     }
-    if((_imanWindowExt||_testMode||_debugMode)&&gapDown15){
+    if((_imanWindowExt||_testMode||_debugMode)&&gapDown15&&imanCallCritical){
       all.push({...meta,code:'IMAN',name:'Efecto Imán Apertura — CALL',type:'call',reqs:[
         {ok:gapDown15,     tf:'15m',text:`Precio $${lP15.toFixed(2)} está ${Math.abs(distFromMA20_15).toFixed(1)}% bajo MA20 ($${lMA20_15.toFixed(2)})`},
         {ok:_imanWindowExt||_testMode||_debugMode,tf:'15m',text:`Ventana de apertura 9:30–10:00 AM ET`},

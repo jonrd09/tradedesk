@@ -165,9 +165,8 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
     ⟳ —:——
   </button>
 
-  <!-- Futures semaphore — /ES y /NQ como sesgo de mercado (solo Schwab, sin tarjetas) -->
+  <!-- Futures semaphore — /ES y /NQ sesgo de mercado (solo topbar, sin tarjetas) -->
   <span id="futuresSemaphore"
-    title="Sesgo de mercado — /ES (S&P500 futuro) y /NQ (Nasdaq futuro)"
     style="display:none;font-family:var(--mono);font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap;cursor:default;border:1px solid transparent;">
   </span>
 
@@ -476,7 +475,7 @@ function saveKeyModal(){
   window._fk=k;
   try{_storeKey('finnhub_key',k)}catch(e){}
   try{sessionStorage.setItem('finnhub_key',k)}catch(e){}
-  try{localStorage.setItem('ms_fh_key',k)}catch(e){} // plain copy for Morning Scanner
+  // C-SEC-02: ms_fh_key eliminado — Morning Scanner usa _loadKey('finnhub_key')
   document.cookie='fk='+encodeURIComponent(k)+';max-age='+365*24*3600+';path=/;SameSite=Lax;Secure';
   // keyModal removed
   
@@ -548,7 +547,7 @@ function saveSchwabKeys(){
   err.style.display='none';
   try{
     localStorage.setItem('schwab_client_id',cid);
-    localStorage.setItem('schwab_client_secret',sec);
+    _storeKey('schwab_client_secret',sec); // C-SEC-01: ofuscado igual que finnhub_key
     if(proxy)localStorage.setItem('proxy_url',proxy);
     else localStorage.removeItem('proxy_url');
   }catch(e){}
@@ -568,7 +567,7 @@ async function handleSchwabCallback(){
   const params=new URLSearchParams(window.location.search);
   const code=params.get('code');
   if(!code)return;
-  const secret=localStorage.getItem('schwab_client_secret')||'';
+  const secret=_loadKey('schwab_client_secret')||'';
   if(!secret)return;
   try{
     const proxyUrl=localStorage.getItem('proxy_url')||'';
@@ -615,7 +614,7 @@ async function getSchwabToken(){
   if(valid)return token;
   if(token&&Date.now()<expiry)addLog('warn','Schwab','Token expira en <5min — renovando automáticamente');
   const refresh=localStorage.getItem('schwab_refresh_token')||'';
-  const secret=localStorage.getItem('schwab_client_secret')||'';
+  const secret=_loadKey('schwab_client_secret')||'';
   if(!refresh||!secret){
     addLog('error','Schwab','No hay refresh_token o client_secret — reconecta Schwab');
     return null;
@@ -1147,9 +1146,9 @@ function pinPress(d){
         if(_pinCallback)_pinCallback();
       }else{
         _pinFailCount++;
-        // Show emergency reset after 2 failed attempts
+        // Show emergency reset only after 5 failed attempts
         const _emg=document.getElementById('pinEmergency');
-        if(_emg&&_pinFailCount>=2)_emg.style.display='block';
+        if(_emg&&_pinFailCount>=5)_emg.style.display='block';
         // Show diagnostic hint
         const _stored=localStorage.getItem('app_pin');
         const _fmt=_stored?(_stored.length<50?'legacy':'PBKDF2'):'no PIN';
@@ -1232,6 +1231,19 @@ function isMarketHoliday(etDate){
   const m=String(etDate.getMonth()+1).padStart(2,'0');
   const d=String(etDate.getDate()).padStart(2,'0');
   return MARKET_HOLIDAYS.has(`${y}-${m}-${d}`);
+}
+
+// ── Weekend closed: Viernes ≥ 4:00 PM ET → Lunes < 8:00 AM ET ───────────────
+// El countdown se pausa y el masterTick no hace API calls durante este período.
+function _isWeekendClosed(){
+  const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+  const day=et.getDay(); // 0=Dom,1=Lun,...,5=Vie,6=Sáb
+  const mins=et.getHours()*60+et.getMinutes();
+  if(day===5&&mins>=960)return true; // Viernes desde 4:00 PM (16:00)
+  if(day===6)return true;            // Sábado completo
+  if(day===0)return true;            // Domingo completo
+  if(day===1&&mins<480)return true;  // Lunes antes de 8:00 AM
+  return false;
 }
 
 function tick(){
@@ -1963,6 +1975,7 @@ async function _buildSignalsCore(){
         {ok:volActive15,  tf:'15m',text:`Volumen activo${volLabel}`},
         {ok:bbCompressed15,tf:'15m',text:`BB comprimido sin volatilidad (BBW ${lBBW15.toFixed(1)}% < 1.5%)`},
         {ok:_imanWindow,  tf:'15m',text:`Ventana apertura 9:30–10:00 AM ET`},
+        {ok:_hlPutOk,     tf:'H/D',text:_hlPutText(),_hlBanner:_hlPutWarnBanner},
       ]});
     }
     const pD_below=lH15<lLow15&&bbCompressed15&&lK15<25, pD_ret=lP15>lO15;
@@ -1974,6 +1987,7 @@ async function _buildSignalsCore(){
         {ok:volActive15,  tf:'15m',text:`Volumen activo${volLabel}`},
         {ok:bbCompressed15,tf:'15m',text:`BB comprimido sin volatilidad (BBW ${lBBW15.toFixed(1)}% < 1.5%)`},
         {ok:_imanWindow,  tf:'15m',text:`Ventana apertura 9:30–10:00 AM ET`},
+        {ok:_hlCallOk,    tf:'H/D',text:_hlCallText(),_hlBanner:_hlCallWarnBanner},
       ]});
     }
 
@@ -2873,7 +2887,7 @@ function _updateApiStatus(){
 function _loadCfgFields(){
   // APIs
   const cid=localStorage.getItem('schwab_client_id')||'';
-  const csec=localStorage.getItem('schwab_client_secret')||'';
+  const csec=_loadKey('schwab_client_secret')||''; // C-SEC-01
   const proxy=localStorage.getItem('proxy_url')||'';
   const fhk=_loadKey('finnhub_key')||_loadKey('levetf_apikey')||'';
   const clk=_loadKey('anthropic_api_key')||'';
@@ -2938,7 +2952,7 @@ function saveCfgSchwab(){
     return;
   }
   try{localStorage.setItem('schwab_client_id',cid);}catch(e){}
-  try{localStorage.setItem('schwab_client_secret',csec);}catch(e){}
+  try{_storeKey('schwab_client_secret',csec);}catch(e){} // C-SEC-01
   if(proxy)try{localStorage.setItem('proxy_url',proxy);}catch(e){}
   else localStorage.removeItem('proxy_url');
   _updateApiStatus();
@@ -4447,50 +4461,29 @@ function _sendWebNotif(sym, type, code, pct, price){
 }
 
 // ── _claudeContextScan — escaneo de catalizadores antes de enviar Telegram ───
-// Llama a Claude con web_search para buscar noticias, earnings, macro del ticker.
-// Si no hay API key o falla, retorna '' y el Telegram sale normal sin el scan.
-// Dedup por sym+type+hora para no repetir el scan en cada tick.
+// _claudeContextScan — SOLO dos condiciones de alto impacto:
+// 1. Earnings HOY (BMO/AMC/intraday)
+// 2. Demanda millonaria ($500M+) en las últimas 48h
+// Si ninguna aplica → retorna '' y el bloque de Telegram no aparece.
 const _scanCache={};
 async function _claudeContextScan(sym, type, code, price){
   const key=getAnthropicKey();
   if(!key||!key.startsWith('sk-')) return '';
-
-  // Dedup: no escanear el mismo sym+type más de 1 vez por hora
   const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
   const scanKey=`${sym}_${type}_${et.toLocaleDateString('es-PR')}_${et.getHours()}`;
   if(_scanCache[scanKey]) return _scanCache[scanKey];
+  const todayStr=et.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+  const prompt=`Search for ${sym} today (${todayStr}) and answer ONLY these two questions:
 
-  const dir=type==='call'?'ALCISTA (CALL)':'BAJISTA (PUT)';
-  const today=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
-  const todayStr=today.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
-  const prompt=`Eres un analista de mercado experto en catalizadores de precio. Analiza ${sym} con contexto de 3 días pasados y 3 días futuros.
+1. EARNINGS: Does ${sym} report earnings TODAY (before market, during market, or after market close today)?
+2. LAWSUIT: Is there a major lawsuit or legal settlement announced in the LAST 48 HOURS for ${sym} involving $500M or more?
 
-SEÑAL ACTIVA: ${sym} ${dir} a $${price} — Fecha: ${todayStr}
-
-BUSCA Y ANALIZA:
-
-📅 ÚLTIMOS 3 DÍAS (pasado — "sell the news"):
-- Noticias recientes: earnings reportados, demandas, upgrades/downgrades, partnerships, contratos, FDA
-- ¿Ya ocurrió algún evento que el mercado ya descontó? (el movimiento puede estar agotado)
-
-📅 PRÓXIMOS 3 DÍAS (futuro — "buy the rumor"):
-- Earnings pendientes de ${sym} esta semana
-- Eventos macro próximos: FOMC, CPI, NFP, datos económicos que puedan mover el sector
-- Fechas de vencimiento de opciones, splits, dividendos anunciados
-- Conferencias o presentaciones del management programadas
-
-📊 MERCADO AHORA:
-- Dirección actual de S&P500, QQQ, DIA, IWM — ¿alinean con la señal ${dir}?
-
-Responde EXACTAMENTE en este formato (máximo 130 palabras):
-
-📰 PASADO (3d): [evento clave reciente o "Sin eventos relevantes" — ¿ya fue descontado?]
-🔮 FUTURO (3d): [próximo catalizador o "Sin eventos programados" — fecha si la conoces]
-📈 MERCADO: [índices vs señal — favorable/neutro/contrario]
-⚡ VEREDICTO: [REFUERZA / NEUTRAL / CONTRADICE] — [1 oración con la razón principal]
-
-Sin introducciones. Solo los 4 puntos.`;
-
+RULES:
+- If NEITHER condition is true → respond with exactly: NONE
+- If earnings TODAY → respond with exactly: EARNINGS [BMO/AMC/intraday] [brief detail, max 8 words]
+- If major lawsuit ($500M+) → respond with exactly: LAWSUIT [brief detail, max 8 words]
+- If both → list both, one per line
+- NO other information. NO market commentary. NO other news.`;
   try{
     const proxyUrl=(localStorage.getItem('proxy_url')||'').trim();
     const _proxyValid=proxyUrl.startsWith('http');
@@ -4503,25 +4496,29 @@ Sin introducciones. Solo los 4 puntos.`;
     }
     const resp=await fetch(endpoint,{
       method:'POST',headers,
-      signal:AbortSignal.timeout(15000), // 15s max — no bloquear el Telegram
+      signal:AbortSignal.timeout(15000),
       body:JSON.stringify({
         model:'claude-sonnet-4-6',
-        max_tokens:350,
+        max_tokens:120,
         tools:[{type:'web_search_20250305',name:'web_search'}],
         messages:[{role:'user',content:prompt}]
       })
     });
     if(!resp.ok) return '';
     const res=await resp.json();
-    // Extraer solo el bloque de texto final (después de los tool_use)
     const txt=res.content?.filter(b=>b.type==='text').map(b=>b.text).join('').trim()||'';
-    if(!txt) return '';
-    _scanCache[scanKey]=txt;
-    addLog('debug','Claude',`Context scan ${sym} completado`);
-    return txt;
+    if(!txt||txt.trim().toUpperCase().startsWith('NONE')) return '';
+    const formatted=txt.split('\n').filter(l=>l.trim()).map(l=>{
+      if(l.startsWith('EARNINGS')) return `📅 *Earnings hoy* — ${l.replace('EARNINGS','').trim()}`;
+      if(l.startsWith('LAWSUIT'))  return `⚖️ *Demanda millonaria* — ${l.replace('LAWSUIT','').trim()}`;
+      return l;
+    }).join('\n');
+    _scanCache[scanKey]=formatted;
+    addLog('debug','Claude',`Context scan ${sym}: ${formatted}`);
+    return formatted;
   }catch(e){
     addLog('debug','Claude',`Context scan ${sym} omitido: ${e.message}`);
-    return ''; // fallo silencioso — el Telegram sale igual sin el scan
+    return '';
   }
 }
 
@@ -4539,16 +4536,17 @@ async function notifySignal(sym, code, name, type, pct, price, pctChange){
   // Si no hay API key o falla, contextBlock queda '' y el Telegram sale normal
   const contextBlock=await _claudeContextScan(sym, type, code, price).catch(()=>'');
 
-  // Aviso de nivel técnico (a 2%): CALL mira techos (LAST HIGH/ATH), PUT mira piso (LAST LOW)
+  // Aviso de nivel técnico — CALL: techo (LH/ATH), PUT: piso (LL)
   let levelWarn='';
   const lv=getLevels(sym);
   if(price&&lv){
+    const distPct=(t)=>t?((Math.abs(t-price)/t)*100).toFixed(2):null;
     const within=(t)=>t&&Math.abs(t-price)/t*100<=2;
     if(type==='call'){
-      if(within(lv.hi)) levelWarn+='\n⬆️ *LAST HIGH POSIBLE* ($'+lv.hi.toFixed(2)+')';
-      if(within(lv.ath))levelWarn+='\n⬆️ *ATH POSIBLE* ($'+lv.ath.toFixed(2)+')';
+      if(within(lv.hi))  levelWarn+=`\n⚠️ *Próx a LH* $${lv.hi.toFixed(2)} (a ${distPct(lv.hi)}% — posible techo)`;
+      if(within(lv.ath)) levelWarn+=`\n⚠️ *Próx a ATH* $${lv.ath.toFixed(2)} (a ${distPct(lv.ath)}% — resistencia extrema)`;
     }else{
-      if(within(lv.lo)) levelWarn+='\n⬇️ *LAST LOW POSIBLE* ($'+lv.lo.toFixed(2)+')';
+      if(within(lv.lo))  levelWarn+=`\n⚠️ *Próx a LL* $${lv.lo.toFixed(2)} (a ${distPct(lv.lo)}% — posible piso)`;
     }
   }
   // FIX 3: precio siempre viene de Finnhub cuando llegamos aquí
@@ -4562,7 +4560,7 @@ async function notifySignal(sym, code, name, type, pct, price, pctChange){
     `🎯 Confianza: *${pct}%*
 `+
     `🕐 ${time} ET`+levelWarn+
-    (contextBlock?`\n\n━━━━━━━━━━━━━━━━━━━━\n🔍 *CONTEXTO DE MERCADO*\n${contextBlock}`:'')+
+    (contextBlock?`\n\n━━━━━━━━━━━━━━━━━━━━\n🚨 *ALERTA CATALÍTICA*\n${contextBlock}`:'')+
     `\n\n`+
     `_TradeDesk Pro — jonrd09.github.io/tradedesk/_`;
   await sendTelegram(msg, tok, chat);
@@ -4714,7 +4712,7 @@ async function msConnect() {
     if (!d.c) throw new Error('Respuesta inválida — verifica tu API key');
     APIKEY = k;
     saveKey(k); // handles _storeKey obfuscation automatically
-    try{localStorage.setItem('ms_fh_key', k);}catch(e){}
+    // C-SEC-02: ms_fh_key eliminado
     const btn=document.getElementById('scanbtn');
     if(btn){btn.disabled=false;btn.style.opacity='1';}
     showKeyPill();
@@ -4767,10 +4765,15 @@ function ms_rsi(a,p=14){
 }
 function ms_macd(a){
   if(a.length<40)return null;
-  const e12=ms_ema(a,12),e26=ms_ema(a,26); if(!e12||!e26)return null;
-  const mv=e12-e26, ms=[];
-  for(let i=26;i<=a.length;i++){const e1=ema(a.slice(0,i),12),e2=ema(a.slice(0,i),26);if(e1&&e2)ms.push(e1-e2);}
-  const sig=ms.length>=9?ms_ema(ms_arr,9):null;
+  const e12=ms_ms_ema(a,12),e26=ms_ms_ema(a,26); if(!e12||!e26)return null;
+  const mv=e12-e26;
+  const ms_hist=[];
+  for(let i=26;i<=a.length;i++){
+    const e1=ms_ms_ema(a.slice(0,i),12),e2=ms_ms_ema(a.slice(0,i),26);
+    if(e1&&e2)ms_hist.push(e1-e2);
+  }
+  // ENG-02: ms_arr y ema() no definidos en este scope — corregido a ms_hist y ms_ms_ema
+  const sig=ms_hist.length>=9?ms_ms_ema(ms_hist,9):null;
   return{macd:mv,signal:sig,hist:sig!==null?mv-sig:null};
 }
 
@@ -5273,11 +5276,10 @@ async function manualScan(){
 ═══════════════════════════════ */
 (function(){
   function msAutoInit(){
-    // Use TradeDesk's getKey() which handles decryption properly
-    // ms_fh_key is plain for scanner; obfuscated keys go through _loadKey
-    const saved = localStorage.getItem('ms_fh_key') ||
-                  (typeof _loadKey==='function'?_loadKey('levetf_apikey'):localStorage.getItem('levetf_apikey')) ||
-                  (typeof _loadKey==='function'?_loadKey('finnhub_key'):localStorage.getItem('finnhub_key')) || '';
+    // C-SEC-02: usar _loadKey('finnhub_key') directo — ms_fh_key eliminado
+    const saved =
+      (typeof _loadKey==='function'?_loadKey('finnhub_key'):localStorage.getItem('finnhub_key')) ||
+      (typeof _loadKey==='function'?_loadKey('levetf_apikey'):localStorage.getItem('levetf_apikey')) || '';
     if(saved && saved.length > 8){
       APIKEY = saved;
       saveKey(saved);
@@ -5981,6 +5983,28 @@ function clearHistorial(){
   updateHistBadge();
 }
 
+// ── Auto-cleanup historial a las 9:00 PM ET ─────────────────────────────────
+const HIST_CLEANUP_KEY='tdp_hist_last_cleanup';
+function _scheduleHistorialCleanup(){
+  setInterval(()=>{
+    try{
+      const etNow=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+      const hh=etNow.getHours(),mm=etNow.getMinutes();
+      if(hh!==21||mm!==0)return; // Solo a las 21:00 ET exacto (ventana de 1 min)
+      const todayKey=`${etNow.getFullYear()}-${etNow.getMonth()+1}-${etNow.getDate()}`;
+      const lastCleanup=localStorage.getItem(HIST_CLEANUP_KEY)||'';
+      if(lastCleanup===todayKey)return; // Ya se limpió hoy
+      localStorage.removeItem(HIST_KEY);
+      localStorage.setItem(HIST_CLEANUP_KEY,todayKey);
+      updateHistBadge();
+      const modal=document.getElementById('historialModal');
+      if(modal&&modal.style.display==='flex')renderHistorialList('all');
+      addLog('info','Historial','🧹 Auto-cleanup 9:00 PM ET — historial del día borrado');
+    }catch(e){}
+  },60000); // chequea cada 60 segundos
+}
+_scheduleHistorialCleanup();
+
 // ═══════════════════════════════════════════════════════════════
 // NEWS PANEL — Yahoo Finance RSS via allorigins proxy
 // ═══════════════════════════════════════════════════════════════
@@ -6588,7 +6612,7 @@ async function init(){
 
   // Restore Schwab status
   const sid=localStorage.getItem('schwab_client_id');
-  const ssec=localStorage.getItem('schwab_client_secret');
+  const ssec=_loadKey('schwab_client_secret');
   if(sid)window._schwabId=sid;if(ssec)window._schwabSec=ssec;
   updateSchwabStatus();
 
@@ -6631,6 +6655,8 @@ async function init(){
 
       const _masterTick=async()=>{
         if(window._signalsBusy){addLog('debug','Timer','masterInterval ocupado — saltado');return;}
+        // Weekend gate: Vie 4PM → Lun 8AM ET — no hacer API calls
+        if(_isWeekendClosed()){addLog('debug','Timer','Weekend cerrado — masterTick pausado');return;}
         const _etM=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
         const _mM=_etM.getHours()*60+_etM.getMinutes(),_dM=_etM.getDay();
         const _isOpenM=_dM>=1&&_dM<=5&&_mM>=570&&_mM<960;
@@ -6676,7 +6702,7 @@ async function init(){
             addLog('debug','Timer','Tab visible — re-sync timers (3s delay)');
             if(window._priceInterval)clearInterval(window._priceInterval);
             setTimeout(()=>{
-              _masterTick(); // tick inmediato al volver
+              if(!_isWeekendClosed()) _masterTick(); // no disparar en weekend
               window._priceInterval=setInterval(_masterTick,10*60*1000);
             },3000);
           }
@@ -6691,7 +6717,7 @@ async function init(){
 
     // Delay rotation load to avoid rate limit burst on startup
     setTimeout(()=>checkMarketBlockMove(),8000);
-    // Futuros semáforo — arrancar 12s después para no competir con el burst inicial
+    // Futuros semáforo — 12s delay para no competir con burst inicial
     setTimeout(()=>updateFuturesSemaphore().catch(()=>{}),12000);
   }else{
     // No key — don't make any API calls
@@ -6705,6 +6731,7 @@ async function init(){
   // Token proactive refresh each 20min to keep session alive
   if(window._tokenInterval)clearInterval(window._tokenInterval);
   window._tokenInterval=setInterval(async()=>{
+    if(_isWeekendClosed())return; // No renovar token en fin de semana
     const tok=localStorage.getItem('schwab_access_token');
     const exp=parseInt(localStorage.getItem('schwab_token_expiry')||'0');
     if(tok&&exp&&Date.now()>exp-900000) await getSchwabToken(); // renovar si faltan <15min
@@ -6784,14 +6811,25 @@ async function init(){
   const _updateCountdownUI=()=>{
     const el=document.getElementById('refreshCountdown');
     if(!el)return;
+    if(_isWeekendClosed()){
+      el.textContent='⏸ Weekend';
+      el.title='Mercado cerrado Vie 4PM–Lun 8AM ET — countdown pausado';
+      el.style.background='rgba(176,191,212,.08)';
+      el.style.borderColor='rgba(176,191,212,.2)';
+      el.style.color='var(--text3)';
+      return;
+    }
+    el.style.background='rgba(0,209,122,.1)';
+    el.style.borderColor='rgba(0,209,122,.3)';
+    el.style.color='var(--green)';
     const m=Math.floor(_refreshCountdown/60),s=_refreshCountdown%60;
     el.textContent=`⟳ ${m}:${String(s).padStart(2,'0')}`;
     el.title=`Próxima actualización en ${m}m ${s}s`;
   };
-  // Exponer función de reset para que _masterTick la llame al ejecutar
   window._resetRefreshCountdown=()=>{_refreshCountdown=600;_updateCountdownUI();};
   _updateCountdownUI();
   window._refreshCountTimer=setInterval(()=>{
+    if(_isWeekendClosed()){_updateCountdownUI();return;} // Weekend: no decrementar
     _refreshCountdown--;
     if(_refreshCountdown<0)_refreshCountdown=600;
     _updateCountdownUI();
@@ -7098,101 +7136,68 @@ async function _pmPDF(id){
 // ── fin post-mortem ──
 
 // ═══════════════════════════════════════════════════════════════
-// FUTURES SEMAPHORE — /ES y /NQ como sesgo de mercado invisible
-// Sin tarjetas, sin paneles. Solo un pill compacto en el topbar.
-// Fuente: Schwab quotes API (misma conexión ya establecida).
-// Lógica: precio vs MA20 de los últimos 20 bars de 5min = sesión actual.
-// Actualiza cada 10 min junto al masterTick. Cache de 9 min para no
-// duplicar llamadas si buildSignals también corre cerca.
+// FUTURES SEMAPHORE — /ES y /NQ sesgo de mercado invisible
+// Sin tarjetas. Solo pill compacto en el topbar.
+// Usa Schwab /quotes (pricehistory NO soporta futuros).
+// Sesgo: precio actual vs closePrice anterior → bull/bear/neutral.
+// Actualiza cada 10min junto al masterTick. Cache 9min.
+// Visible en premarket, sesión regular y after-hours (futuros = 23h).
 // ═══════════════════════════════════════════════════════════════
 const _FUT_SYMBOLS=['/ES','/NQ'];
-const _futCache={}; // sym → {bias, price, prevClose, pct, ts}
+const _futCache={};
 
-// ── Schwab /quotes soporta futuros con /ES y /NQ (encodeURIComponent maneja el /)
-// No usar /pricehistory — Schwab NO provee histórico de barras para futuros.
-// Sesgo: precio vs cierre anterior del contrato (openPrice del quote de Schwab).
-// Umbral: >0.15% sobre prev = bull, <-0.15% = bear, medio = neutral.
 async function _fetchFuturesBias(){
   const token=await getSchwabToken();
   if(!token)return null;
-
-  // Una sola llamada con ambos símbolos — más eficiente
-  const cached=_FUT_SYMBOLS.every(s=>_futCache[s]&&Date.now()-_futCache[s].ts<9*60*1000);
-  if(cached){
+  // Cache válido 9min
+  if(_FUT_SYMBOLS.every(s=>_futCache[s]&&Date.now()-_futCache[s].ts<9*60*1000))
     return{'/ES':_futCache['/ES'],'/NQ':_futCache['/NQ']};
-  }
-
   try{
-    // Schwab quotes endpoint acepta múltiples símbolos separados por coma
-    // encodeURIComponent convierte '/' en '%2F' — necesario para futuros
+    // encodeURIComponent convierte '/' en '%2F' — requerido por Schwab para futuros
     const symsParam=_FUT_SYMBOLS.map(s=>encodeURIComponent(s)).join('%2C');
     const url=`${SCHWAB_API_BASE}/quotes?symbols=${symsParam}&fields=quote`;
     const r=await fetch(url,{
       headers:{'Authorization':'Bearer '+token},
       signal:AbortSignal.timeout(6000)
     });
-    if(!r.ok){
-      addLog('warn','Futuros',`quotes HTTP ${r.status}`);
-      return null;
-    }
+    if(!r.ok){addLog('warn','Futuros',`quotes HTTP ${r.status}`);return null;}
     const d=await r.json();
     const results={};
     for(const sym of _FUT_SYMBOLS){
-      // Schwab puede devolver la key con o sin la barra — buscar ambas
       const entry=d[sym]||d[sym.replace('/','')]||null;
-      const q=entry?.quote||entry?.fundamental||null;
+      const q=entry?.quote||null;
       if(!q)continue;
-      // lastPrice = precio actual; closePrice o openPrice = referencia anterior
       const last=q.lastPrice||q.mark||0;
       const prev=q.closePrice||q.openPrice||last;
       if(!last||last<=0)continue;
       const pct=prev>0?((last-prev)/prev*100):0;
-      // Sesgo basado en variación respecto al cierre anterior
       const bias=pct>0.15?'bull':pct<-0.15?'bear':'neutral';
       _futCache[sym]={bias,price:last,prev,pct,ts:Date.now()};
       results[sym]=_futCache[sym];
       addLog('debug','Futuros',`${sym} $${last.toFixed(2)} prev $${prev.toFixed(2)} → ${pct>=0?'+':''}${pct.toFixed(2)}% → ${bias}`);
     }
     return Object.keys(results).length===2?results:null;
-  }catch(e){
-    addLog('warn','Futuros',`_fetchFuturesBias: ${e.message}`);
-    return null;
-  }
+  }catch(e){addLog('warn','Futuros',`_fetchFuturesBias: ${e.message}`);return null;}
 }
 
-// Renderiza el pill en el topbar — compacto, sin tarjetas
-// Visible en premarket, sesión regular Y after-hours
 function _renderFuturesSemaphore(data){
   const el=document.getElementById('futuresSemaphore');
   if(!el)return;
-  if(!data||!data['/ES']||!data['/NQ']){
-    el.style.display='none';
-    return;
-  }
+  if(!data||!data['/ES']||!data['/NQ']){el.style.display='none';return;}
   const es=data['/ES'],nq=data['/NQ'];
   const bullCount=[es,nq].filter(f=>f.bias==='bull').length;
   const bearCount=[es,nq].filter(f=>f.bias==='bear').length;
-  let bgColor,borderColor,textColor,dot;
-  if(bullCount===2){
-    bgColor='rgba(0,209,122,.12)';borderColor='rgba(0,209,122,.35)';
-    textColor='var(--green)';dot='▲';
-  }else if(bearCount===2){
-    bgColor='rgba(255,77,109,.12)';borderColor='rgba(255,77,109,.35)';
-    textColor='var(--red)';dot='▼';
-  }else{
-    bgColor='rgba(255,194,52,.1)';borderColor='rgba(255,194,52,.3)';
-    textColor='var(--yellow)';dot='◆';
-  }
+  let bg,border,color,dot;
+  if(bullCount===2){bg='rgba(0,209,122,.12)';border='rgba(0,209,122,.35)';color='var(--green)';dot='▲';}
+  else if(bearCount===2){bg='rgba(255,77,109,.12)';border='rgba(255,77,109,.35)';color='var(--red)';dot='▼';}
+  else{bg='rgba(255,194,52,.1)';border='rgba(255,194,52,.3)';color='var(--yellow)';dot='◆';}
   const esPct=(es.pct>=0?'+':'')+es.pct.toFixed(2)+'%';
   const nqPct=(nq.pct>=0?'+':'')+nq.pct.toFixed(2)+'%';
-  el.style.cssText=`display:inline-flex;align-items:center;gap:5px;background:${bgColor};border-color:${borderColor};color:${textColor};font-family:var(--mono);font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap;cursor:default;border:1px solid ${borderColor};`;
+  el.style.cssText=`display:inline-flex;align-items:center;gap:5px;background:${bg};border:1px solid ${border};color:${color};font-family:var(--mono);font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap;cursor:default;`;
   el.title=`Sesgo futuros (vs cierre anterior)\n/ES $${es.price.toFixed(2)} → ${esPct}\n/NQ $${nq.price.toFixed(2)} → ${nqPct}\nFuente: Schwab quotes`;
   el.textContent=`${dot} ES ${esPct}  NQ ${nqPct}`;
 }
 
-// Punto de entrada — silencioso, no bloquea nada si Schwab no está conectado.
-// Se muestra en cualquier horario donde Schwab tenga token válido
-// (premarket, sesión regular, after-hours — futuros cotizan 23h)
 async function updateFuturesSemaphore(){
   try{
     const tok=localStorage.getItem('schwab_access_token');
@@ -7204,9 +7209,7 @@ async function updateFuturesSemaphore(){
     }
     const data=await _fetchFuturesBias();
     _renderFuturesSemaphore(data);
-  }catch(e){
-    addLog('debug','Futuros',`updateFuturesSemaphore: ${e.message}`);
-  }
+  }catch(e){addLog('debug','Futuros',`updateFuturesSemaphore: ${e.message}`);}
 }
 </script>
 <!-- ══════════════════════════════════════════════════════
@@ -7799,7 +7802,7 @@ async function updateFuturesSemaphore(){
       <button onclick="emergencyPinReset()"
         style="background:none;border:none;color:var(--text3);font-size:11px;
         cursor:pointer;text-decoration:underline;padding:4px 8px;">
-        ¿Olvidaste tu PIN? Resetear a 2122
+        ¿Olvidaste tu PIN? Contacta soporte para resetear
       </button>
     </div>
   </div>

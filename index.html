@@ -1228,19 +1228,6 @@ function isMarketHoliday(etDate){
   return MARKET_HOLIDAYS.has(`${y}-${m}-${d}`);
 }
 
-// ── Weekend closed: Viernes ≥ 4:00 PM ET → Lunes < 8:00 AM ET ───────────────
-// Durante este período el countdown se pausa y el masterTick no hace API calls.
-function _isWeekendClosed(){
-  const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
-  const day=et.getDay(); // 0=Dom,1=Lun,...,5=Vie,6=Sáb
-  const mins=et.getHours()*60+et.getMinutes();
-  if(day===5&&mins>=960)return true; // Viernes desde 4:00 PM
-  if(day===6)return true;            // Sábado completo
-  if(day===0)return true;            // Domingo completo
-  if(day===1&&mins<480)return true;  // Lunes antes de 8:00 AM
-  return false;
-}
-
 function tick(){
   const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
   document.getElementById('clockEl').textContent=et.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:true})+' ET';
@@ -1970,6 +1957,7 @@ async function _buildSignalsCore(){
         {ok:volActive15,  tf:'15m',text:`Volumen activo${volLabel}`},
         {ok:bbCompressed15,tf:'15m',text:`BB comprimido sin volatilidad (BBW ${lBBW15.toFixed(1)}% < 1.5%)`},
         {ok:_imanWindow,  tf:'15m',text:`Ventana apertura 9:30–10:00 AM ET`},
+        {ok:_hlPutOk,     tf:'H/D',text:_hlPutText(),_hlBanner:_hlPutWarnBanner},
       ]});
     }
     const pD_below=lH15<lLow15&&bbCompressed15&&lK15<25, pD_ret=lP15>lO15;
@@ -1981,6 +1969,7 @@ async function _buildSignalsCore(){
         {ok:volActive15,  tf:'15m',text:`Volumen activo${volLabel}`},
         {ok:bbCompressed15,tf:'15m',text:`BB comprimido sin volatilidad (BBW ${lBBW15.toFixed(1)}% < 1.5%)`},
         {ok:_imanWindow,  tf:'15m',text:`Ventana apertura 9:30–10:00 AM ET`},
+        {ok:_hlCallOk,    tf:'H/D',text:_hlCallText(),_hlBanner:_hlCallWarnBanner},
       ]});
     }
 
@@ -4454,9 +4443,9 @@ function _sendWebNotif(sym, type, code, pct, price){
 }
 
 // ── _claudeContextScan — escaneo de catalizadores antes de enviar Telegram ───
-// Llama a Claude con web_search para buscar noticias, earnings, macro del ticker.
-// Si no hay API key o falla, retorna '' y el Telegram sale normal sin el scan.
-// Dedup por sym+type+hora para no repetir el scan en cada tick.
+// Llama a Claude con web_search SOLO si detecta Earnings hoy/post-market o demanda millonaria.
+// Si ninguna condición aplica, retorna '' y el Telegram sale sin bloque de contexto.
+// Dedup por sym+tipo+hora para no repetir el scan en cada tick.
 const _scanCache={};
 async function _claudeContextScan(sym, type, code, price){
   const key=getAnthropicKey();
@@ -4467,36 +4456,20 @@ async function _claudeContextScan(sym, type, code, price){
   const scanKey=`${sym}_${type}_${et.toLocaleDateString('es-PR')}_${et.getHours()}`;
   if(_scanCache[scanKey]) return _scanCache[scanKey];
 
-  const dir=type==='call'?'ALCISTA (CALL)':'BAJISTA (PUT)';
-  const today=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
-  const todayStr=today.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
-  const prompt=`Eres un analista de mercado experto en catalizadores de precio. Analiza ${sym} con contexto de 3 días pasados y 3 días futuros.
+  const todayStr=et.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
 
-SEÑAL ACTIVA: ${sym} ${dir} a $${price} — Fecha: ${todayStr}
+  // Prompt ultra-focalizado: SOLO dos condiciones de alto impacto
+  const prompt=`Search for ${sym} today (${todayStr}) and answer ONLY these two questions:
 
-BUSCA Y ANALIZA:
+1. EARNINGS: Does ${sym} report earnings TODAY (before market, during market, or after market close today)?
+2. LAWSUIT: Is there a major lawsuit or legal settlement announced in the LAST 48 HOURS for ${sym} involving $500M or more?
 
-📅 ÚLTIMOS 3 DÍAS (pasado — "sell the news"):
-- Noticias recientes: earnings reportados, demandas, upgrades/downgrades, partnerships, contratos, FDA
-- ¿Ya ocurrió algún evento que el mercado ya descontó? (el movimiento puede estar agotado)
-
-📅 PRÓXIMOS 3 DÍAS (futuro — "buy the rumor"):
-- Earnings pendientes de ${sym} esta semana
-- Eventos macro próximos: FOMC, CPI, NFP, datos económicos que puedan mover el sector
-- Fechas de vencimiento de opciones, splits, dividendos anunciados
-- Conferencias o presentaciones del management programadas
-
-📊 MERCADO AHORA:
-- Dirección actual de S&P500, QQQ, DIA, IWM — ¿alinean con la señal ${dir}?
-
-Responde EXACTAMENTE en este formato (máximo 130 palabras):
-
-📰 PASADO (3d): [evento clave reciente o "Sin eventos relevantes" — ¿ya fue descontado?]
-🔮 FUTURO (3d): [próximo catalizador o "Sin eventos programados" — fecha si la conoces]
-📈 MERCADO: [índices vs señal — favorable/neutro/contrario]
-⚡ VEREDICTO: [REFUERZA / NEUTRAL / CONTRADICE] — [1 oración con la razón principal]
-
-Sin introducciones. Solo los 4 puntos.`;
+RULES:
+- If NEITHER condition is true → respond with exactly: NONE
+- If earnings TODAY → respond with exactly: EARNINGS [BMO/AMC/intraday] [brief detail, max 8 words]
+- If major lawsuit ($500M+) → respond with exactly: LAWSUIT [brief detail, max 8 words]
+- If both → list both, one per line
+- NO other information. NO market commentary. NO other news. ONLY these two conditions.`;
 
   try{
     const proxyUrl=(localStorage.getItem('proxy_url')||'').trim();
@@ -4510,25 +4483,31 @@ Sin introducciones. Solo los 4 puntos.`;
     }
     const resp=await fetch(endpoint,{
       method:'POST',headers,
-      signal:AbortSignal.timeout(15000), // 15s max — no bloquear el Telegram
+      signal:AbortSignal.timeout(15000),
       body:JSON.stringify({
         model:'claude-sonnet-4-6',
-        max_tokens:350,
+        max_tokens:120,
         tools:[{type:'web_search_20250305',name:'web_search'}],
         messages:[{role:'user',content:prompt}]
       })
     });
     if(!resp.ok) return '';
     const res=await resp.json();
-    // Extraer solo el bloque de texto final (después de los tool_use)
     const txt=res.content?.filter(b=>b.type==='text').map(b=>b.text).join('').trim()||'';
-    if(!txt) return '';
-    _scanCache[scanKey]=txt;
-    addLog('debug','Claude',`Context scan ${sym} completado`);
-    return txt;
+    // Si Claude respondió NONE o está vacío — no añadir nada al Telegram
+    if(!txt||txt.trim().toUpperCase()==='NONE'||txt.trim().startsWith('NONE')) return '';
+    // Formatear para Telegram: añadir emoji según tipo
+    const formatted=txt.split('\n').filter(l=>l.trim()).map(l=>{
+      if(l.startsWith('EARNINGS')) return `📅 *Earnings hoy* — ${l.replace('EARNINGS','').trim()}`;
+      if(l.startsWith('LAWSUIT'))  return `⚖️ *Demanda millonaria* — ${l.replace('LAWSUIT','').trim()}`;
+      return l;
+    }).join('\n');
+    _scanCache[scanKey]=formatted;
+    addLog('debug','Claude',`Context scan ${sym}: ${formatted}`);
+    return formatted;
   }catch(e){
     addLog('debug','Claude',`Context scan ${sym} omitido: ${e.message}`);
-    return ''; // fallo silencioso — el Telegram sale igual sin el scan
+    return '';
   }
 }
 
@@ -4546,16 +4525,18 @@ async function notifySignal(sym, code, name, type, pct, price, pctChange){
   // Si no hay API key o falla, contextBlock queda '' y el Telegram sale normal
   const contextBlock=await _claudeContextScan(sym, type, code, price).catch(()=>'');
 
-  // Aviso de nivel técnico (a 2%): CALL mira techos (LAST HIGH/ATH), PUT mira piso (LAST LOW)
+  // Aviso de nivel técnico — CALL: techo (LH/ATH), PUT: piso (LL)
+  // Umbral 2% — si está más lejos no es relevante para la entrada inmediata
   let levelWarn='';
   const lv=getLevels(sym);
   if(price&&lv){
+    const distPct=(t)=>t?((Math.abs(t-price)/t)*100).toFixed(2):null;
     const within=(t)=>t&&Math.abs(t-price)/t*100<=2;
     if(type==='call'){
-      if(within(lv.hi)) levelWarn+='\n⬆️ *LAST HIGH POSIBLE* ($'+lv.hi.toFixed(2)+')';
-      if(within(lv.ath))levelWarn+='\n⬆️ *ATH POSIBLE* ($'+lv.ath.toFixed(2)+')';
+      if(within(lv.hi))  levelWarn+=`\n⚠️ *Próx a LH* $${lv.hi.toFixed(2)} (a ${distPct(lv.hi)}% — posible techo)`;
+      if(within(lv.ath)) levelWarn+=`\n⚠️ *Próx a ATH* $${lv.ath.toFixed(2)} (a ${distPct(lv.ath)}% — resistencia extrema)`;
     }else{
-      if(within(lv.lo)) levelWarn+='\n⬇️ *LAST LOW POSIBLE* ($'+lv.lo.toFixed(2)+')';
+      if(within(lv.lo))  levelWarn+=`\n⚠️ *Próx a LL* $${lv.lo.toFixed(2)} (a ${distPct(lv.lo)}% — posible piso)`;
     }
   }
   // FIX 3: precio siempre viene de Finnhub cuando llegamos aquí
@@ -4569,7 +4550,7 @@ async function notifySignal(sym, code, name, type, pct, price, pctChange){
     `🎯 Confianza: *${pct}%*
 `+
     `🕐 ${time} ET`+levelWarn+
-    (contextBlock?`\n\n━━━━━━━━━━━━━━━━━━━━\n🔍 *CONTEXTO DE MERCADO*\n${contextBlock}`:'')+
+    (contextBlock?`\n\n━━━━━━━━━━━━━━━━━━━━\n🚨 *ALERTA CATALÍTICA*\n${contextBlock}`:'')+
     `\n\n`+
     `_TradeDesk Pro — jonrd09.github.io/tradedesk/_`;
   await sendTelegram(msg, tok, chat);
@@ -6638,11 +6619,6 @@ async function init(){
 
       const _masterTick=async()=>{
         if(window._signalsBusy){addLog('debug','Timer','masterInterval ocupado — saltado');return;}
-        // Weekend gate: Vie 4PM → Lun 8AM ET — no hacer API calls
-        if(_isWeekendClosed()){
-          addLog('debug','Timer','Weekend cerrado — masterTick pausado');
-          return;
-        }
         const _etM=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
         const _mM=_etM.getHours()*60+_etM.getMinutes(),_dM=_etM.getDay();
         const _isOpenM=_dM>=1&&_dM<=5&&_mM>=570&&_mM<960;
@@ -6687,8 +6663,7 @@ async function init(){
             addLog('debug','Timer','Tab visible — re-sync timers (3s delay)');
             if(window._priceInterval)clearInterval(window._priceInterval);
             setTimeout(()=>{
-              // Weekend: no disparar tick al volver al frente — solo re-armar el interval
-              if(!_isWeekendClosed()) _masterTick();
+              _masterTick(); // tick inmediato al volver
               window._priceInterval=setInterval(_masterTick,10*60*1000);
             },3000);
           }
@@ -6715,8 +6690,6 @@ async function init(){
   // Token proactive refresh each 20min to keep session alive
   if(window._tokenInterval)clearInterval(window._tokenInterval);
   window._tokenInterval=setInterval(async()=>{
-    // Weekend gate: no renovar token cuando el mercado está cerrado todo el fin de semana
-    if(_isWeekendClosed())return;
     const tok=localStorage.getItem('schwab_access_token');
     const exp=parseInt(localStorage.getItem('schwab_token_expiry')||'0');
     if(tok&&exp&&Date.now()>exp-900000) await getSchwabToken(); // renovar si faltan <15min
@@ -6796,19 +6769,6 @@ async function init(){
   const _updateCountdownUI=()=>{
     const el=document.getElementById('refreshCountdown');
     if(!el)return;
-    // Weekend: congelar el botón — no tiene sentido correr el countdown sin mercado
-    if(_isWeekendClosed()){
-      el.textContent='⏸ Weekend';
-      el.title='Mercado cerrado Vie 4PM–Lun 8AM ET — countdown pausado';
-      el.style.background='rgba(176,191,212,.08)';
-      el.style.borderColor='rgba(176,191,212,.2)';
-      el.style.color='var(--text3)';
-      return;
-    }
-    // Restablecer estilo normal al volver al horario activo
-    el.style.background='rgba(0,209,122,.1)';
-    el.style.borderColor='rgba(0,209,122,.3)';
-    el.style.color='var(--green)';
     const m=Math.floor(_refreshCountdown/60),s=_refreshCountdown%60;
     el.textContent=`⟳ ${m}:${String(s).padStart(2,'0')}`;
     el.title=`Próxima actualización en ${m}m ${s}s`;
@@ -6817,8 +6777,6 @@ async function init(){
   window._resetRefreshCountdown=()=>{_refreshCountdown=600;_updateCountdownUI();};
   _updateCountdownUI();
   window._refreshCountTimer=setInterval(()=>{
-    // Weekend: congelar el countdown — no decrementar
-    if(_isWeekendClosed()){_updateCountdownUI();return;}
     _refreshCountdown--;
     if(_refreshCountdown<0)_refreshCountdown=600;
     _updateCountdownUI();

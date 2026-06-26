@@ -6649,6 +6649,8 @@ async function init(){
           const _hasKey=getKey()&&getKey().length>8;
           if(_hasKey){await loadLivePrices();}else{await buildSignals();}
           await checkMarketBlockMove();
+          // Sincronizar el countdown visual con el tick real
+          if(window._resetRefreshCountdown) window._resetRefreshCountdown();
         }
       };
 
@@ -6777,6 +6779,8 @@ async function init(){
     el.textContent=`⟳ ${m}:${String(s).padStart(2,'0')}`;
     el.title=`Próxima actualización en ${m}m ${s}s`;
   };
+  // Exponer función de reset para que _masterTick la llame al ejecutar
+  window._resetRefreshCountdown=()=>{_refreshCountdown=600;_updateCountdownUI();};
   _updateCountdownUI();
   window._refreshCountTimer=setInterval(()=>{
     _refreshCountdown--;

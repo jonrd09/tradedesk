@@ -389,7 +389,7 @@ function loadTickerConfig(){
     const m=JSON.parse(localStorage.getItem('cfg_main_tickers')||'null');
     const s=JSON.parse(localStorage.getItem('cfg_signal_tickers')||'null');
     _mainTickers=Array.isArray(m)&&m.length===3?m:[...TICKER_DEFAULTS.main];
-    _signalTickers=Array.isArray(s)&&s.length>=3&&s.length<=6?s:[...TICKER_DEFAULTS.signal];
+    _signalTickers=Array.isArray(s)&&s.length>=1&&s.length<=15?s:[...TICKER_DEFAULTS.signal];
   }catch(e){
     _mainTickers=[...TICKER_DEFAULTS.main];
     _signalTickers=[...TICKER_DEFAULTS.signal];
@@ -7528,7 +7528,7 @@ async function _pmPDF(id){
         <div style="border-top:1px solid var(--border);margin:16px 0;"></div>
 
         <div class="cfg-section-title">Señales adicionales (hasta 3 más)</div>
-        <div style="font-size:11px;color:var(--text3);margin-bottom:12px;">Se suman a los 3 del panel para el monitoreo de señales y noticias. Máximo 6 en total.</div>
+        <div style="font-size:11px;color:var(--text3);margin-bottom:12px;">Se suman a los 3 del panel para el monitoreo de señales y noticias. Máximo 15 en total.</div>
         <div id="cfg-extraTickers" style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px;"></div>
         <button id="cfg-addExtraBtn" onclick="cfgAddExtraTicker()"
           style="background:rgba(61,139,255,.15);border:1px solid rgba(61,139,255,.4);color:var(--blue);border-radius:var(--r);padding:7px 14px;font-size:12px;font-weight:700;cursor:pointer;">

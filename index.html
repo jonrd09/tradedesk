@@ -2235,12 +2235,16 @@ async function _buildSignalsCore(){
       return s;
     })
     // Expirar señales con más de 1 hora y marcarlas como bloqueadas en sessionStorage
+    // Señales se quedan TODO EL DÍA hasta las 4:00 PM ET o hasta que el trader las cierre con X
+    // Solo expiran si: mercado cerrado (>=4PM) O señal tiene más de 4 horas
     .filter(s=>{
       if(_debugMode||s.isSetup)return true;
       const _dk=`${s.sym}_${s.code}_${s.type}`;
       const age=Date.now()-s._detectedAt;
-      if(age>=3600000){
-        // Marcar como expirada — no volverá a aparecer en el panel esta sesión
+      const _etExp=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+      const _mExp=_etExp.getHours()*60+_etExp.getMinutes();
+      const _marketClosed=_mExp>=960; // 4:00 PM ET
+      if(_marketClosed||(age>=4*3600000)){ // 4 horas max o mercado cerrado
         try{sessionStorage.setItem(`sig_expired_${_dk}`,'1');}catch(e){}
         delete _sigDetectedAt[_dk];
         delete _sigDetectedAt[_dk+'_timeET'];
@@ -2268,9 +2272,12 @@ async function _buildSignalsCore(){
 
   let html=[];
   // Header string — rendered separately
+  // Contar señales visibles = activas + pinned que siguen en el DOM
+  const _pinnedCount=Object.keys(_pinnedSignals).length;
+  const _displayCount=Math.max(active.length, _pinnedCount);
   const _headerHtml=`<div style="text-align:center;padding:10px 0;border-bottom:1px solid var(--border);margin-bottom:12px;">
     <div style="font-size:12px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:4px;">SEÑALES ACTIVAS — BB BREAKOUT 15MIN</div>
-    <div style="font-family:var(--mono);font-size:32px;font-weight:700;color:#fff;">${active.length}</div>
+    <div style="font-family:var(--mono);font-size:32px;font-weight:700;color:#fff;">${_displayCount}</div>
     <div style="font-size:12px;color:${dirCol};margin-top:4px;">${dir}</div>
   </div>`;
 
@@ -6617,23 +6624,30 @@ async function init(){
       if(window._sigInterval)clearInterval(window._sigInterval);
 
       const _masterTick=async()=>{
-        // Guard: si buildSignals ya está corriendo, saltar este tick
-        if(window._signalsBusy){
-          addLog('debug','Timer','masterInterval: buildSignals ocupado — tick saltado');
-          return;
-        }
+        if(window._signalsBusy){addLog('debug','Timer','masterInterval ocupado — saltado');return;}
         const _etM=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
         const _mM=_etM.getHours()*60+_etM.getMinutes(),_dM=_etM.getDay();
         const _isOpenM=_dM>=1&&_dM<=5&&_mM>=570&&_mM<960;
         const _isPreM=_dM>=1&&_dM<=5&&_mM>=515&&_mM<570;
+        const _isClosedM=_dM>=1&&_dM<=5&&_mM>=960; // después de 4:00 PM ET
+        // 4:00 PM — limpiar panel de señales automáticamente
+        if(_isClosedM){
+          const _area=document.getElementById('signalArea');
+          if(_area&&_area.querySelectorAll('[data-sigkey]').length>0){
+            _area.querySelectorAll('[data-sigkey]').forEach(el=>{
+              el.style.transition='opacity .5s';el.style.opacity='0';
+              setTimeout(()=>el.remove(),600);
+            });
+            Object.keys(_pinnedSignals).forEach(k=>delete _pinnedSignals[k]);
+            Object.keys(_sigDetectedAt).forEach(k=>delete _sigDetectedAt[k]);
+            addLog('debug','Timer','4:00 PM — panel de señales limpiado automáticamente');
+          }
+          return;
+        }
         if(_isOpenM||_isPreM){
           Object.keys(sessionStorage).filter(k=>k.startsWith('tg_sent_setup_')).forEach(k=>sessionStorage.removeItem(k));
           const _hasKey=getKey()&&getKey().length>8;
-          if(_hasKey){
-            await loadLivePrices(); // loadLivePrices llama buildSignals al terminar
-          }else{
-            await buildSignals();
-          }
+          if(_hasKey){await loadLivePrices();}else{await buildSignals();}
           await checkMarketBlockMove();
         }
       };

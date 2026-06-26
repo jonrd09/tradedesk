@@ -7199,17 +7199,36 @@ function _renderFuturesSemaphore(data){
 }
 
 async function updateFuturesSemaphore(){
+  const el=document.getElementById('futuresSemaphore');
+  if(!el)return;
+  const _showOffline=(reason)=>{
+    el.style.cssText='display:inline-flex;align-items:center;gap:4px;background:rgba(176,191,212,.07);border:1px solid rgba(176,191,212,.18);color:var(--text3,#6b7a8d);font-family:var(--mono);font-size:11px;font-weight:600;padding:3px 10px;border-radius:20px;white-space:nowrap;cursor:default;opacity:.7;';
+    el.title=reason;
+    el.textContent='\u25cc ES —  NQ —';
+  };
   try{
-    const tok=localStorage.getItem('schwab_access_token');
-    const exp=parseInt(localStorage.getItem('schwab_token_expiry')||'0');
-    if(!tok||Date.now()>exp-60000){
-      const el=document.getElementById('futuresSemaphore');
-      if(el)el.style.display='none';
+    // Si Schwab no está configurado — ocultar completamente
+    const hasCreds=!!(localStorage.getItem('schwab_client_id'));
+    if(!hasCreds){el.style.display='none';return;}
+
+    // getSchwabToken() intenta refresh automático si el token expiró
+    const token=await getSchwabToken();
+    if(!token){
+      // Fin de semana o token no renovable — mostrar pill offline
+      _showOffline('Futuros /ES /NQ — Schwab sin sesión activa\nEl token se renueva automáticamente el lunes al abrir la plataforma.');
       return;
     }
+    // Token válido → fetch y render
     const data=await _fetchFuturesBias();
-    _renderFuturesSemaphore(data);
-  }catch(e){addLog('debug','Futuros',`updateFuturesSemaphore: ${e.message}`);}
+    if(data){
+      _renderFuturesSemaphore(data);
+    }else{
+      _showOffline('Futuros /ES /NQ — datos no disponibles ahora\nSchwab conectado. Se reintentará en el próximo ciclo.');
+    }
+  }catch(e){
+    addLog('debug','Futuros',`updateFuturesSemaphore: ${e.message}`);
+    try{_showOffline(`Futuros — error: ${e.message}`);}catch(_){}
+  }
 }
 </script>
 <!-- ══════════════════════════════════════════════════════

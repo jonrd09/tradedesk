@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>LevETF Dashboard v2 — Live</title>
+<title>LevETF Dashboard v3 — Live</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 :root{
@@ -103,18 +103,15 @@ body.window-active .window-banner{animation:pulse-banner 2s infinite;}
 .ctitle .rbtn{margin-left:auto;background:none;border:none;color:var(--muted2);cursor:pointer;font-size:15px;padding:2px;transition:color .15s;}
 .ctitle .rbtn:hover{color:var(--green);}
 
-/* ── HEAT MAP ── */
-.heatmap-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:20px;}
-@media(max-width:700px){.heatmap-grid{grid-template-columns:repeat(3,1fr);}}
-@media(max-width:420px){.heatmap-grid{grid-template-columns:repeat(2,1fr);}}
-.hm-cell{border-radius:10px;padding:10px 8px;text-align:center;cursor:pointer;transition:all .2s;border:2px solid transparent;position:relative;overflow:hidden;}
-.hm-cell:hover{transform:scale(1.04);box-shadow:var(--shadow-md);}
-.hm-cell.alert-ring{animation:ring-pulse 1s ease-in-out 3;}
-@keyframes ring-pulse{0%,100%{box-shadow:0 0 0 0 rgba(10,140,94,.5)}50%{box-shadow:0 0 0 6px rgba(10,140,94,.15)}}
-.hm-sym{font-size:13px;font-weight:700;font-family:var(--mono);}
-.hm-pct{font-size:15px;font-weight:700;font-family:var(--mono);margin-top:2px;}
-.hm-price{font-size:10px;font-family:var(--mono);opacity:.8;margin-top:1px;}
-.hm-badge{position:absolute;top:4px;right:4px;font-size:8px;font-weight:700;font-family:var(--mono);padding:1px 4px;border-radius:8px;background:rgba(255,255,255,.3);}
+/* ── HOT BADGE on qcard ── */
+.hot-banner{background:linear-gradient(90deg,#064e35,#0a8c5e);color:#fff;border-radius:8px 8px 0 0;padding:5px 12px;font-size:11px;font-family:var(--mono);font-weight:700;display:flex;align-items:center;gap:6px;letter-spacing:.03em;margin:-13px -13px 10px -13px;}
+.hot-banner .hot-reason{font-size:10px;font-weight:400;opacity:.85;margin-left:4px;}
+.hot-score-bar{height:4px;border-radius:0;margin:-10px -13px 10px -13px;background:var(--bg4);overflow:hidden;}
+.hot-score-fill{height:100%;background:linear-gradient(90deg,#1aad76,#0a8c5e);transition:width .6s;}
+@keyframes hot-glow{0%,100%{box-shadow:var(--shadow)}50%{box-shadow:0 0 0 3px rgba(10,140,94,0.25),var(--shadow-md)}}
+@keyframes hot-glow-bear{0%,100%{box-shadow:var(--shadow)}50%{box-shadow:0 0 0 3px rgba(214,48,49,0.25),var(--shadow-md)}}
+.qcard.is-hot{border-color:var(--green);animation:hot-glow 2.5s ease-in-out infinite;}
+.qcard.is-hot-bear{border-color:var(--red);animation:hot-glow-bear 2.5s ease-in-out infinite;}
 
 /* ── DUAL COL ── */
 .dual-col{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:20px;}
@@ -245,7 +242,7 @@ body.window-active .window-banner{animation:pulse-banner 2s infinite;}
 <div class="hdr">
   <div class="hdr-l">
     <div class="logo"><svg viewBox="0 0 16 16" fill="none"><polyline points="1,12 5,7 9,10 15,3" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><polyline points="11,3 15,3 15,7" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-    <div><div class="hdr-title">LevETF Dashboard v2</div><div class="hdr-sub">WebSocket · Risk · Journal · Alertas</div></div>
+    <div><div class="hdr-title">LevETF Dashboard v3</div><div class="hdr-sub">HOT score · TOP PICK · Journal · Alertas</div></div>
   </div>
   <div class="hdr-r">
     <span class="mkt-badge closed" id="mkt-badge">—</span>
@@ -294,21 +291,20 @@ body.window-active .window-banner{animation:pulse-banner 2s infinite;}
 ════════════════════════════════════ -->
 <div id="p-dashboard" class="panel act">
 
-  <!-- HEAT MAP -->
-  <div style="margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+<!-- TOP PICK banner -->
+<div id="top-pick-banner" style="display:none;margin-bottom:14px;background:linear-gradient(135deg,#064e35,#0a7a52);border-radius:12px;padding:14px 18px;color:#fff;">
+  <div style="font-size:10px;font-family:var(--mono);font-weight:600;letter-spacing:.1em;opacity:.7;margin-bottom:4px;">🏆 TOP PICK DEL MOMENTO</div>
+  <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+    <div id="tp-sym" style="font-size:26px;font-weight:700;font-family:var(--mono);"></div>
     <div>
-      <div style="font-size:11px;font-family:var(--mono);color:var(--green);font-weight:600;text-transform:uppercase;letter-spacing:.08em;">Mapa de calor · Todos los ETFs</div>
-      <div style="font-size:12px;color:var(--muted);margin-top:2px;">Color = intensidad del movimiento · Verde &gt;2% = ALERTA activa</div>
+      <div id="tp-price" style="font-size:16px;font-weight:700;font-family:var(--mono);"></div>
+      <div id="tp-reason" style="font-size:11px;opacity:.85;margin-top:2px;line-height:1.5;"></div>
     </div>
-    <div style="display:flex;align-items:center;gap:6px;font-size:10px;font-family:var(--mono);color:var(--muted);">
-      <span style="background:#d63031;width:10px;height:10px;border-radius:2px;display:inline-block;"></span>Bajando
-      <span style="background:var(--bg4);width:10px;height:10px;border-radius:2px;display:inline-block;"></span>Plano
-      <span style="background:#0a8c5e;width:10px;height:10px;border-radius:2px;display:inline-block;"></span>Subiendo
-    </div>
+    <button onclick="selETF(document.getElementById('tp-sym').textContent.trim())" style="margin-left:auto;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);border-radius:8px;color:#fff;font-size:12px;font-weight:600;padding:7px 14px;cursor:pointer;font-family:var(--font);">Ver gráfico →</button>
   </div>
-  <div class="heatmap-grid" id="heatmap"></div>
+</div>
 
-  <!-- DUAL COLUMNS -->
+<!-- DUAL COLUMNS -->
   <div class="dual-col">
     <div class="col-block">
       <div class="col-header bull-hdr">
@@ -347,7 +343,7 @@ body.window-active .window-banner{animation:pulse-banner 2s infinite;}
     </div>
   </div>
 
-  <div class="disc"><strong>v2:</strong> WebSocket Finnhub (real-time) · VWAP intraday · Heat map · Alertas browser · Contexto SPY/QQQ/VIX · Ordenado por momentum compuesto.</div>
+  <div class="disc"><strong>v3:</strong> HOT score compuesto (% día + señal técnica + momentum + urgencia) · TOP PICK automático · Sin heat map · Badges RSI + señal en cada tarjeta · Cache técnico en background · Bug calcRisk corregido.</div>
 </div>
 
 <!-- ════════════════════════════════════
@@ -668,7 +664,6 @@ function openWS(){
         const dp=((price-prev.pc)/prev.pc)*100;
         liveQ[sym]={...prev,c:price,dp};
         updateQCardLive(sym,price,dp);
-        updateHeatCell(sym,price,dp);
         checkAlertThreshold(sym,dp);
         if(curSel===sym) updateDetPrice(sym,price,dp);
       });
@@ -793,14 +788,162 @@ function calcVWAP(candles){
   });
   return cumV>0?cumPV/cumV:null;
 }
-function calcMomentumScore(sym){
+/* ══════════════════════════════════════
+   HOT SCORE ENGINE — algoritmo compuesto
+   Regla base: HOT = el ETF está SUBIENDO (dp > 0)
+   — BULL (TQQQ/UPRO/SSO/etc):  sube cuando mercado sube
+   — BEAR (SQQQ/SPXU/SDS/etc):  sube cuando mercado baja
+   En ambos casos dp>0 = oportunidad. La lógica es simétrica.
+
+   Criterios (100 pts total):
+   1. % del día          (40 pts) — movimiento real de precio
+   2. Señal técnica       (30 pts) — MAs+RSI+MACD ajustados por tipo
+   3. Velocidad intraday  (20 pts) — aceleración entre ticks
+   4. Urgencia al umbral  (10 pts) — cercanía al 2%
+   HOT = score >= 50 AND dp > 0
+══════════════════════════════════════ */
+let techCache={}; // {sym: {sig, rsi, macd, atr, ts}}
+
+// Determinar si un símbolo es inverso (BEAR)
+function isBearETF(sym){ return !!BEAR.find(e=>e.t===sym); }
+
+function calcHotScore(sym){
   const q=liveQ[sym];
-  if(!q||q.dp===undefined)return 0;
+  if(!q||q.dp===undefined) return {score:0,reasons:[],hot:false,dp:0};
   const dp=q.dp??0;
-  // Score = % dia + bonus si supera umbral + bonus si subió en última actualización
-  const prev=prevDP[sym]??0;
+  const prev=prevDP[sym]??dp;
   const velocity=dp-prev;
-  return dp*10 + (dp>=THRESHOLD?20:0) + velocity*5;
+  const isBear=isBearETF(sym);
+  let score=0;
+  const reasons=[];
+
+  // ── REGLA CERO: solo positivos son HOT ───────
+  // Un ETF bajando no es oportunidad de entrada, es riesgo
+  if(dp<=0) return {score:0,reasons:[],hot:false,dp};
+
+  // ── 1. % DEL DÍA (0-40 pts) ──────────────────
+  // Escala suavizada: 0%=0, 1%=15, 2%=28, 3%=36, 4%+=40
+  // Aplica igual para BULL y BEAR — ambos necesitan subir para ser HOT
+  const dpScore=Math.min(
+    dp<1  ? dp*15 :
+    dp<2  ? 15+(dp-1)*13 :
+    dp<3  ? 28+(dp-2)*8  :
+            36+(dp-3)*4,
+    40
+  );
+  score+=dpScore;
+  if(dp>=2)       reasons.push(`+${dp.toFixed(2)}% hoy 🔥`);
+  else if(dp>=1)  reasons.push(`+${dp.toFixed(2)}% hoy`);
+  else            reasons.push(`+${dp.toFixed(2)}%`);
+
+  // ── 2. SEÑAL TÉCNICA (0-30 pts) ───────────────
+  // Para BULL: señal BUY = precio sobre MAs = alcista = bueno
+  // Para BEAR: señal SELL en el mercado = BEAR sube = bueno
+  //   → para inversos invertimos: si computeSignal devuelve 'sell', es HOT para el BEAR
+  const tc=techCache[sym];
+  if(tc){
+    const sigGood = isBear ? (tc.sig==='sell') : (tc.sig==='buy');
+    const sigOk   = tc.sig==='neutral';
+    if(sigGood){
+      score+=30;
+      reasons.push(isBear ? 'mercado bajista ✓' : 'señal técnica COMPRA');
+    } else if(sigOk){
+      score+=12;
+    }
+    // RSI: para BULL zona limpia = 45-65 (no sobrecomprado)
+    // Para BEAR: RSI bajo (30-55) en el BEAR ETF = aún tiene recorrido
+    if(tc.rsi!==null){
+      const rsiOk = isBear
+        ? (tc.rsi>=30&&tc.rsi<=60)   // bear ETF con RSI bajo = sigue subiendo
+        : (tc.rsi>=45&&tc.rsi<=65);  // bull ETF con RSI limpio
+      const rsiLev = isBear
+        ? (tc.rsi>60&&tc.rsi<=70)
+        : (tc.rsi>65&&tc.rsi<=75);
+      if(rsiOk){score+=5;reasons.push(`RSI ${tc.rsi.toFixed(0)} ✓`);}
+      else if(rsiLev){score+=2;}
+    }
+    // MACD histograma: positivo = momentum al alza del propio ETF
+    // Aplica igual para BULL y BEAR (ambos necesitan MACD↑ propio)
+    if(tc.macd&&tc.macd.hist>0){score+=3;reasons.push('MACD↑');}
+  }
+
+  // ── 3. VELOCIDAD INTRADAY (0-20 pts) ─────────
+  // Igual para ambos: velocidad positiva = acelerando
+  if(velocity>0.05){
+    score+=Math.min(velocity*40,20);
+    reasons.push('acelerando ↗');
+  } else if(velocity>0){
+    score+=Math.min(velocity*20,10);
+  }
+
+  // ── 4. URGENCIA — cercanía al umbral (0-10 pts)
+  if(dp>=THRESHOLD){
+    score+=10;
+  } else {
+    const dist=THRESHOLD-dp;
+    if(dist<0.5){score+=8;reasons.push(`cerca del ${THRESHOLD}%`);}
+    else if(dist<1){score+=4;}
+  }
+
+  const finalScore=Math.round(Math.min(score,100));
+  const hot=finalScore>=50;
+  return {score:finalScore,reasons,hot,dp};
+}
+
+// Caché técnica: calcula en background respetando la dirección del ETF
+async function buildTechCache(){
+  for(const e of ALL){
+    try{
+      const hist=await getHistory(e.t,100);
+      if(!hist||hist.length<30){await new Promise(r=>setTimeout(r,80));continue;}
+      const closes=hist.map(x=>x.c);
+      const price=liveQ[e.t]?.c??closes[closes.length-1];
+      const ma20=calcSMA(closes,20),ma40=calcSMA(closes,40);
+      const ma100=calcSMA(closes,100),ma200=calcSMA(closes,200);
+      const rsi=calcRSI(closes,14);
+      const macd=calcMACD(closes);
+      const atr=calcATR(hist,5);
+      // computeSignal usa la misma lógica (precio vs MAs etc.)
+      // La interpretación correcta para BEAR la hace calcHotScore
+      const sig=computeSignal(price,ma20,ma40,ma100,ma200,rsi,macd);
+      techCache[e.t]={sig,rsi,macd,atr,ma20,ma40,ma100,ma200,ts:Date.now()};
+    }catch(ex){}
+    await new Promise(r=>setTimeout(r,120));
+  }
+  buildDualCols();
+  updateTopPick();
+}
+
+function updateTopPick(){
+  // Mejor BULL y mejor BEAR por separado
+  let bestBull=null,bestBear=null,bsB=0,bsBr=0;
+  BULL.forEach(e=>{
+    const r=calcHotScore(e.t);
+    if(r.score>bsB&&r.hot&&liveQ[e.t]?.c){bsB=r.score;bestBull={sym:e.t,...r};}
+  });
+  BEAR.forEach(e=>{
+    const r=calcHotScore(e.t);
+    if(r.score>bsBr&&r.hot&&liveQ[e.t]?.c){bsBr=r.score;bestBear={sym:e.t,...r};}
+  });
+  const banner=document.getElementById('top-pick-banner');
+  if(!banner) return;
+  const best=bsB>=bsBr?bestBull:bestBear;
+  const second=bsB>=bsBr?bestBear:bestBull;
+  if(!best){banner.style.display='none';return;}
+  banner.style.display='block';
+  const qB=liveQ[best.sym];
+  const isBear=isBearETF(best.sym);
+  document.getElementById('tp-sym').textContent=best.sym;
+  document.getElementById('tp-sym').style.color=isBear?'#fca5a5':'#fff';
+  document.getElementById('tp-price').textContent=
+    qB?`$${qB.c.toFixed(2)}  +${best.dp.toFixed(2)}%`:'';
+  const secondStr=second?` · 2do: ${second.sym} +${second.dp.toFixed(2)}% (${second.score}/100)`:'';
+  document.getElementById('tp-reason').textContent=
+    `Score ${best.score}/100 · ${best.reasons.slice(0,2).join(' · ')}${secondStr}`;
+}
+
+function calcMomentumScore(sym){
+  return calcHotScore(sym).score;
 }
 function computeSignal(price,ma20,ma50,ma100,ma200,rsi,macdObj){
   let score=0,total=0;
@@ -845,17 +988,12 @@ function checkAlertThreshold(sym,dp){
 }
 function fireAlert(sym,dp){
   playAlertSound();
-  showToast(`🟢 ${sym} +${dp.toFixed(2)}%`,`¡Superó el umbral de +${THRESHOLD}% — ventana activa!`,true);
-  // Resaltar tarjeta
+  showToast(`🔥 ${sym} +${dp.toFixed(2)}%`,`¡Superó +${THRESHOLD}% — revisa ahora!`,true);
   const card=document.getElementById('qc-'+sym);
   if(card){card.classList.add('alert-flash');setTimeout(()=>card.classList.remove('alert-flash'),8000);}
-  // Resaltar celda heat map
-  const cell=document.getElementById('hm-'+sym);
-  if(cell){cell.classList.add('alert-ring');setTimeout(()=>cell.classList.remove('alert-ring'),6000);}
-  // Notificación nativa
   if(alertsEnabled&&'Notification' in window&&Notification.permission==='granted'){
-    new Notification(`LevETF: ${sym} +${dp.toFixed(2)}%`,{
-      body:`¡Superó +${THRESHOLD}% en la ventana 9:30-10:30am!`,
+    new Notification(`LevETF 🔥 ${sym} +${dp.toFixed(2)}%`,{
+      body:`¡Superó +${THRESHOLD}% — ventana 9:30-10:30am!`,
       icon:'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" fill="%230a8c5e" rx="7"/></svg>'
     });
   }
@@ -938,25 +1076,29 @@ async function afterConnect(){
   renderJournalTable();
   // Cargar precios iniciales via REST, luego abrir WS
   await initialRestFetch();
-  buildHeatMap();
   buildDualCols();
+  updateTopPick();
   await loadContextPrices();
   openWS();
-  // visibilitychange: reconectar WS al volver
+  // Calcular cache técnico en background (no bloquea UI)
+  setTimeout(()=>buildTechCache(),2000);
+  // visibilitychange
   document.addEventListener('visibilitychange',()=>{
     if(!document.hidden&&connected){
       if(!wsConn||wsConn.readyState===WebSocket.CLOSED) openWS();
-      else if(wsConn.readyState!==WebSocket.OPEN){initialRestFetch().then(()=>{buildDualCols();});}
+      else if(wsConn.readyState!==WebSocket.OPEN){initialRestFetch().then(()=>{buildDualCols();updateTopPick();});}
     }
   });
   // Fallback REST cada 60s si WS caído
   setInterval(()=>{
     if(connected&&(!wsConn||wsConn.readyState!==WebSocket.OPEN)){
-      initialRestFetch().then(()=>{buildDualCols();buildHeatMap();});
+      initialRestFetch().then(()=>{buildDualCols();updateTopPick();});
     }
     updateMarketBadge();
     updateJournalPnL();
   },60000);
+  // Refrescar cache técnico cada 15 min
+  setInterval(()=>{if(connected)buildTechCache();},900000);
 }
 
 async function initialRestFetch(){
@@ -995,49 +1137,7 @@ function tick(){
 }
 
 /* ══════════════════════════════════════
-   HEAT MAP (FEATURE NUEVA)
-══════════════════════════════════════ */
-function buildHeatMap(){
-  const grid=document.getElementById('heatmap');
-  grid.innerHTML=ALL.map(e=>{
-    const q=liveQ[e.t];
-    const dp=q?.dp??0;
-    const price=q?.c??0;
-    const cellStyle=heatCellStyle(dp);
-    const aboveThreshold=dp>=THRESHOLD;
-    return `<div class="hm-cell" id="hm-${esc(e.t)}" style="${cellStyle}" onclick="selETF('${esc(e.t)}')">
-      ${aboveThreshold?'<div class="hm-badge">🔥 +'+dp.toFixed(1)+'%</div>':''}
-      <div class="hm-sym" style="color:${dp>0.5?'#fff':dp<-0.5?'#fff':'var(--text)'};">${esc(e.t)}</div>
-      <div class="hm-pct" style="color:${dp>0.5?'#fff':dp<-0.5?'#fff':'var(--muted)'};">${dp>=0?'+':''}${price?dp.toFixed(2)+'%':'—'}</div>
-      <div class="hm-price" style="color:${dp>0.5?'rgba(255,255,255,0.7)':dp<-0.5?'rgba(255,255,255,0.7)':'var(--muted2)'};">${price?'$'+price.toFixed(2):'—'}</div>
-    </div>`;
-  }).join('');
-}
-function heatCellStyle(dp){
-  if(dp>=3) return 'background:#064e35;border-color:#0a7a52;';
-  if(dp>=2) return 'background:#0a8c5e;border-color:#0a7a52;';
-  if(dp>=1) return 'background:#1aad76;border-color:#0a8c5e;';
-  if(dp>=0.3) return 'background:#d4f5e9;border-color:#9fdfc8;';
-  if(dp<=-3) return 'background:#7f1d1d;border-color:#991b1b;';
-  if(dp<=-2) return 'background:#d63031;border-color:#b91c1c;';
-  if(dp<=-1) return 'background:#ef4444;border-color:#d63031;';
-  if(dp<=-0.3) return 'background:#fee2e2;border-color:#fca5a5;';
-  return 'background:var(--bg4);border-color:var(--border);';
-}
-function updateHeatCell(sym,price,dp){
-  const cell=document.getElementById('hm-'+sym);
-  if(!cell)return;
-  const cellStyle=heatCellStyle(dp);
-  cell.style.cssText=cellStyle.replace(/;/g,';');
-  const aboveThreshold=dp>=THRESHOLD;
-  cell.innerHTML=`${aboveThreshold?'<div class="hm-badge">🔥 +'+dp.toFixed(1)+'%</div>':''}
-    <div class="hm-sym" style="color:${dp>0.5?'#fff':dp<-0.5?'#fff':'var(--text)'};">${esc(sym)}</div>
-    <div class="hm-pct" style="color:${dp>0.5?'#fff':dp<-0.5?'#fff':'var(--muted)'};">${dp>=0?'+':''}${dp.toFixed(2)}%</div>
-    <div class="hm-price" style="color:${dp>0.5?'rgba(255,255,255,0.7)':dp<-0.5?'rgba(255,255,255,0.7)':'var(--muted2)'};">$${price.toFixed(2)}</div>`;
-}
-
-/* ══════════════════════════════════════
-   DUAL COLUMN
+   DUAL COLUMN — renderColSorted con HOT banners
 ══════════════════════════════════════ */
 function buildDualCols(){
   renderColSorted('col-bull',BULL);
@@ -1045,35 +1145,78 @@ function buildDualCols(){
 }
 function renderColSorted(id,etfs){
   const container=document.getElementById(id);
-  const sorted=[...etfs].sort((a,b)=>{
-    return calcMomentumScore(b.t)-calcMomentumScore(a.t);
-  });
-  container.innerHTML=sorted.map((e,rank)=>{
+  const scored=etfs.map(e=>({...e,...calcHotScore(e.t)}));
+  scored.sort((a,b)=>b.score-a.score);
+  const maxScore=Math.max(...scored.map(x=>x.score),1);
+
+  container.innerHTML=scored.map((e,rank)=>{
     const q=liveQ[e.t];
-    const dp=q?.dp??0,price=q?.c??0;
-    const score=calcMomentumScore(e.t);
-    const maxScore=Math.max(...sorted.map(x=>Math.abs(calcMomentumScore(x.t))),1);
-    const barPct=Math.min(Math.abs(score)/maxScore*100,100).toFixed(1);
-    const aboveThreshold=dp>=THRESHOLD;
+    const dp=e.dp??0, price=q?.c??0;
+    const barPct=Math.min((e.score/100)*100,100).toFixed(1);
+    const tc=techCache[e.t];
+
+    // ── HOT banner — verde para BULL, rojo para BEAR ────────────────
+    const isBear=isBearETF(e.t);
+    let hotBanner='';
+    if(e.hot&&price){
+      const reasonStr=e.reasons.slice(0,2).join(' · ');
+      const bannerBg=isBear
+        ?'background:linear-gradient(90deg,#7f1d1d,#b91c1c);'
+        :'background:linear-gradient(90deg,#064e35,#0a8c5e);';
+      const barColor=isBear
+        ?'linear-gradient(90deg,#ef4444,#d63031)'
+        :'linear-gradient(90deg,#1aad76,#0a8c5e)';
+      const label=isBear?'🔥 HOT BAJISTA':'🔥 HOT ALCISTA';
+      hotBanner=`<div class="hot-banner" style="${bannerBg}">
+        ${label}
+        <span class="hot-reason">${esc(reasonStr)}</span>
+        <span style="margin-left:auto;font-size:10px;font-weight:700;background:rgba(255,255,255,.2);padding:1px 6px;border-radius:8px;">${e.score}/100</span>
+      </div>
+      <div class="hot-score-bar"><div class="hot-score-fill" style="width:${barPct}%;background:${barColor};"></div></div>`;
+    }
+
+    // ── Señal técnica badge — invertida para BEAR ────────────────────
+    let sigBadge='';
+    if(tc){
+      // BULL: 'buy' es buena señal. BEAR: 'sell' (mercado bajando) es buena señal
+      const goodSig=isBear?(tc.sig==='sell'):(tc.sig==='buy');
+      const badSig =isBear?(tc.sig==='buy') :(tc.sig==='sell');
+      if(goodSig)  sigBadge=`<span class="tag ${isBear?'t-bear':'t-bull'}">${isBear?'📉 BAJISTA':'📈 ALCISTA'}</span>`;
+      else if(badSig) sigBadge=`<span class="tag" style="background:var(--bg4);color:var(--muted);border:1px solid var(--border);">${isBear?'mercado sube':'señal SELL'}</span>`;
+    }
+
+    // ── Precio HTML ──────────────────────────────
     const priceHTML=price
-      ?`<div class="qp" style="color:${dp>=0?'var(--green)':'var(--red)'};">$${price.toFixed(2)}</div>
-         <div class="qc ${dp>=0?'pos':'neg'}">${dp>=0?'+':''}${dp.toFixed(2)}%</div>`
-      :`<div class="qp"><span class="skel" style="width:55px;height:16px;border-radius:3px;">&nbsp;</span></div>
-         <div class="qc">—</div>`;
-    const topBadge=rank===0&&price
-      ?`<span style="font-size:9px;font-family:var(--mono);font-weight:700;padding:1px 5px;border-radius:10px;background:${dp>=0?'var(--gd)':'var(--rd)'};color:${dp>=0?'var(--green)':'var(--red)'};border:1px solid ${dp>=0?'var(--gb)':'var(--rb)'};">↑ #1</span>`:'';
-    const alertBadge=aboveThreshold
-      ?`<span style="font-size:9px;font-family:var(--mono);font-weight:700;padding:1px 5px;border-radius:10px;background:var(--gd);color:var(--green);border:1px solid var(--gb);">🔥 ALERTA</span>`:'';
-    return `<div class="qcard" id="qc-${esc(e.t)}" onclick="selETF('${esc(e.t)}')">
+      ?`<div class="qp" id="qp-${esc(e.t)}" style="color:${dp>=0?'var(--green)':'var(--red)'};">$${price.toFixed(2)}</div>
+         <div class="qc ${dp>=0?'pos':'neg'}" id="qch-${esc(e.t)}">${dp>=0?'+':''}${dp.toFixed(2)}%</div>`
+      :`<div class="qp" id="qp-${esc(e.t)}"><span class="skel" style="width:55px;height:16px;border-radius:3px;">&nbsp;</span></div>
+         <div class="qc" id="qch-${esc(e.t)}">—</div>`;
+
+    // ── RSI mini badge ───────────────────────────
+    let rsiBadge='';
+    if(tc&&tc.rsi!==null){
+      const rv=tc.rsi.toFixed(0);
+      const rc=tc.rsi>70?'var(--red)':tc.rsi<30?'var(--green)':'var(--amber)';
+      rsiBadge=`<span style="font-size:9px;font-family:var(--mono);font-weight:600;color:${rc};background:rgba(0,0,0,.05);padding:1px 5px;border-radius:8px;">RSI ${rv}</span>`;
+    }
+
+    return `<div class="qcard${e.hot?(isBear?' is-hot-bear':' is-hot'):''}" id="qc-${esc(e.t)}" onclick="selETF('${esc(e.t)}')">
+      ${hotBanner}
       <div style="display:flex;align-items:flex-start;justify-content:space-between;">
         <div>
-          <div class="qt" style="display:flex;align-items:center;gap:5px;">${esc(e.t)} ${topBadge} ${alertBadge}</div>
+          <div class="qt">${esc(e.t)}</div>
           <div class="qn">${esc(e.n)}</div>
         </div>
         <div style="text-align:right;">${priceHTML}</div>
       </div>
-      <div class="momentum-bar"><div class="momentum-fill" style="width:${barPct}%;background:${dp>=0?'var(--green)':'var(--red)'}"></div></div>
-      <div class="qtags">${e.tags.map((t,i)=>`<span class="tag ${e.tc[i]}">${esc(t)}</span>`).join('')}</div>
+      <div class="momentum-bar" style="margin-top:6px;">
+        <div class="momentum-fill" style="width:${barPct}%;background:${dp>=0?'var(--green)':'var(--red)'}"></div>
+      </div>
+      <div class="qtags" style="margin-top:7px;">
+        ${e.tags.map((t,i)=>`<span class="tag ${e.tc[i]}">${esc(t)}</span>`).join('')}
+        ${sigBadge}
+        ${rsiBadge}
+      </div>
     </div>`;
   }).join('');
 }
@@ -1081,18 +1224,26 @@ function renderColSorted(id,etfs){
 /* ══════════════════════════════════════
    LIVE PRICE UPDATE (desde WS)
 ══════════════════════════════════════ */
+let wsUpdateQueue={};
+let wsRenderPending=false;
 function updateQCardLive(sym,price,dp){
+  // Siempre actualizar precio en el elemento si existe (rápido)
   const priceEl=document.getElementById('qp-'+sym);
   const chgEl=document.getElementById('qch-'+sym);
-  if(priceEl){
-    priceEl.style.color=dp>=0?'var(--green)':'var(--red)';
-    priceEl.textContent='$'+price.toFixed(2);
-  }
-  if(chgEl){
-    chgEl.className='qc '+(dp>=0?'pos':'neg');
-    chgEl.textContent=(dp>=0?'+':'')+dp.toFixed(2)+'%';
-  }
+  if(priceEl){priceEl.style.color=dp>=0?'var(--green)':'var(--red)';priceEl.textContent='$'+price.toFixed(2);}
+  if(chgEl){chgEl.className='qc '+(dp>=0?'pos':'neg');chgEl.textContent=(dp>=0?'+':'')+dp.toFixed(2)+'%';}
   prevDP[sym]=dp;
+  // Re-evaluar si cambió el estado HOT (batch para no hacer render por cada tick)
+  wsUpdateQueue[sym]=true;
+  if(!wsRenderPending){
+    wsRenderPending=true;
+    setTimeout(()=>{
+      wsRenderPending=false;
+      wsUpdateQueue={};
+      buildDualCols();
+      updateTopPick();
+    },1500); // batch render cada 1.5s máximo
+  }
   updateJournalPnL();
 }
 function updateDetPrice(sym,price,dp){
@@ -1300,14 +1451,22 @@ function populateSymSelects(){
     if(sel) sel.innerHTML=sel.innerHTML.replace(/<option value="">.*?<\/option>/,'')+'<option value="">—</option>'+opts;
   });
 }
+let prevRiskSym='';
 async function calcRisk(){
   const sym=document.getElementById('risk-sym').value;
   const capital=parseFloat(document.getElementById('risk-capital').value)||10000;
   const riskPct=parseFloat(document.getElementById('risk-pct').value)||1;
+  const note=document.getElementById('risk-note');
+  // Si cambió el ETF, limpiar campos para re-autocomplete
+  if(sym&&sym!==prevRiskSym){
+    prevRiskSym=sym;
+    document.getElementById('risk-entry').value='';
+    document.getElementById('risk-stop').value='';
+    document.getElementById('risk-target').value='';
+  }
   let entry=parseFloat(document.getElementById('risk-entry').value)||0;
   let stop=parseFloat(document.getElementById('risk-stop').value)||0;
   let target=parseFloat(document.getElementById('risk-target').value)||0;
-  const note=document.getElementById('risk-note');
   // Auto-fill desde precio live
   if(sym&&liveQ[sym]&&!entry){
     entry=liveQ[sym].c;

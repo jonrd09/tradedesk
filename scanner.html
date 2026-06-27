@@ -1270,8 +1270,14 @@ function renderColSorted(id,etfs){
         </div>
         <div style="text-align:right;">${priceHTML}</div>
       </div>
-      <div class="momentum-bar" style="margin-top:6px;">
-        <div class="momentum-fill" style="width:${barPct}%;background:${dp>=0?'var(--green)':'var(--red)'}"></div>
+      <div style="margin-top:8px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;">
+          <span style="font-size:9px;font-family:var(--mono);color:var(--muted2);letter-spacing:.04em;text-transform:uppercase;">HOT score</span>
+          <span style="font-size:9px;font-family:var(--mono);font-weight:700;color:${e.hot?(isBear?'var(--red)':'var(--green)'):'var(--muted2)'};">${e.score}/100</span>
+        </div>
+        <div class="momentum-bar" title="HOT score ${e.score}/100 — % día + señal técnica + velocidad + urgencia al 2%">
+          <div class="momentum-fill" style="width:${barPct}%;background:${dp>=0?'var(--green)':'var(--red)'}"></div>
+        </div>
       </div>
       <div class="qtags" style="margin-top:7px;">
         ${e.tags.map((t,i)=>`<span class="tag ${e.tc[i]}">${esc(t)}</span>`).join('')}

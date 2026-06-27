@@ -6043,46 +6043,79 @@ async function loadNews(ticker){
   const area=document.getElementById('newsArea');
   if(!area)return;
 
-  // Update active button
   _newsActive=ticker;
   document.querySelectorAll('.news-ticker-btn').forEach(b=>{
     b.classList.toggle('active', b.id==='nbtn-'+ticker);
   });
 
-  // Show loading
   area.innerHTML='<div style="text-align:center;padding:20px;color:var(--text3);font-size:12px;">⟳ Cargando noticias...</div>';
 
   try{
     let items=[];
     const syms=ticker==='ALL'?[..._signalTickers]:[ticker];
+    // Cache más corto en fin de semana (15min) para recibir noticias frescas
+    // En días de mercado el cache es de 30min para no saturar la API
+    const cacheTTL=_isWeekendClosed()?15*60*1000:30*60*1000;
+    const fk=getKey()||'';
 
     for(const sym of syms){
-      // Check cache (5min TTL)
-      if(_newsCache[sym]&&Date.now()-_newsCache[sym].ts<1800000){
+      if(_newsCache[sym]&&Date.now()-_newsCache[sym].ts<cacheTTL){
         items.push(..._newsCache[sym].items);
         continue;
       }
-      try{
-        const rssUrl=`https://feeds.finance.yahoo.com/rss/2.0/headline?s=${sym}&region=US&lang=en-US`;
-        const proxy=`https://api.allorigins.win/get?url=${encodeURIComponent(rssUrl)}`;
-        const r=await fetch(proxy,{signal:AbortSignal.timeout(6000)});
-        if(!r.ok)throw new Error('HTTP '+r.status);
-        const j=await r.json();
-        const parser=new DOMParser();
-        const xml=parser.parseFromString(j.contents,'text/xml');
-        const entries=Array.from(xml.querySelectorAll('item')).slice(0,5).map(item=>({
-          sym,
-          title:item.querySelector('title')?.textContent||'',
-          link:item.querySelector('link')?.textContent||'',
-          pubDate:item.querySelector('pubDate')?.textContent||'',
-          source:item.querySelector('source')?.textContent||'Yahoo Finance',
-        }));
-        _newsCache[sym]={ts:Date.now(),items:entries};
-        items.push(...entries);
-        if(syms.length>1)await new Promise(r=>setTimeout(r,400));
-      }catch(e){
-        console.warn('News fetch failed for',sym,e.message);
+
+      let fetched=false;
+
+      // ── Fuente 1: Finnhub company-news (más fresco y confiable que Yahoo RSS)
+      if(fk&&fk.length>8){
+        try{
+          const toTs=Math.floor(Date.now()/1000);
+          // En fin de semana pedir 3 días atrás para capturar noticias del viernes y del weekend
+          const fromDays=_isWeekendClosed()?3:2;
+          const fromTs=toTs-(fromDays*24*60*60);
+          const fhUrl=`https://finnhub.io/api/v1/company-news?symbol=${sym}&from=${new Date(fromTs*1000).toISOString().slice(0,10)}&to=${new Date(toTs*1000).toISOString().slice(0,10)}&token=${fk}`;
+          const r=await fetch(fhUrl,{signal:AbortSignal.timeout(6000)});
+          if(r.ok){
+            const data=await r.json();
+            if(Array.isArray(data)&&data.length){
+              const entries=data.slice(0,8).map(n=>({
+                sym,
+                title:n.headline||'',
+                link:n.url||'',
+                pubDate:new Date(n.datetime*1000).toUTCString(),
+                source:n.source||'Finnhub',
+              }));
+              _newsCache[sym]={ts:Date.now(),items:entries};
+              items.push(...entries);
+              fetched=true;
+            }
+          }
+        }catch(e){console.warn('Finnhub news failed for',sym,e.message);}
       }
+
+      // ── Fuente 2: Yahoo Finance RSS (fallback si no hay Finnhub key o falla)
+      if(!fetched){
+        try{
+          const rssUrl=`https://feeds.finance.yahoo.com/rss/2.0/headline?s=${sym}&region=US&lang=en-US`;
+          const proxy=`https://api.allorigins.win/get?url=${encodeURIComponent(rssUrl)}`;
+          const r=await fetch(proxy,{signal:AbortSignal.timeout(6000)});
+          if(!r.ok)throw new Error('HTTP '+r.status);
+          const j=await r.json();
+          const parser=new DOMParser();
+          const xml=parser.parseFromString(j.contents,'text/xml');
+          const entries=Array.from(xml.querySelectorAll('item')).slice(0,5).map(item=>({
+            sym,
+            title:item.querySelector('title')?.textContent||'',
+            link:item.querySelector('link')?.textContent||'',
+            pubDate:item.querySelector('pubDate')?.textContent||'',
+            source:item.querySelector('source')?.textContent||'Yahoo Finance',
+          }));
+          _newsCache[sym]={ts:Date.now(),items:entries};
+          items.push(...entries);
+        }catch(e){console.warn('Yahoo RSS failed for',sym,e.message);}
+      }
+
+      if(syms.length>1)await new Promise(r=>setTimeout(r,300));
     }
 
     if(!items.length){
@@ -6090,11 +6123,9 @@ async function loadNews(ticker){
       return;
     }
 
-    // Sort by date descending
     items.sort((a,b)=>new Date(b.pubDate)-new Date(a.pubDate));
 
-    // ── Deduplicar: mismo artículo puede venir de varios tickers
-    // Agrupa por URL (o por título si no hay URL) y combina los tickers
+    // Deduplicar por URL o título
     const seen=new Map();
     for(const item of items){
       const key=item.link||item.title;
@@ -6107,14 +6138,12 @@ async function loadNews(ticker){
     }
     const deduped=Array.from(seen.values());
 
-    // Filtrar noticias por palabras clave — solo mostrar las relevantes
     const filtered=deduped.filter(item=>newsPassesFilter(item.title));
     if(!filtered.length){
       area.innerHTML='<div style="text-align:center;padding:20px;color:var(--text3);font-size:12px;">Sin noticias relevantes en este momento.<br><span style="font-size:11px;">Solo se muestran: adquisiciones, ejecutivos, earnings, partnerships, etc.</span></div>';
       return;
     }
 
-    // M-07: Relative time helper
     function _relTime(pubDate){
       if(!pubDate)return '';
       const diffMin=Math.round((Date.now()-new Date(pubDate))/60000);
@@ -6124,9 +6153,8 @@ async function loadNews(ticker){
       if(diffH<24)return `hace ${diffH}h`;
       return `hace ${Math.round(diffH/24)}d`;
     }
-    // Render
+
     area.innerHTML=filtered.map(item=>{
-      // Si el artículo aplica a múltiples tickers, mostrar todos los badges
       const tickerBadges=item.syms.map(s=>{
         const c=NEWS_COLORS[s]||'var(--blue)';
         return `<span class="news-card-ticker" style="background:${c}22;color:${c};">${s}</span>`;
@@ -6156,13 +6184,14 @@ async function loadNews(ticker){
 // Auto-load ALL news on init
 function initNews(){
   setTimeout(()=>loadNews('ALL'),2000);
-  // Refresh every 30 minutes
+  // Refresh independiente del masterTick — funciona en fin de semana también
+  // Intervalo: 15min en weekend (noticias frescas), 30min en días de trading
   setInterval(()=>{
-    if(_newsActive){
-      _newsCache={};
-      loadNews(_newsActive);
-    }
-  },30*60*1000);
+    if(!_newsActive)return;
+    // Limpiar cache para forzar fetch fresco — no mostrar datos stale
+    _newsCache={};
+    loadNews(_newsActive);
+  },15*60*1000); // 15min — en días de trading el cache interno de 30min filtra el exceso
 }
 
 // ═══════════════════════════════════════════════════════════════

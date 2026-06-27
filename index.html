@@ -6070,30 +6070,42 @@ async function loadNews(ticker){
       if(fk&&fk.length>8){
         try{
           const toTs=Math.floor(Date.now()/1000);
-          // En fin de semana pedir 3 días atrás para capturar noticias del viernes y del weekend
-          const fromDays=_isWeekendClosed()?3:2;
+          // Fin de semana: pedir 5 días para capturar noticias del viernes + sábado + domingo
+          // Días normales: 2 días es suficiente
+          const fromDays=_isWeekendClosed()?5:2;
           const fromTs=toTs-(fromDays*24*60*60);
-          const fhUrl=`https://finnhub.io/api/v1/company-news?symbol=${sym}&from=${new Date(fromTs*1000).toISOString().slice(0,10)}&to=${new Date(toTs*1000).toISOString().slice(0,10)}&token=${fk}`;
+          const fromDate=new Date(fromTs*1000).toISOString().slice(0,10);
+          const toDate=new Date(toTs*1000).toISOString().slice(0,10);
+          const fhUrl=`https://finnhub.io/api/v1/company-news?symbol=${sym}&from=${fromDate}&to=${toDate}&token=${fk}`;
           const r=await fetch(fhUrl,{signal:AbortSignal.timeout(6000)});
           if(r.ok){
             const data=await r.json();
-            if(Array.isArray(data)&&data.length){
-              const entries=data.slice(0,8).map(n=>({
-                sym,
-                title:n.headline||'',
-                link:n.url||'',
-                pubDate:new Date(n.datetime*1000).toUTCString(),
-                source:n.source||'Finnhub',
-              }));
-              _newsCache[sym]={ts:Date.now(),items:entries};
-              items.push(...entries);
+            if(Array.isArray(data)){
+              // Aunque el array venga vacío, marcar fetched=true para no caer a Yahoo
+              // (Yahoo en fin de semana tiene datos más stale que Finnhub vacío)
               fetched=true;
+              if(data.length){
+                const entries=data.slice(0,10).map(n=>({
+                  sym,
+                  title:n.headline||'',
+                  link:n.url||'',
+                  pubDate:new Date(n.datetime*1000).toUTCString(),
+                  // Fuente: usar el dominio real de la noticia, no solo "Finnhub"
+                  source:n.source||'Finnhub',
+                  _fromFinnhub:true,
+                }));
+                _newsCache[sym]={ts:Date.now(),items:entries};
+                items.push(...entries);
+              }
             }
           }
-        }catch(e){console.warn('Finnhub news failed for',sym,e.message);}
+        }catch(e){
+          console.warn('Finnhub news failed for',sym,e.message);
+          // Si Finnhub falla por error de red — dejar fetched=false para intentar Yahoo
+        }
       }
 
-      // ── Fuente 2: Yahoo Finance RSS (fallback si no hay Finnhub key o falla)
+      // ── Fuente 2: Yahoo Finance RSS (fallback — solo si Finnhub no está disponible)
       if(!fetched){
         try{
           const rssUrl=`https://feeds.finance.yahoo.com/rss/2.0/headline?s=${sym}&region=US&lang=en-US`;
@@ -6172,7 +6184,9 @@ async function loadNews(ticker){
           </div>
         </div>
         <div class="news-card-title">${item.title}</div>
-        <div class="news-card-source">${item.source}</div>
+        <div class="news-card-source" style="${item._fromFinnhub?'color:var(--blue,#60a5fa);':''}">
+          ${item._fromFinnhub?'':'📰 '}${item.source}
+        </div>
       </div>`;
     }).join('');
 

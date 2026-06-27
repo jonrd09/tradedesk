@@ -661,6 +661,9 @@ function openWS(){
         if(!etf) return;
         const prev=liveQ[sym];
         if(!prev||!prev.pc) return;
+        // FIX: usar pc del REST oficial de Finnhub (siempre el cierre anterior certificado)
+        // prev.pc viene del /quote REST y es el campo "pc" oficial de Finnhub
+        // No recalculamos — confiamos en ese valor como ancla
         const dp=((price-prev.pc)/prev.pc)*100;
         liveQ[sym]={...prev,c:price,dp};
         updateQCardLive(sym,price,dp);
@@ -691,6 +694,7 @@ function scheduleReconnect(){
 
 /* ══════════════════════════════════════
    HISTORIAL YAHOO (CORS proxies)
+   FIX: extrae OHLCV completo — h y l necesarios para ATR real
 ══════════════════════════════════════ */
 async function getHistory(symbol,days=80){
   const ck=symbol+'_'+days;
@@ -712,9 +716,14 @@ async function getHistory(symbol,days=80){
       catch(ex){parsed=JSON.parse(raw);}
       const result=parsed?.chart?.result?.[0];
       if(!result) continue;
+      const q0=result.indicators.quote[0];
       const clean=result.timestamp.map((t,i)=>({
-        t,c:result.indicators.quote[0].close[i],
-        v:result.indicators.quote[0].volume?.[i]??0
+        t,
+        o: q0.open?.[i]  ?? null,
+        h: q0.high?.[i]  ?? null,   // ← FIX: high para ATR real
+        l: q0.low?.[i]   ?? null,   // ← FIX: low para ATR real
+        c: q0.close?.[i] ?? null,
+        v: q0.volume?.[i]?? 0
       })).filter(x=>x.c!=null);
       if(!clean.length) continue;
       histCache[ck]={ts:Date.now(),data:clean};
@@ -725,24 +734,32 @@ async function getHistory(symbol,days=80){
 }
 
 /* ══════════════════════════════════════
-   FINNHUB CANDLES (DEFICIENCIA #5 — sin proxies CORS para intraday)
+   FINNHUB CANDLES — intraday 1-min
+   FIX: cálculo ET→UTC robusto usando getETNow(), maneja DST correctamente
 ══════════════════════════════════════ */
 async function getFinnhubCandles(sym){
   const now=Math.floor(Date.now()/1000);
-  // Calcular 9:30am ET de hoy correctamente usando UTC offset
-  const etNow=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
-  const etDate=new Date(etNow);
-  etDate.setHours(9,29,0,0); // 9:29 para capturar primer minuto
-  // Convertir de ET a UTC timestamp
-  const etStr=etDate.toLocaleString('en-US',{timeZone:'America/New_York'});
-  const utcEquiv=new Date(etStr);
-  // Diferencia ET↔UTC (EST=-5h, EDT=-4h)
-  const etOffset=etNow.getTime()-new Date(etNow.toLocaleString('en-US',{timeZone:'UTC'})).getTime();
-  const from=Math.floor((etDate.getTime()-etOffset)/1000);
+
+  // FIX: usar getETNow() para saber la hora ET exacta ahora
+  // Luego restar los minutos transcurridos desde 9:29am ET
+  // para obtener el timestamp UTC correcto sin cálculos de offset manuales
+  const etNow=getETNow();
+  const etMinutesToday=etNow.getHours()*60+etNow.getMinutes();
+  const minutesSince929=etMinutesToday - (9*60+29);
+  // Si el mercado aún no abrió (antes de 9:29am ET), usar 1h atrás como fallback
+  const from=minutesSince929>0
+    ? now - minutesSince929*60
+    : now - 3600;
+
   const data=await fh(`/stock/candle?symbol=${encodeURIComponent(sym)}&resolution=1&from=${from}&to=${now}`);
-  if(!data||data.s==='no_data'||!data.t||data.t.length===0) throw new Error('Sin candles Finnhub (mercado cerrado o sin datos 1-min)');
-  return data.t.map((t,i)=>({t,o:data.o[i],h:data.h[i],l:data.l[i],c:data.c[i],v:data.v?.[i]??0}))
-    .filter(x=>x.c!=null&&x.o!=null);
+  if(!data||data.s==='no_data'||!data.t||data.t.length===0){
+    throw new Error('Sin candles Finnhub — mercado cerrado o fuera de horario');
+  }
+  return data.t.map((t,i)=>({
+    t,
+    o:data.o[i], h:data.h[i], l:data.l[i], c:data.c[i],
+    v:data.v?.[i]??0
+  })).filter(x=>x.c!=null&&x.o!=null);
 }
 
 /* ══════════════════════════════════════
@@ -1082,9 +1099,13 @@ async function afterConnect(){
   openWS();
   // Calcular cache técnico en background (no bloquea UI)
   setTimeout(()=>buildTechCache(),2000);
+  // FIX: sync dp oficial cada 5 min para mantener el ancla pc fresca
+  setInterval(()=>{if(connected)syncDpFromRest();},300000);
   // visibilitychange
   document.addEventListener('visibilitychange',()=>{
     if(!document.hidden&&connected){
+      // Al volver al tab, sincronizar dp inmediatamente
+      syncDpFromRest();
       if(!wsConn||wsConn.readyState===WebSocket.CLOSED) openWS();
       else if(wsConn.readyState!==WebSocket.OPEN){initialRestFetch().then(()=>{buildDualCols();updateTopPick();});}
     }
@@ -1107,6 +1128,31 @@ async function initialRestFetch(){
     catch(err){}
     await new Promise(r=>setTimeout(r,100));
   }
+}
+
+// FIX: sincronizar dp oficial de Finnhub cada 5 min
+// El WS calcula dp desde prev.pc — este refresh renueva ese ancla
+// para que el % sea correcto si hubo reconexión, overnight, o el
+// mercado cerró/abrió mientras la página estaba abierta
+async function syncDpFromRest(){
+  // Escalonar: 1 símbolo cada 350ms = ~4 seg para 12 ETFs (dentro del rate limit)
+  for(const e of ALL){
+    try{
+      const d=await fh(`/quote?symbol=${e.t}`);
+      if(d&&d.c&&d.pc){
+        // Preservar el precio live del WS si es más reciente
+        const wsPrice=liveQ[e.t]?.c??d.c;
+        // Recalcular dp con el pc oficial recién recibido
+        const freshDp=((wsPrice-d.pc)/d.pc)*100;
+        liveQ[e.t]={...d,c:wsPrice,dp:freshDp,pc:d.pc};
+      }
+    }catch(err){}
+    await new Promise(r=>setTimeout(r,350));
+  }
+  lastDpSync=new Date().toLocaleTimeString('es',{hour:'2-digit',minute:'2-digit'});
+  buildDualCols();
+  updateTopPick();
+  tick();
 }
 
 async function connect(){
@@ -1132,8 +1178,11 @@ async function connect(){
   }
 }
 
+let lastDpSync=null;
 function tick(){
-  document.getElementById('tlbl').textContent=new Date().toLocaleTimeString('es',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  const t=new Date().toLocaleTimeString('es',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  const syncStr=lastDpSync?` · sync ${lastDpSync}`:'';
+  document.getElementById('tlbl').textContent=t+syncStr;
 }
 
 /* ══════════════════════════════════════

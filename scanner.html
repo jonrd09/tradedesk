@@ -27,6 +27,7 @@ body.window-active .hdr{background:linear-gradient(135deg,#064e35 0%,#0a7a52 100
 body.window-active .hdr-title,body.window-active .hdr-sub{color:#fff;}
 body.window-active .mkt-badge.open{background:rgba(255,255,255,0.15);border-color:rgba(255,255,255,0.3);color:#fff;}
 body.window-active .time-lbl{background:rgba(255,255,255,0.12);border-color:rgba(255,255,255,0.2);color:#fff;}
+body.window-active #sync-lbl{background:rgba(255,255,255,0.08);border-color:rgba(255,255,255,0.15);color:rgba(255,255,255,0.6);}
 .window-banner{display:none;background:linear-gradient(90deg,#064e35,#0a8c5e);color:#fff;text-align:center;padding:8px;font-size:12px;font-family:var(--mono);font-weight:600;letter-spacing:.04em;}
 .window-banner.show{display:block;}
 @keyframes pulse-banner{0%,100%{opacity:1}50%{opacity:.7}}
@@ -251,6 +252,7 @@ body.window-active .window-banner{animation:pulse-banner 2s infinite;}
     <div id="key-slot"></div>
     <button class="bell-btn" id="bell-btn" onclick="toggleAlerts()" title="Alertas browser">🔔</button>
     <div class="time-lbl" id="tlbl">—</div>
+    <div id="sync-lbl" style="display:none;font-size:10px;font-family:var(--mono);color:var(--muted2);padding:3px 8px;border-radius:20px;background:var(--bg3);border:1px solid var(--border);white-space:nowrap;transition:all .4s;">sync —</div>
   </div>
 </div>
 
@@ -1150,9 +1152,9 @@ async function syncDpFromRest(){
     await new Promise(r=>setTimeout(r,350));
   }
   lastDpSync=new Date().toLocaleTimeString('es',{hour:'2-digit',minute:'2-digit'});
+  updateSyncLbl();
   buildDualCols();
   updateTopPick();
-  tick();
 }
 
 async function connect(){
@@ -1180,10 +1182,20 @@ async function connect(){
 
 let lastDpSync=null;
 function tick(){
-  const t=new Date().toLocaleTimeString('es',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
-  const syncStr=lastDpSync?` · sync ${lastDpSync}`:'';
-  document.getElementById('tlbl').textContent=t+syncStr;
+  document.getElementById('tlbl').textContent=
+    new Date().toLocaleTimeString('es',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
 }
+function updateSyncLbl(){
+  const el=document.getElementById('sync-lbl');
+  if(!el) return;
+  if(lastDpSync){
+    el.style.display='block';
+    el.textContent='sync '+lastDpSync;
+  }
+}
+// Reloj en vivo — corre siempre, independiente del WS o conexión
+setInterval(tick, 1000);
+tick(); // primer render inmediato
 
 /* ══════════════════════════════════════
    DUAL COLUMN — renderColSorted con HOT banners

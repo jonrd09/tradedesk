@@ -616,9 +616,15 @@ function forgetKey(){
    REST FALLBACK (Finnhub)
 ══════════════════════════════════════ */
 async function fh(ep){
-  const r=await fetch(`https://finnhub.io/api/v1${ep}`,{headers:{'X-Finnhub-Token':APIKEY}});
-  if(r.status===429) throw new Error('Rate limit. Espera un momento.');
-  if(!r.ok) throw new Error(`HTTP ${r.status}`);
+  // Key como query param para evitar CORS preflight desde GitHub Pages / hosting externo
+  const sep=ep.includes('?')?'&':'?';
+  const url=`https://finnhub.io/api/v1${ep}${sep}token=${encodeURIComponent(APIKEY)}`;
+  let r;
+  try{r=await fetch(url,{signal:AbortSignal.timeout(10000)});}
+  catch(ex){throw new Error('Sin conexión a Finnhub — verifica tu internet o que la key sea correcta.');}
+  if(r.status===401||r.status===403) throw new Error('API key inválida o sin permisos (HTTP '+r.status+').');
+  if(r.status===429) throw new Error('Rate limit alcanzado. Espera 30 segundos e intenta de nuevo.');
+  if(!r.ok) throw new Error('Finnhub HTTP '+r.status+'.');
   return r.json();
 }
 
@@ -626,8 +632,13 @@ async function fh(ep){
    WEBSOCKET (DEFICIENCIA #7 — REAL-TIME)
 ══════════════════════════════════════ */
 function openWS(){
-  if(wsConn&&wsConn.readyState===WebSocket.OPEN) return;
-  wsConn=new WebSocket(`wss://ws.finnhub.io?token=${APIKEY}`);
+  if(wsConn&&(wsConn.readyState===WebSocket.OPEN||wsConn.readyState===WebSocket.CONNECTING)) return;
+  try{
+    wsConn=new WebSocket(`wss://ws.finnhub.io?token=${encodeURIComponent(APIKEY)}`);
+  }catch(ex){
+    document.getElementById('slbl').textContent='WS no soportado · REST activo';
+    return;
+  }
   wsConn.onopen=()=>{
     document.getElementById('slbl').textContent='WS live';
     document.getElementById('slbl').classList.add('live');
@@ -723,15 +734,20 @@ async function getHistory(symbol,days=80){
 ══════════════════════════════════════ */
 async function getFinnhubCandles(sym){
   const now=Math.floor(Date.now()/1000);
-  const et=getETNow();
-  // desde 9:30am ET de hoy
-  const today=new Date(et);
-  today.setHours(9,30,0,0);
-  const from=Math.floor(today.getTime()/1000);
+  // Calcular 9:30am ET de hoy correctamente usando UTC offset
+  const etNow=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+  const etDate=new Date(etNow);
+  etDate.setHours(9,29,0,0); // 9:29 para capturar primer minuto
+  // Convertir de ET a UTC timestamp
+  const etStr=etDate.toLocaleString('en-US',{timeZone:'America/New_York'});
+  const utcEquiv=new Date(etStr);
+  // Diferencia ET↔UTC (EST=-5h, EDT=-4h)
+  const etOffset=etNow.getTime()-new Date(etNow.toLocaleString('en-US',{timeZone:'UTC'})).getTime();
+  const from=Math.floor((etDate.getTime()-etOffset)/1000);
   const data=await fh(`/stock/candle?symbol=${encodeURIComponent(sym)}&resolution=1&from=${from}&to=${now}`);
-  if(!data||data.s==='no_data'||!data.t) throw new Error('Sin candles Finnhub');
-  return data.t.map((t,i)=>({t,o:data.o[i],h:data.h[i],l:data.l[i],c:data.c[i],v:data.v[i]}))
-    .filter(x=>x.c!=null);
+  if(!data||data.s==='no_data'||!data.t||data.t.length===0) throw new Error('Sin candles Finnhub (mercado cerrado o sin datos 1-min)');
+  return data.t.map((t,i)=>({t,o:data.o[i],h:data.h[i],l:data.l[i],c:data.c[i],v:data.v?.[i]??0}))
+    .filter(x=>x.c!=null&&x.o!=null);
 }
 
 /* ══════════════════════════════════════
@@ -953,18 +969,24 @@ async function initialRestFetch(){
 
 async function connect(){
   const k=document.getElementById('apik').value.trim();
-  if(!k){alert('Ingresa tu Finnhub API key');return;}
+  if(!k){alert('Ingresa tu Finnhub API key (empieza con pk_...)');return;}
+  if(!k.startsWith('pk_')&&!k.startsWith('sandbox_')){
+    if(!confirm('La key no empieza con "pk_" — ¿es correcta? Las keys de Finnhub empiezan con pk_')) return;
+  }
   APIKEY=k;
-  document.getElementById('slbl').textContent='verificando...';
+  const slbl=document.getElementById('slbl');
+  slbl.textContent='verificando key...';
   try{
     const test=await fh('/quote?symbol=SPY');
-    if(!test||!test.c) throw new Error('Respuesta vacía — verifica tu API key');
+    if(!test||typeof test.c==='undefined') throw new Error('Respuesta inesperada. Verifica que la key sea de Finnhub (finnhub.io).');
+    if(test.c===0&&test.pc===0) throw new Error('Key válida pero sin datos — puede ser que el mercado esté cerrado y tu plan no tenga datos EOD.');
     saveKey(k);
     await afterConnect();
   }catch(e){
-    document.getElementById('slbl').textContent='error';
-    alert('Error: '+e.message);
+    slbl.textContent='error';
     APIKEY='';
+    const msg=e.message||'Error desconocido';
+    alert('❌ Error al conectar:\n\n'+msg+'\n\n💡 Verifica:\n• La key comienza con pk_\n• La copiaste completa desde finnhub.io/dashboard\n• Tienes conexión a internet');
   }
 }
 
@@ -1526,11 +1548,20 @@ function goPanel(id,btn){
   const saved=loadKey();
   if(saved){
     APIKEY=saved;
-    document.getElementById('slbl').textContent='conectando...';
-    fh('/quote?symbol=SPY').then(d=>{
-      if(d&&d.c) afterConnect();
-      else{clearKey();document.getElementById('slbl').textContent='sin conectar';}
-    }).catch(()=>{clearKey();document.getElementById('slbl').textContent='sin conectar';});
+    const slbl=document.getElementById('slbl');
+    slbl.textContent='reconectando...';
+    fh('/quote?symbol=SPY')
+      .then(d=>{
+        // Acepta respuesta aunque c=0 (mercado cerrado)
+        if(d&&typeof d.c!=='undefined') afterConnect();
+        else{clearKey();APIKEY='';slbl.textContent='sin conectar';}
+      })
+      .catch(err=>{
+        // Si falla con key guardada, no borrar key — puede ser temporal
+        APIKEY='';
+        slbl.textContent='sin conexión — reintenta';
+        console.warn('Auto-init failed:',err.message);
+      });
   }
 })();
 </script>

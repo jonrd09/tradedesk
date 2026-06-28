@@ -453,7 +453,16 @@ const ROT_DATA={
 // Si Finnhub no tiene precio, el símbolo se omite del panel de rotación.
 const ROT_FALLBACK={};
 const ROT_PREV={};
-const INSIDER_TICKERS=['TSLA','AAPL','MSFT','NVDA','AMD','COIN','AMZN','NFLX','META','AVGO','MU','QCOM','GOOG','PLTR','UBER','PYPL','CRM','HOOD','UNH','OKLO','URA','ORCL'];
+// INSIDER_TICKERS — sincronizado con _signalTickers al abrir el modal
+// No es una lista fija: usa los tickers activos de la plataforma
+// más un set de blue-chips de alto volumen institucional como base
+const INSIDER_TICKERS_BASE=['TSLA','AAPL','MSFT','NVDA','AMD','COIN','AMZN','NFLX','META','AVGO','MU','QCOM','GOOG','PLTR','UBER','PYPL','CRM','HOOD','UNH','OKLO','URA','ORCL'];
+// Getter dinámico — merge de tickers activos + base, deduplicado
+function getInsiderTickers(){
+  const active=(_signalTickers||[]).filter(s=>s&&s.length>0);
+  const merged=[...new Set([...active,...INSIDER_TICKERS_BASE])];
+  return merged.filter(s=>!['SPY','QQQ','DIA','IWM'].includes(s)); // excluir ETFs índice
+}
 
 // ═══════════════════════════════════════════════════════════════
 // KEY MANAGEMENT
@@ -3678,15 +3687,19 @@ function renderInsiderCards(){
   const area=document.getElementById('insiderArea');
   if(!area)return;
   const data=(_insiderData||[]).filter(d=>{
-    // Solo CEO y CFO
+    // CEO, CFO, COO, President, Chairman, Director
     const title=(d.title||'').toLowerCase();
-    const isCeoOrCfo=title.includes('ceo')||title.includes('chief executive')||
-                     title.includes('cfo')||title.includes('chief financial');
-    if(!isCeoOrCfo)return false;
-    // Solo transacciones >$100K (shares * precio estimado — usamos shares como proxy)
-    // Finnhub devuelve 'shares' como número de acciones y 'value' si está disponible
-    const val=Math.abs(d.value||d.shares||0);
-    return val>=100000||Math.abs(d.shares||0)>=500; // >500 shares o >$100K valor
+    const isKeyExec=title.includes('ceo')||title.includes('chief executive')||
+                    title.includes('cfo')||title.includes('chief financial')||
+                    title.includes('coo')||title.includes('chief operating')||
+                    title.includes('president')||title.includes('chairman')||
+                    title.includes('director');
+    if(!isKeyExec)return false;
+    // Filtrar por valor real si está disponible, sino por shares
+    // txValue > $50K O shares > 500 (proxy conservador)
+    const hasRealValue=d.txValue&&d.txValue>0;
+    if(hasRealValue)return d.txValue>=50000;
+    return Math.abs(d.shares||0)>=500;
   });
 
   if(!data.length){
@@ -3700,7 +3713,9 @@ function renderInsiderCards(){
     const label=isBuy?'COMPRA':'VENTA';
     const labelColor=isBuy?'var(--green)':'var(--red)';
     const shares=Math.abs(d.shares||0).toLocaleString();
-    const val=d.value?`$${Math.abs(d.value).toLocaleString()}`:shares+' acc.';
+    const val=d.txValue>0
+      ?`$${Math.abs(d.txValue).toLocaleString('en-US',{maximumFractionDigits:0})} @ $${(d.txPrice||0).toFixed(2)}`
+      :`${shares} acc.`;
     return`<div style="background:rgba(255,182,193,.08);border:1px solid rgba(255,182,193,.25);border-left:3px solid ${borderColor};border-radius:var(--r);padding:10px 12px;margin-bottom:8px;">
       <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;flex-wrap:wrap;">
         <span style="font-size:12px;font-weight:700;color:${getTickerColor(d.sym)||'var(--blue)'};">${d.sym}</span>
@@ -3708,7 +3723,12 @@ function renderInsiderCards(){
         <span style="font-size:11px;color:var(--text2);margin-left:auto;">${d.date}</span>
       </div>
       <div style="font-size:13px;color:var(--text);font-weight:600;margin-bottom:2px;">${d.name}</div>
-      <div style="font-size:11px;color:var(--text3);">${d.title} · ${val}</div>
+      <div style="font-size:11px;color:var(--text3);">
+          ${d.title}
+          ${d.txValue>0?` · <strong>$${Math.abs(d.txValue).toLocaleString('en-US',{maximumFractionDigits:0})}</strong>`
+            :` · ${Math.abs(d.shares||0).toLocaleString()} acc.`}
+          ${d.txPrice>0?` @ $${d.txPrice.toFixed(2)}`:''}
+        </div>
     </div>`;
   }).join('');
 }
@@ -4054,8 +4074,9 @@ async function loadInsiderData(forceRefresh=false){
   // Fetch fresh data — sequential 1 by 1 with 1.2s delay to avoid 429
   tbody.innerHTML='<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--text2);">⟳ Actualizando datos de insiders… (puede tardar ~30s)</td></tr>';
   _insiderData=[];
-  for(let i=0;i<INSIDER_TICKERS.length;i++){
-    const sym=INSIDER_TICKERS[i];
+  const _itkrs=getInsiderTickers();
+  for(let i=0;i<_itkrs.length;i++){
+    const sym=_itkrs[i];
     try{
       const r=await fetch(`https://finnhub.io/api/v1/stock/insider-transactions?symbol=${sym}&token=${key}`,{signal:AbortSignal.timeout(8000)});
       if(!r.ok){
@@ -4067,12 +4088,27 @@ async function loadInsiderData(forceRefresh=false){
           d.data.slice(0,5).forEach(t=>{
             const txCode=t.transactionCode||'';const change=t.change||0;
             let nt=txCode;if(!txCode)nt=change>0?'P':change<0?'S':'—';if(txCode==='B')nt='P';
-            _insiderData.push({sym,name:t.name||'—',title:t.title||'—',date:t.transactionDate||'—',type:nt,shares:change,total:t.share||0});
+            // t.change = net shares traded (negative for sales)
+            // t.transactionPrice = price per share at transaction time (when available)
+            // t.share = total shares owned after transaction (NOT the trade value)
+            const txPrice=t.transactionPrice||0;
+            const txValue=txPrice>0&&change?Math.abs(change)*txPrice:0;
+            _insiderData.push({
+              sym,
+              name:t.name||'—',
+              title:t.title||'—',
+              date:t.transactionDate||'—',
+              type:nt,
+              shares:change,          // net shares in this transaction
+              txPrice,                // price per share
+              txValue,                // dollar value of transaction (0 if unknown)
+              totalOwned:t.share||0   // total shares owned after (renamed from 'total')
+            });
           });
         }
       }
     }catch(e){}
-    if(i<INSIDER_TICKERS.length-1)await new Promise(r=>setTimeout(r,1200));
+    if(i<_itkrs.length-1)await new Promise(r=>setTimeout(r,1200));
   }
   _insiderData.sort((a,b)=>b.date.localeCompare(a.date));
   _insiderData=_insiderData.filter(r=>r.type==='P'||r.type==='S');
@@ -4091,7 +4127,9 @@ async function loadInsiderData(forceRefresh=false){
 function checkInsiderAlert(){
   const now=new Date();const cutoff=new Date();cutoff.setDate(cutoff.getDate()-30);
   const big=_insiderData.filter(r=>{
-    if(Math.abs(r.shares)<500000)return false;
+    // BIG alert: $1M+ en valor real, o 500K shares si no hay precio
+    const isBig=r.txValue>0?r.txValue>=1000000:Math.abs(r.shares||0)>=500000;
+    if(!isBig)return false;
     if(r.date&&r.date!=='—'){const dt=new Date(r.date);if(!isNaN(dt)&&dt<cutoff)return false;}
     return true;
   });

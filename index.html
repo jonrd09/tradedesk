@@ -456,12 +456,13 @@ const ROT_PREV={};
 // INSIDER_TICKERS — sincronizado con _signalTickers al abrir el modal
 // No es una lista fija: usa los tickers activos de la plataforma
 // más un set de blue-chips de alto volumen institucional como base
-const INSIDER_TICKERS_BASE=['TSLA','AAPL','MSFT','NVDA','AMD','COIN','AMZN','NFLX','META','AVGO','MU','QCOM','GOOG','PLTR','UBER','PYPL','CRM','HOOD','UNH','OKLO','URA','ORCL'];
-// Getter dinámico — merge de tickers activos + base, deduplicado
+// Insiders — solo los tickers activos en Configuration
+// Sin lista base fija: si no lo operas, no necesitas verlo
+// ETFs índice excluidos (no tienen insiders relevantes)
+const _INSIDER_ETF_EXCLUDE=['SPY','QQQ','DIA','IWM','VTI','VOO','GLD','SLV','TLT','HYG'];
 function getInsiderTickers(){
-  const active=(_signalTickers||[]).filter(s=>s&&s.length>0);
-  const merged=[...new Set([...active,...INSIDER_TICKERS_BASE])];
-  return merged.filter(s=>!['SPY','QQQ','DIA','IWM'].includes(s)); // excluir ETFs índice
+  return (_signalTickers||[])
+    .filter(s=>s&&s.length>0&&!_INSIDER_ETF_EXCLUDE.includes(s));
 }
 
 // ═══════════════════════════════════════════════════════════════

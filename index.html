@@ -3703,7 +3703,7 @@ function renderInsiderCards(){
   });
 
   if(!data.length){
-    area.innerHTML='<div style="text-align:center;padding:20px;color:var(--text3);font-size:12px;">Sin transacciones de CEO/CFO mayores a $100K esta semana</div>';
+    area.innerHTML='<div style="text-align:center;padding:20px;color:var(--text3);font-size:12px;">Sin transacciones de ejecutivos hoy<br><span style="font-size:11px;opacity:.7;">Se actualiza diariamente · Los datos del SEC tienen 1–2 días de delay</span></div>';
     return;
   }
   area.innerHTML=data.map(d=>{
@@ -3720,7 +3720,9 @@ function renderInsiderCards(){
       <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;flex-wrap:wrap;">
         <span style="font-size:12px;font-weight:700;color:${getTickerColor(d.sym)||'var(--blue)'};">${d.sym}</span>
         <span style="font-size:11px;font-weight:700;color:${labelColor};background:${accentColor};padding:1px 7px;border-radius:10px;">${label}</span>
-        <span style="font-size:11px;color:var(--text2);margin-left:auto;">${d.date}</span>
+        <span style="font-size:11px;color:var(--text2);margin-left:auto;">
+          ${(()=>{const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));const td=`${et.getFullYear()}-${String(et.getMonth()+1).padStart(2,'0')}-${String(et.getDate()).padStart(2,'0')}`;return d.date===td?'<span style="background:rgba(255,194,52,.2);color:var(--yellow);font-weight:700;padding:1px 6px;border-radius:8px;font-size:10px;">HOY</span> ':''})()}${d.date}
+        </span>
       </div>
       <div style="font-size:13px;color:var(--text);font-weight:600;margin-bottom:2px;">${d.name}</div>
       <div style="font-size:11px;color:var(--text3);">
@@ -4034,22 +4036,26 @@ function _getInsiderCache(){
   try{return JSON.parse(localStorage.getItem(INSIDER_CACHE_KEY)||'null');}catch(e){return null;}
 }
 function _saveInsiderCache(data){
-  try{localStorage.setItem(INSIDER_CACHE_KEY,JSON.stringify({data,ts:Date.now(),savedOn:new Date().toLocaleDateString('es-PR')}));}catch(e){}
+  try{
+    const etNow=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+    const todayKey=`${etNow.getFullYear()}-${etNow.getMonth()+1}-${etNow.getDate()}`;
+    localStorage.setItem(INSIDER_CACHE_KEY,JSON.stringify({
+      data,
+      ts:Date.now(),
+      savedOn:etNow.toLocaleDateString('es-PR'),
+      savedDay:todayKey,  // key del día para invalidación automática
+      hasDateRange:true
+    }));
+  }catch(e){}
 }
 function _insiderCacheValid(){
   const c=_getInsiderCache();
-  if(!c||!c.ts||!c.data)return false;
-  const now=new Date();
-  const saved=new Date(c.ts);
-  // Valid if: saved this week (Mon–Sun) and saved day is Monday or later this week
-  // Refresh every Monday: if today is Mon and last save was before this Monday → invalid
-  const dayNow=now.getDay(); // 0=Sun,1=Mon...6=Sat
-  const msPerDay=86400000;
-  // Find last Monday (or today if today is Monday)
-  const daysSinceMon=dayNow===0?6:dayNow-1;
-  const lastMonday=new Date(now.getTime()-daysSinceMon*msPerDay);
-  lastMonday.setHours(0,0,0,0);
-  return saved>=lastMonday; // cache still valid if saved on or after this week's Monday
+  if(!c||!c.ts||!c.data||!c.hasDateRange)return false;
+  // Cache válido solo si fue guardado HOY (mismo día ET)
+  // Al día siguiente se descarta automáticamente — insiders son alertas del día
+  const etNow=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+  const todayKey=`${etNow.getFullYear()}-${etNow.getMonth()+1}-${etNow.getDate()}`;
+  return c.savedDay===todayKey;
 }
 
 async function loadInsiderData(forceRefresh=false){
@@ -4067,30 +4073,45 @@ async function loadInsiderData(forceRefresh=false){
     checkInsiderAlert();
     renderInsiderTable(_insiderData);
     const upEl=document.getElementById('insiderLastUpdate');
-    if(upEl)upEl.textContent=`📦 Caché del ${c.savedOn} · ${_insiderData.length} transacciones · Próxima actualización: lunes`;
+    const _etC=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+    const _todayETc=`${_etC.getFullYear()}-${String(_etC.getMonth()+1).padStart(2,'0')}-${String(_etC.getDate()).padStart(2,'0')}`;
+    const _hasTodayC=_insiderData.some(r=>r.date===_todayETc);
+    if(upEl)upEl.textContent=`${_hasTodayC?'✅ Datos de hoy':'📋 Últimos 3 días'} · ${c.savedOn} · ${_insiderData.length} transacciones`;
     return;
   }
 
-  // Fetch fresh data — sequential 1 by 1 with 1.2s delay to avoid 429
-  tbody.innerHTML='<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--text2);">⟳ Actualizando datos de insiders… (puede tardar ~30s)</td></tr>';
+  // Fetch del día actual — insiders son alertas del día, no historial
+  // from=hoy, to=hoy: solo transacciones reportadas hoy
+  // Finnhub publica transacciones con 1-2 días de delay (SEC Form 4 tiene 2 días hábiles)
+  // por eso también pedimos los últimos 3 días para no perder nada reciente
+  tbody.innerHTML='<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--text2);">⟳ Buscando transacciones de insiders de hoy…</td></tr>';
   _insiderData=[];
   const _itkrs=getInsiderTickers();
+  const _toDate=new Date();
+  // 3 días atrás para cubrir delay de SEC Form 4 (2 días hábiles)
+  const _fromDate=new Date(_toDate.getTime()-3*24*60*60*1000);
+  const _toStr=_toDate.toISOString().slice(0,10);     // YYYY-MM-DD
+  const _fromStr=_fromDate.toISOString().slice(0,10); // YYYY-MM-DD
+  // Fecha de hoy ET para filtrar — solo mostrar transacciones de hoy
+  const _etNow=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+  const _todayET=`${_etNow.getFullYear()}-${String(_etNow.getMonth()+1).padStart(2,'0')}-${String(_etNow.getDate()).padStart(2,'0')}`;
   for(let i=0;i<_itkrs.length;i++){
     const sym=_itkrs[i];
     try{
-      const r=await fetch(`https://finnhub.io/api/v1/stock/insider-transactions?symbol=${sym}&token=${key}`,{signal:AbortSignal.timeout(8000)});
+      // from/to = últimos 3 días para cubrir delay SEC Form 4
+      const url=`https://finnhub.io/api/v1/stock/insider-transactions?symbol=${sym}&from=${_fromStr}&to=${_toStr}&token=${key}`;
+      const r=await fetch(url,{signal:AbortSignal.timeout(8000)});
       if(!r.ok){
         if(r.status===429)addLog('error','Finnhub',`Rate limit insider (429) — ${sym}`);
         else if(r.status===403)addLog('error','Finnhub',`Key inválida insider (403) — ${sym}`);
       }else{
         const d=await r.json();
         if(d&&d.data&&d.data.length>0){
-          d.data.slice(0,5).forEach(t=>{
+          // Sin .slice(0,5) — tomar TODAS las transacciones del período
+          // El slice anterior ocultaba transacciones válidas como la de Elon en Sept
+          d.data.forEach(t=>{
             const txCode=t.transactionCode||'';const change=t.change||0;
             let nt=txCode;if(!txCode)nt=change>0?'P':change<0?'S':'—';if(txCode==='B')nt='P';
-            // t.change = net shares traded (negative for sales)
-            // t.transactionPrice = price per share at transaction time (when available)
-            // t.share = total shares owned after transaction (NOT the trade value)
             const txPrice=t.transactionPrice||0;
             const txValue=txPrice>0&&change?Math.abs(change)*txPrice:0;
             _insiderData.push({
@@ -4099,10 +4120,10 @@ async function loadInsiderData(forceRefresh=false){
               title:t.title||'—',
               date:t.transactionDate||'—',
               type:nt,
-              shares:change,          // net shares in this transaction
-              txPrice,                // price per share
-              txValue,                // dollar value of transaction (0 if unknown)
-              totalOwned:t.share||0   // total shares owned after (renamed from 'total')
+              shares:change,
+              txPrice,
+              txValue,
+              totalOwned:t.share||0
             });
           });
         }
@@ -4111,7 +4132,14 @@ async function loadInsiderData(forceRefresh=false){
     if(i<_itkrs.length-1)await new Promise(r=>setTimeout(r,1200));
   }
   _insiderData.sort((a,b)=>b.date.localeCompare(a.date));
+  // Solo compras y ventas (no grants, options, etc.)
   _insiderData=_insiderData.filter(r=>r.type==='P'||r.type==='S');
+  // Filtrar a SOLO las transacciones de hoy ET
+  // Finnhub usa YYYY-MM-DD en transactionDate — comparar directo con _todayET
+  const _todayData=_insiderData.filter(r=>r.date===_todayET);
+  // Si no hay transacciones de hoy, mostrar las de los últimos 3 días con etiqueta de fecha
+  // (puede que el mercado esté cerrado o no haya habido actividad hoy)
+  _insiderData=_todayData.length?_todayData:_insiderData;
   _saveInsiderCache(_insiderData);
   checkInsiderAlert();
   // Notificar al panel de noticias si hay insiders CEO/CFO >$100K
@@ -4122,7 +4150,8 @@ async function loadInsiderData(forceRefresh=false){
   if(relevantCount>0)notifyInsiderUpdate(relevantCount);
   renderInsiderTable(_insiderData);
   const upEl=document.getElementById('insiderLastUpdate');
-  if(upEl)upEl.textContent=`✅ Actualizado: ${new Date().toLocaleDateString('es-PR')} · ${_insiderData.length} transacciones · Próxima actualización: lunes`;
+  const _hasToday=_insiderData.some(r=>r.date===_todayET);
+  if(upEl)upEl.textContent=`${_hasToday?'✅ Transacciones de HOY':'📋 Sin actividad hoy — mostrando últimos 3 días'} · ${_insiderData.length} transacciones · Se actualiza cada día`;
 }
 function checkInsiderAlert(){
   const now=new Date();const cutoff=new Date();cutoff.setDate(cutoff.getDate()-30);

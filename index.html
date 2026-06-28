@@ -3417,17 +3417,146 @@ function switchNewsTab(tab){
 // ── NEWS FILTER SYSTEM — palabras editables desde Configuration ──────────────
 const _NEWS_FILTER_KEY='tdp_news_filter_v1';
 
-const _NEWS_DEFAULTS_SHOW=[
-  'acquisition','merger','takeover','buyout','partnership','deal','contract','agreement',
-  'ceo','cfo','coo','executive','insider','buys shares','sells shares','purchased shares',
-  'earnings','revenue','guidance','outlook','forecast','beats','misses','beat','miss',
-  'sec filing','sec ','fda','lawsuit','settlement','fine','penalty','investigation',
-  'layoffs','restructuring','spinoff','ipo','buyback','repurchase','dividend',
-  'upgrade','downgrade','price target','raises','lowers','cuts','increases',
-  'raised','lowered','record','surge','plunge','crash','soar','rally',
-  'appoints','names','hires','resigns','fired','steps down','joins',
-  'patent','license','regulator','antitrust','breakup','charges'
+// ── NEWS_PATTERNS — base de patrones con categoría, impacto y dirección
+// Integrado desde newsPatterns.js (jonrd09 — TradeDesk Pro)
+// Solo HIGH y CRITICAL disparan alerta de Telegram independiente
+const NEWS_PATTERNS=[
+  // 💰 INVERSIONES / PARTNERSHIPS
+  {pattern:"strategic investment",       category:"INVESTMENT",          impact:"HIGH",     direction:"BULLISH", emoji:"💰", telegramMsg:"💰 INVERSIÓN ESTRATÉGICA detectada en {ticker}"},
+  {pattern:"multiyear commercial agreement",category:"INVESTMENT",       impact:"HIGH",     direction:"BULLISH", emoji:"🤝", telegramMsg:"🤝 ACUERDO MULTIANUAL detectado en {ticker}"},
+  {pattern:"partnership deal",           category:"INVESTMENT",          impact:"MODERATE", direction:"BULLISH", emoji:"🤝", telegramMsg:"🤝 PARTNERSHIP detectado en {ticker}"},
+  {pattern:"joint venture",              category:"INVESTMENT",          impact:"MODERATE", direction:"BULLISH", emoji:"🤝", telegramMsg:"🤝 JOINT VENTURE anunciado por {ticker}"},
+  {pattern:"preferred supplier",         category:"INVESTMENT",          impact:"MODERATE", direction:"BULLISH", emoji:"💰", telegramMsg:"💰 {ticker} nombrada PROVEEDOR PREFERIDO"},
+  {pattern:"funding round",              category:"INVESTMENT",          impact:"HIGH",     direction:"BULLISH", emoji:"💰", telegramMsg:"💰 RONDA DE FINANCIAMIENTO en {ticker}"},
+  {pattern:"private placement",          category:"INVESTMENT",          impact:"MODERATE", direction:"BULLISH", emoji:"💰", telegramMsg:"💰 COLOCACIÓN PRIVADA anunciada por {ticker}"},
+  {pattern:"expands partnership",        category:"INVESTMENT",          impact:"MODERATE", direction:"BULLISH", emoji:"🤝", telegramMsg:"🤝 PARTNERSHIP EXPANDIDO por {ticker}"},
+  // 🎯 ADQUISICIONES — TICKER COMPRA
+  {pattern:"acquires",                   category:"ACQUISITION_BUYER",   impact:"CRITICAL", direction:"BULLISH", emoji:"🎯", telegramMsg:"🎯 ADQUISICIÓN: {ticker} compra empresa"},
+  {pattern:"to acquire",                 category:"ACQUISITION_BUYER",   impact:"CRITICAL", direction:"BULLISH", emoji:"🎯", telegramMsg:"🎯 ADQUISICIÓN ANUNCIADA por {ticker}"},
+  {pattern:"definitive agreement to acquire",category:"ACQUISITION_BUYER",impact:"CRITICAL",direction:"BULLISH", emoji:"🎯", telegramMsg:"🎯 ACUERDO DEFINITIVO de adquisición por {ticker}"},
+  {pattern:"completes acquisition",      category:"ACQUISITION_BUYER",   impact:"CRITICAL", direction:"BULLISH", emoji:"🎯", telegramMsg:"🎯 ADQUISICIÓN COMPLETADA por {ticker}"},
+  {pattern:"closes buyout",              category:"ACQUISITION_BUYER",   impact:"CRITICAL", direction:"BULLISH", emoji:"🎯", telegramMsg:"🎯 BUYOUT CERRADO por {ticker}"},
+  {pattern:"merger",                     category:"ACQUISITION_BUYER",   impact:"CRITICAL", direction:"BULLISH", emoji:"🎯", telegramMsg:"🎯 FUSIÓN anunciada por {ticker}"},
+  // 🏆 ADQUISICIONES — COMPRAN A TICKER
+  {pattern:"takeover bid",               category:"ACQUISITION_TARGET",  impact:"CRITICAL", direction:"BULLISH", emoji:"🏆", telegramMsg:"🏆 OFERTA DE COMPRA recibida por {ticker}"},
+  {pattern:"buyout by",                  category:"ACQUISITION_TARGET",  impact:"CRITICAL", direction:"BULLISH", emoji:"🏆", telegramMsg:"🏆 {ticker} SERÁ ADQUIRIDA — posible premium"},
+  {pattern:"unsolicited offer",          category:"ACQUISITION_TARGET",  impact:"CRITICAL", direction:"BULLISH", emoji:"🏆", telegramMsg:"🏆 OFERTA NO SOLICITADA para {ticker}"},
+  {pattern:"leveraged buyout",           category:"ACQUISITION_TARGET",  impact:"CRITICAL", direction:"BULLISH", emoji:"🏆", telegramMsg:"🏆 LBO anunciado para {ticker}"},
+  {pattern:"goes private",               category:"ACQUISITION_TARGET",  impact:"CRITICAL", direction:"BULLISH", emoji:"🏆", telegramMsg:"🏆 {ticker} SE PRIVATIZA"},
+  {pattern:"bidding war",                category:"ACQUISITION_TARGET",  impact:"CRITICAL", direction:"BULLISH", emoji:"🏆", telegramMsg:"🏆 GUERRA DE OFERTAS por {ticker}"},
+  {pattern:"per share",                  category:"ACQUISITION_TARGET",  impact:"CRITICAL", direction:"BULLISH", emoji:"🏆", telegramMsg:"🏆 OFERTA POR ACCIÓN recibida por {ticker}"},
+  // 📈 EARNINGS POSITIVOS
+  {pattern:"beats",                      category:"EARNINGS_BEAT",       impact:"HIGH",     direction:"BULLISH", emoji:"📈", telegramMsg:"📈 EARNINGS BEAT: {ticker} superó estimados"},
+  {pattern:"record revenue",             category:"EARNINGS_BEAT",       impact:"HIGH",     direction:"BULLISH", emoji:"📈", telegramMsg:"📈 REVENUE RÉCORD reportado por {ticker}"},
+  {pattern:"raises full-year guidance",  category:"EARNINGS_BEAT",       impact:"HIGH",     direction:"BULLISH", emoji:"📈", telegramMsg:"📈 GUIDANCE ELEVADO por {ticker}"},
+  {pattern:"raises guidance",            category:"EARNINGS_BEAT",       impact:"HIGH",     direction:"BULLISH", emoji:"📈", telegramMsg:"📈 GUIDANCE ELEVADO por {ticker}"},
+  {pattern:"tops revenue",               category:"EARNINGS_BEAT",       impact:"HIGH",     direction:"BULLISH", emoji:"📈", telegramMsg:"📈 REVENUE SUPERADO por {ticker}"},
+  {pattern:"record quarterly profit",    category:"EARNINGS_BEAT",       impact:"HIGH",     direction:"BULLISH", emoji:"📈", telegramMsg:"📈 GANANCIA TRIMESTRAL RÉCORD de {ticker}"},
+  {pattern:"blowout quarter",            category:"EARNINGS_BEAT",       impact:"HIGH",     direction:"BULLISH", emoji:"📈", telegramMsg:"📈 TRIMESTRE EXCEPCIONAL de {ticker}"},
+  {pattern:"record free cash flow",      category:"EARNINGS_BEAT",       impact:"HIGH",     direction:"BULLISH", emoji:"📈", telegramMsg:"📈 FREE CASH FLOW RÉCORD de {ticker}"},
+  {pattern:"exceeds expectations",       category:"EARNINGS_BEAT",       impact:"HIGH",     direction:"BULLISH", emoji:"📈", telegramMsg:"📈 {ticker} SUPERÓ expectativas del mercado"},
+  // 📉 EARNINGS NEGATIVOS
+  {pattern:"misses",                     category:"EARNINGS_MISS",       impact:"HIGH",     direction:"BEARISH", emoji:"📉", telegramMsg:"📉 EARNINGS MISS: {ticker} no alcanzó estimados"},
+  {pattern:"cuts guidance",              category:"EARNINGS_MISS",       impact:"HIGH",     direction:"BEARISH", emoji:"📉", telegramMsg:"📉 GUIDANCE RECORTADO por {ticker}"},
+  {pattern:"lowers outlook",             category:"EARNINGS_MISS",       impact:"HIGH",     direction:"BEARISH", emoji:"📉", telegramMsg:"📉 OUTLOOK REDUCIDO por {ticker}"},
+  {pattern:"wider-than-expected loss",   category:"EARNINGS_MISS",       impact:"HIGH",     direction:"BEARISH", emoji:"📉", telegramMsg:"📉 PÉRDIDA MAYOR a lo esperado en {ticker}"},
+  {pattern:"revenue shortfall",          category:"EARNINGS_MISS",       impact:"HIGH",     direction:"BEARISH", emoji:"📉", telegramMsg:"📉 SHORTFALL DE REVENUE en {ticker}"},
+  {pattern:"disappoints",                category:"EARNINGS_MISS",       impact:"HIGH",     direction:"BEARISH", emoji:"📉", telegramMsg:"📉 {ticker} DECEPCIONÓ al mercado"},
+  {pattern:"warns of",                   category:"EARNINGS_MISS",       impact:"HIGH",     direction:"BEARISH", emoji:"📉", telegramMsg:"📉 WARNING emitido por {ticker}"},
+  {pattern:"suspends dividend",          category:"EARNINGS_MISS",       impact:"HIGH",     direction:"BEARISH", emoji:"📉", telegramMsg:"📉 DIVIDENDO SUSPENDIDO por {ticker}"},
+  {pattern:"margin contracts",           category:"EARNINGS_MISS",       impact:"MODERATE", direction:"BEARISH", emoji:"📉", telegramMsg:"📉 CONTRACCIÓN DE MÁRGENES en {ticker}"},
+  // ⚖️ DEMANDAS CONTRA TICKER
+  {pattern:"lawsuit",                    category:"LEGAL_AGAINST",       impact:"HIGH",     direction:"BEARISH", emoji:"⚖️", telegramMsg:"⚖️ DEMANDA presentada contra {ticker}"},
+  {pattern:"class action",               category:"LEGAL_AGAINST",       impact:"CRITICAL", direction:"BEARISH", emoji:"🚨", telegramMsg:"🚨 CLASS ACTION contra {ticker}"},
+  {pattern:"DOJ investigation",          category:"LEGAL_AGAINST",       impact:"CRITICAL", direction:"BEARISH", emoji:"🚨", telegramMsg:"🚨 INVESTIGACIÓN DOJ sobre {ticker}"},
+  {pattern:"SEC charges",                category:"LEGAL_AGAINST",       impact:"CRITICAL", direction:"BEARISH", emoji:"🚨", telegramMsg:"🚨 CARGOS SEC contra {ticker}"},
+  {pattern:"antitrust suit",             category:"LEGAL_AGAINST",       impact:"HIGH",     direction:"BEARISH", emoji:"⚖️", telegramMsg:"⚖️ CASO ANTIMONOPOLIO contra {ticker}"},
+  {pattern:"patent infringement",        category:"LEGAL_AGAINST",       impact:"HIGH",     direction:"BEARISH", emoji:"⚖️", telegramMsg:"⚖️ INFRACCIÓN DE PATENTE contra {ticker}"},
+  {pattern:"fined",                      category:"LEGAL_AGAINST",       impact:"HIGH",     direction:"BEARISH", emoji:"⚖️", telegramMsg:"⚖️ MULTA impuesta a {ticker}"},
+  {pattern:"securities fraud",           category:"LEGAL_AGAINST",       impact:"CRITICAL", direction:"BEARISH", emoji:"🚨", telegramMsg:"🚨 FRAUDE DE VALORES: cargos contra {ticker}"},
+  {pattern:"Wells Notice",               category:"LEGAL_AGAINST",       impact:"CRITICAL", direction:"BEARISH", emoji:"🚨", telegramMsg:"🚨 WELLS NOTICE recibido por {ticker}"},
+  {pattern:"regulatory probe",           category:"LEGAL_AGAINST",       impact:"HIGH",     direction:"BEARISH", emoji:"⚖️", telegramMsg:"⚖️ INVESTIGACIÓN REGULATORIA sobre {ticker}"},
+  {pattern:"criminal investigation",     category:"LEGAL_AGAINST",       impact:"CRITICAL", direction:"BEARISH", emoji:"🚨", telegramMsg:"🚨 INVESTIGACIÓN CRIMINAL sobre {ticker}"},
+  {pattern:"shareholder lawsuit",        category:"LEGAL_AGAINST",       impact:"HIGH",     direction:"BEARISH", emoji:"⚖️", telegramMsg:"⚖️ DEMANDA DE ACCIONISTAS contra {ticker}"},
+  // ✅ DEMANDAS — TICKER GANA
+  {pattern:"wins lawsuit",               category:"LEGAL_WIN",           impact:"HIGH",     direction:"BULLISH", emoji:"✅", telegramMsg:"✅ DEMANDA GANADA por {ticker}"},
+  {pattern:"court rules in favor",       category:"LEGAL_WIN",           impact:"HIGH",     direction:"BULLISH", emoji:"✅", telegramMsg:"✅ FALLO FAVORABLE para {ticker}"},
+  {pattern:"dismisses",                  category:"LEGAL_WIN",           impact:"MODERATE", direction:"BULLISH", emoji:"✅", telegramMsg:"✅ DEMANDA DESESTIMADA contra {ticker}"},
+  {pattern:"probe closed",               category:"LEGAL_WIN",           impact:"MODERATE", direction:"BULLISH", emoji:"✅", telegramMsg:"✅ INVESTIGACIÓN CERRADA sobre {ticker}"},
+  {pattern:"drops investigation",        category:"LEGAL_WIN",           impact:"HIGH",     direction:"BULLISH", emoji:"✅", telegramMsg:"✅ INVESTIGACIÓN ABANDONADA contra {ticker}"},
+  {pattern:"awarded damages",            category:"LEGAL_WIN",           impact:"HIGH",     direction:"BULLISH", emoji:"✅", telegramMsg:"✅ DAÑOS OTORGADOS a favor de {ticker}"},
+  {pattern:"prevails",                   category:"LEGAL_WIN",           impact:"HIGH",     direction:"BULLISH", emoji:"✅", telegramMsg:"✅ {ticker} PREVALECE en disputa legal"},
+  {pattern:"favorable settlement",       category:"LEGAL_WIN",           impact:"MODERATE", direction:"BULLISH", emoji:"✅", telegramMsg:"✅ ACUERDO FAVORABLE para {ticker}"},
+  {pattern:"upholds ruling for",         category:"LEGAL_WIN",           impact:"HIGH",     direction:"BULLISH", emoji:"✅", telegramMsg:"✅ FALLO CONFIRMADO en apelación para {ticker}"},
+  // ❌ DEMANDAS — TICKER PIERDE
+  {pattern:"loses lawsuit",              category:"LEGAL_LOSS",          impact:"HIGH",     direction:"BEARISH", emoji:"❌", telegramMsg:"❌ DEMANDA PERDIDA por {ticker}"},
+  {pattern:"ordered to pay",             category:"LEGAL_LOSS",          impact:"HIGH",     direction:"BEARISH", emoji:"❌", telegramMsg:"❌ {ticker} CONDENADA a pagar daños"},
+  {pattern:"found liable",               category:"LEGAL_LOSS",          impact:"HIGH",     direction:"BEARISH", emoji:"❌", telegramMsg:"❌ {ticker} declarada RESPONSABLE"},
+  {pattern:"import ban",                 category:"LEGAL_LOSS",          impact:"CRITICAL", direction:"BEARISH", emoji:"🚨", telegramMsg:"🚨 BAN DE IMPORTACIÓN impuesto a {ticker}"},
+  {pattern:"patent declared invalid",    category:"LEGAL_LOSS",          impact:"HIGH",     direction:"BEARISH", emoji:"❌", telegramMsg:"❌ PATENTE INVALIDADA de {ticker}"},
+  {pattern:"barred from",                category:"LEGAL_LOSS",          impact:"CRITICAL", direction:"BEARISH", emoji:"🚨", telegramMsg:"🚨 {ticker} PROHIBIDA de operar en mercado"},
+  {pattern:"loses appeal",               category:"LEGAL_LOSS",          impact:"HIGH",     direction:"BEARISH", emoji:"❌", telegramMsg:"❌ {ticker} PIERDE APELACIÓN"},
+  {pattern:"EU fines",                   category:"LEGAL_LOSS",          impact:"CRITICAL", direction:"BEARISH", emoji:"🚨", telegramMsg:"🚨 MULTA UE impuesta a {ticker}"},
+  // 💀 DETERIORO FINANCIERO
+  {pattern:"bankruptcy",                 category:"FINANCIAL_DISTRESS",  impact:"CRITICAL", direction:"BEARISH", emoji:"💀", telegramMsg:"💀 BANCARROTA declarada por {ticker}"},
+  {pattern:"chapter 11",                 category:"FINANCIAL_DISTRESS",  impact:"CRITICAL", direction:"BEARISH", emoji:"💀", telegramMsg:"💀 CHAPTER 11 declarado por {ticker}"},
+  {pattern:"going concern",              category:"FINANCIAL_DISTRESS",  impact:"CRITICAL", direction:"BEARISH", emoji:"💀", telegramMsg:"💀 GOING CONCERN warning en {ticker}"},
+  {pattern:"delisted",                   category:"FINANCIAL_DISTRESS",  impact:"CRITICAL", direction:"BEARISH", emoji:"💀", telegramMsg:"💀 {ticker} DELISTED del mercado"},
+  {pattern:"layoffs",                    category:"FINANCIAL_DISTRESS",  impact:"HIGH",     direction:"BEARISH", emoji:"📉", telegramMsg:"📉 RECORTE DE PERSONAL anunciado por {ticker}"},
+  {pattern:"restructuring",              category:"FINANCIAL_DISTRESS",  impact:"HIGH",     direction:"BEARISH", emoji:"📉", telegramMsg:"📉 REESTRUCTURACIÓN anunciada por {ticker}"},
+  {pattern:"strategic alternatives",     category:"FINANCIAL_DISTRESS",  impact:"HIGH",     direction:"BEARISH", emoji:"⚠️", telegramMsg:"⚠️ {ticker} explora ALTERNATIVAS ESTRATÉGICAS"},
+  {pattern:"credit downgrade",           category:"FINANCIAL_DISTRESS",  impact:"HIGH",     direction:"BEARISH", emoji:"📉", telegramMsg:"📉 RATING CREDITICIO rebajado de {ticker}"},
+  {pattern:"default risk",               category:"FINANCIAL_DISTRESS",  impact:"CRITICAL", direction:"BEARISH", emoji:"🚨", telegramMsg:"🚨 RIESGO DE DEFAULT elevado en {ticker}"},
+  {pattern:"impairment charge",          category:"FINANCIAL_DISTRESS",  impact:"HIGH",     direction:"BEARISH", emoji:"📉", telegramMsg:"📉 CARGO POR DETERIORO registrado por {ticker}"},
+  {pattern:"stock halted",               category:"FINANCIAL_DISTRESS",  impact:"CRITICAL", direction:"BEARISH", emoji:"🚨", telegramMsg:"🚨 ACCIÓN HALTED: {ticker} suspendida"},
+  {pattern:"suspends operations",        category:"FINANCIAL_DISTRESS",  impact:"CRITICAL", direction:"BEARISH", emoji:"💀", telegramMsg:"💀 OPERACIONES SUSPENDIDAS en {ticker}"},
+  // 📋 CONTRATOS
+  {pattern:"government contract",        category:"CONTRACT_WIN",        impact:"HIGH",     direction:"BULLISH", emoji:"📋", telegramMsg:"📋 CONTRATO GUBERNAMENTAL ganado por {ticker}"},
+  {pattern:"Pentagon contract",          category:"CONTRACT_WIN",        impact:"CRITICAL", direction:"BULLISH", emoji:"🛡️", telegramMsg:"🛡️ CONTRATO PENTÁGONO para {ticker}"},
+  {pattern:"NASA contract",              category:"CONTRACT_WIN",        impact:"HIGH",     direction:"BULLISH", emoji:"🚀", telegramMsg:"🚀 CONTRATO NASA para {ticker}"},
+  {pattern:"awarded contract",           category:"CONTRACT_WIN",        impact:"HIGH",     direction:"BULLISH", emoji:"📋", telegramMsg:"📋 CONTRATO OTORGADO a {ticker}"},
+  {pattern:"wins competitive bid",       category:"CONTRACT_WIN",        impact:"HIGH",     direction:"BULLISH", emoji:"📋", telegramMsg:"📋 LICITACIÓN GANADA por {ticker}"},
+  {pattern:"contract extended",          category:"CONTRACT_WIN",        impact:"MODERATE", direction:"BULLISH", emoji:"📋", telegramMsg:"📋 CONTRATO EXTENDIDO para {ticker}"},
+  {pattern:"selected as supplier",       category:"CONTRACT_WIN",        impact:"HIGH",     direction:"BULLISH", emoji:"📋", telegramMsg:"📋 {ticker} SELECCIONADA como proveedor"},
+  {pattern:"contract cancelled",         category:"CONTRACT_LOSS",       impact:"HIGH",     direction:"BEARISH", emoji:"❌", telegramMsg:"❌ CONTRATO CANCELADO para {ticker}"},
+  {pattern:"loses contract",             category:"CONTRACT_LOSS",       impact:"HIGH",     direction:"BEARISH", emoji:"❌", telegramMsg:"❌ CONTRATO PERDIDO por {ticker}"},
+  {pattern:"contract terminated",        category:"CONTRACT_LOSS",       impact:"HIGH",     direction:"BEARISH", emoji:"❌", telegramMsg:"❌ CONTRATO TERMINADO de {ticker}"},
+  // 🔬 FDA / PRODUCTO
+  {pattern:"FDA approval",               category:"PRODUCT_APPROVAL",    impact:"CRITICAL", direction:"BULLISH", emoji:"✅", telegramMsg:"✅ APROBACIÓN FDA obtenida por {ticker}"},
+  {pattern:"FDA approved",               category:"PRODUCT_APPROVAL",    impact:"CRITICAL", direction:"BULLISH", emoji:"✅", telegramMsg:"✅ FDA APROBÓ producto de {ticker}"},
+  {pattern:"FDA rejected",               category:"PRODUCT_REJECTION",   impact:"CRITICAL", direction:"BEARISH", emoji:"🚨", telegramMsg:"🚨 FDA RECHAZÓ producto de {ticker}"},
+  {pattern:"complete response letter",   category:"PRODUCT_REJECTION",   impact:"CRITICAL", direction:"BEARISH", emoji:"🚨", telegramMsg:"🚨 FDA CRL emitida a {ticker}"},
+  {pattern:"product recall",             category:"PRODUCT_REJECTION",   impact:"HIGH",     direction:"BEARISH", emoji:"⚠️", telegramMsg:"⚠️ RECALL de producto anunciado por {ticker}"},
+  {pattern:"breakthrough designation",   category:"PRODUCT_APPROVAL",    impact:"HIGH",     direction:"BULLISH", emoji:"✅", telegramMsg:"✅ BREAKTHROUGH DESIGNATION obtenida por {ticker}"},
+  {pattern:"clinical trial",             category:"PRODUCT_APPROVAL",    impact:"MODERATE", direction:"BULLISH", emoji:"🔬", telegramMsg:"🔬 ENSAYO CLÍNICO anunciado por {ticker}"},
+  {pattern:"trial failure",              category:"PRODUCT_REJECTION",   impact:"CRITICAL", direction:"BEARISH", emoji:"🚨", telegramMsg:"🚨 ENSAYO CLÍNICO FALLIDO en {ticker}"},
+  // 👔 MANAGEMENT
+  {pattern:"CEO resigns",                category:"MANAGEMENT",          impact:"HIGH",     direction:"BEARISH", emoji:"👔", telegramMsg:"👔 CEO RENUNCIA en {ticker}"},
+  {pattern:"CEO steps down",             category:"MANAGEMENT",          impact:"HIGH",     direction:"BEARISH", emoji:"👔", telegramMsg:"👔 CEO SE VA en {ticker}"},
+  {pattern:"CFO departure",              category:"MANAGEMENT",          impact:"MODERATE", direction:"BEARISH", emoji:"👔", telegramMsg:"👔 CFO SALIDA anunciada en {ticker}"},
+  {pattern:"names new CEO",              category:"MANAGEMENT",          impact:"MODERATE", direction:"BULLISH", emoji:"👔", telegramMsg:"👔 NUEVO CEO nombrado en {ticker}"},
+  {pattern:"share buyback",              category:"MANAGEMENT",          impact:"MODERATE", direction:"BULLISH", emoji:"💵", telegramMsg:"💵 RECOMPRA DE ACCIONES por {ticker}"},
+  {pattern:"stock split",                category:"MANAGEMENT",          impact:"MODERATE", direction:"BULLISH", emoji:"✂️", telegramMsg:"✂️ STOCK SPLIT anunciado por {ticker}"},
+  {pattern:"increases dividend",         category:"MANAGEMENT",          impact:"MODERATE", direction:"BULLISH", emoji:"💵", telegramMsg:"💵 DIVIDENDO AUMENTADO por {ticker}"},
+  {pattern:"cuts dividend",              category:"MANAGEMENT",          impact:"HIGH",     direction:"BEARISH", emoji:"📉", telegramMsg:"📉 DIVIDENDO RECORTADO por {ticker}"},
+  {pattern:"insider buys",               category:"MANAGEMENT",          impact:"MODERATE", direction:"BULLISH", emoji:"💵", telegramMsg:"💵 COMPRA INSIDER en {ticker}"},
+  {pattern:"insider sells",              category:"MANAGEMENT",          impact:"MODERATE", direction:"BEARISH", emoji:"⚠️", telegramMsg:"⚠️ VENTA INSIDER en {ticker}"},
+  // 🏆 ÍNDICES
+  {pattern:"added to S&P 500",           category:"INDEX_INCLUSION",     impact:"CRITICAL", direction:"BULLISH", emoji:"🏆", telegramMsg:"🏆 {ticker} AÑADIDA al S&P 500"},
+  {pattern:"added to Nasdaq-100",        category:"INDEX_INCLUSION",     impact:"CRITICAL", direction:"BULLISH", emoji:"🏆", telegramMsg:"🏆 {ticker} AÑADIDA al Nasdaq-100"},
+  {pattern:"added to Dow",               category:"INDEX_INCLUSION",     impact:"CRITICAL", direction:"BULLISH", emoji:"🏆", telegramMsg:"🏆 {ticker} AÑADIDA al Dow Jones"},
+  {pattern:"removed from S&P 500",       category:"INDEX_REMOVAL",       impact:"HIGH",     direction:"BEARISH", emoji:"📉", telegramMsg:"📉 {ticker} REMOVIDA del S&P 500"},
+  {pattern:"removed from Nasdaq-100",    category:"INDEX_REMOVAL",       impact:"HIGH",     direction:"BEARISH", emoji:"📉", telegramMsg:"📉 {ticker} REMOVIDA del Nasdaq-100"},
 ];
+
+// Prioridad numérica para ordenar múltiples matches
+const _NEWS_IMPACT_PRIORITY={CRITICAL:4,HIGH:3,MODERATE:2,LOW:1};
+
+// Solo HIGH y CRITICAL disparan alerta de Telegram de noticias
+const _NEWS_SEND_THRESHOLD=['HIGH','CRITICAL'];
+
+// Extrae los patrones como keywords para compatibilidad con _NEWS_DEFAULTS_SHOW
+const _NEWS_DEFAULTS_SHOW=NEWS_PATTERNS.map(p=>p.pattern);
 const _NEWS_DEFAULTS_HIDE=[
   "here's why","top stocks","best stocks","should you buy","is it time",
   "it's time to buy","it's time to sell","its time to buy","its time to sell",
@@ -3457,12 +3586,90 @@ function _saveNewsFilter(show,hide){
   try{localStorage.setItem(_NEWS_FILTER_KEY,JSON.stringify({show,hide}));}catch(e){}
 }
 
-function newsPassesFilter(title){
+// Mapa de nombre de empresa por ticker — para buscar el nombre en el título
+// Además del ticker exacto (ej. "AAPL"), busca el nombre real (ej. "Apple")
+const _TICKER_COMPANY_NAMES={
+  'META':['meta','facebook'],'GOOG':['alphabet','google'],'GOOGL':['alphabet','google'],
+  'AAPL':['apple'],'MSFT':['microsoft'],'AMZN':['amazon'],'NVDA':['nvidia'],
+  'TSLA':['tesla'],'SPY':['s&p','s&p 500','spy'],'QQQ':['nasdaq','qqq'],
+  'PLTR':['palantir'],'NFLX':['netflix'],'AMD':['amd'],'INTC':['intel'],
+  'JPM':['jpmorgan','j.p. morgan','jp morgan'],'BAC':['bank of america'],
+  'GS':['goldman sachs','goldman'],'MS':['morgan stanley'],
+  'DIS':['disney','walt disney'],'BA':['boeing'],'F':['ford'],
+  'GM':['general motors'],'XOM':['exxon','exxonmobil'],
+  'CVX':['chevron'],'PFE':['pfizer'],'JNJ':['johnson & johnson','johnson and johnson'],
+  'WMT':['walmart'],'COST':['costco'],'TGT':['target'],
+  'UBER':['uber'],'LYFT':['lyft'],'SNAP':['snap','snapchat'],
+  'RBLX':['roblox'],'COIN':['coinbase'],'HOOD':['robinhood'],
+  'PYPL':['paypal'],'SQ':['square','block inc'],'V':['visa'],'MA':['mastercard'],
+  'CRM':['salesforce'],'NOW':['servicenow'],'SNOW':['snowflake'],
+  'PANW':['palo alto'],'CRWD':['crowdstrike'],'OKTA':['okta'],
+  'ZM':['zoom'],'DOCU':['docusign'],'SHOP':['shopify'],
+  'MELI':['mercadolibre','mercado libre'],'SE':['sea limited','sea group'],
+  'BABA':['alibaba'],'JD':['jd.com'],'PDD':['pinduoduo','temu'],
+};
+
+// ── analyzeNewsHeadline — motor principal de clasificación (de newsPatterns.js)
+// Retorna el match de mayor impacto o null si no hay ninguno.
+function analyzeNewsHeadline(headline, ticker){
+  if(!headline||!ticker)return null;
+  const hl=headline.toLowerCase();
+  const matches=NEWS_PATTERNS.filter(p=>hl.includes(p.pattern.toLowerCase()));
+  if(!matches.length)return null;
+  const top=matches.sort((a,b)=>_NEWS_IMPACT_PRIORITY[b.impact]-_NEWS_IMPACT_PRIORITY[a.impact])[0];
+  return{
+    ticker:ticker.toUpperCase(),
+    headline,
+    category:top.category,
+    impact:top.impact,
+    direction:top.direction,
+    emoji:top.emoji,
+    allMatches:matches.length,
+    telegramMsg:top.telegramMsg.replace('{ticker}',ticker.toUpperCase()),
+    timestamp:new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',timeZone:'America/New_York'})
+  };
+}
+
+// newsPassesFilter(title, sym)
+// sym es requerido — el título DEBE contener el ticker o nombre de empresa.
+// Usa NEWS_PATTERNS como base de patrones en lugar de keywords simples.
+function newsPassesFilter(title, sym){
   if(!title)return false;
   const t=title.toLowerCase();
-  const{show,hide}=_getNewsFilter();
+  const{hide}=_getNewsFilter();
+
+  // 1. Hide keywords — bloquear si está en la lista de exclusión
   if(hide.some(k=>t.includes(k.toLowerCase())))return false;
-  if(show.some(k=>t.includes(k.toLowerCase())))return true;
+
+  // 2. Ticker/empresa DEBE aparecer en el título
+  if(sym){
+    const symLower=sym.toLowerCase();
+    const hasTickerInTitle=t.includes(symLower)||t.includes('('+symLower+')')||
+      t.includes(symLower+':')||t.includes(symLower+' ');
+    const companyAliases=_TICKER_COMPANY_NAMES[sym.toUpperCase()]||[];
+    const hasCompanyInTitle=companyAliases.some(alias=>t.includes(alias.toLowerCase()));
+    if(!hasTickerInTitle&&!hasCompanyInTitle)return false;
+  }
+
+  // 3. Debe tener al menos un patrón de NEWS_PATTERNS o un keyword del show list
+  const{show}=_getNewsFilter();
+  const hasPattern=NEWS_PATTERNS.some(p=>t.includes(p.pattern.toLowerCase()));
+  const hasShowKw=show.some(k=>t.includes(k.toLowerCase()));
+
+  // 4. Si el ticker/empresa está en el título Y tiene patrón o keyword — mostrar
+  if(hasPattern||hasShowKw)return true;
+
+  // 5. Si el ticker/empresa está directamente en el título aunque no tenga patrón —
+  //    mostrar igual (noticia directa sobre la empresa)
+  if(sym){
+    const symLower=sym.toLowerCase();
+    const hasTickerInTitle=t.includes(symLower)||t.includes('('+symLower+')')||
+      t.includes(symLower+':')||t.includes(symLower+' ');
+    const companyAliases=_TICKER_COMPANY_NAMES[sym.toUpperCase()]||[];
+    const hasCompanyInTitle=companyAliases.some(alias=>t.includes(alias.toLowerCase()));
+    if(hasTickerInTitle||hasCompanyInTitle)return true;
+  }
+
   return false;
 }
 
@@ -6150,7 +6357,8 @@ async function loadNews(ticker){
     }
     const deduped=Array.from(seen.values());
 
-    const filtered=deduped.filter(item=>newsPassesFilter(item.title));
+    // Pasar el sym para que el filtro verifique que el ticker/empresa aparece en el título
+    const filtered=deduped.filter(item=>newsPassesFilter(item.title, item.syms&&item.syms.length===1?item.syms[0]:null));
     if(!filtered.length){
       area.innerHTML='<div style="text-align:center;padding:20px;color:var(--text3);font-size:12px;">Sin noticias relevantes en este momento.<br><span style="font-size:11px;">Solo se muestran: adquisiciones, ejecutivos, earnings, partnerships, etc.</span></div>';
       return;
@@ -6195,17 +6403,103 @@ async function loadNews(ticker){
   }
 }
 
+// ── _newsAlertSent — dedup de alertas de Telegram por noticia
+// key: hash del headline para no repetir la misma alerta en el mismo día
+const _newsAlertSent=new Set();
+function _newsHeadlineHash(ticker, headline){
+  // Genera un key simple basado en ticker + primeros 60 chars del headline
+  return `${ticker}::${headline.substring(0,60).toLowerCase().replace(/\s+/g,'_')}`;
+}
+
+// ── _sendNewsAlert — envía alerta de Telegram para una noticia
+// Solo si: impacto HIGH o CRITICAL, noticia del día actual o hasta +3 días (earnings futuros)
+async function _sendNewsAlert(ticker, headline, pubDateStr){
+  const hash=_newsHeadlineHash(ticker,headline);
+  if(_newsAlertSent.has(hash))return; // ya enviada esta sesión
+
+  const result=analyzeNewsHeadline(headline,ticker);
+  if(!result)return; // sin patrón reconocido
+  if(!_NEWS_SEND_THRESHOLD.includes(result.impact))return; // solo HIGH/CRITICAL
+
+  // Ventana de tiempo: noticia del día actual o hasta +3 días (para earnings futuros)
+  const nowEt=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+  const nowDay=new Date(nowEt.getFullYear(),nowEt.getMonth(),nowEt.getDate());
+  const pubDate=pubDateStr?new Date(pubDateStr):null;
+  if(pubDate){
+    const pubDay=new Date(new Date(pubDate).toLocaleString('en-US',{timeZone:'America/New_York'}));
+    const pubDayOnly=new Date(pubDay.getFullYear(),pubDay.getMonth(),pubDay.getDate());
+    const diffDays=(pubDayOnly-nowDay)/(1000*60*60*24);
+    // Descartar noticias de más de 1 día atrás (no queremos alertas de noticias viejas)
+    // Permitir hasta +3 días adelante (earnings futuros anunciados)
+    if(diffDays<-1||diffDays>3)return;
+  }
+
+  // Marcar como enviada ANTES de hacer fetch para evitar doble envío
+  _newsAlertSent.add(hash);
+
+  const tgToken=localStorage.getItem('telegram_bot_token')||'';
+  const tgChat=localStorage.getItem('telegram_chat_id')||'';
+  if(!tgToken||!tgChat)return;
+
+  const dirIcon=result.direction==='BULLISH'?'🟢 CALL':'🔴 PUT';
+  const impactBar={CRITICAL:'🔴🔴🔴 CRÍTICO',HIGH:'🟠🟠 ALTO',MODERATE:'🟡 MODERADO',LOW:'⚪ BAJO'};
+  const msg=[
+    `━━━━━━━━━━━━━━━━━━━━`,
+    `${result.emoji} *$${result.ticker}* — ALERTA DE NOTICIA`,
+    `━━━━━━━━━━━━━━━━━━━━`,
+    `📌 ${result.telegramMsg}`,
+    ``,
+    `📊 Impacto:   ${impactBar[result.impact]}`,
+    `📈 Dirección: ${dirIcon}`,
+    `🏷️ Categoría: ${result.category}`,
+    `⏰ Hora:      ${result.timestamp} ET`,
+    ``,
+    `📰 _"${headline.substring(0,120)}"_`,
+    `━━━━━━━━━━━━━━━━━━━━`,
+    `_TradeDesk Pro — Alerta Noticias_`
+  ].join('\n');
+
+  try{
+    await fetch(`https://api.telegram.org/bot${tgToken}/sendMessage`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({chat_id:tgChat,text:msg,parse_mode:'Markdown'})
+    });
+    addLog('info','Noticias TG',`${result.emoji} ${ticker} — ${result.category} enviado a Telegram`);
+  }catch(e){
+    addLog('warn','Noticias TG',`Error enviando alerta: ${e.message}`);
+    _newsAlertSent.delete(hash); // permitir reintento si falló el envío
+  }
+}
+
+// ── _scanNewsForAlerts — procesa el cache actual de noticias y dispara alertas
+// Se llama después de cada loadNews() — no hace fetch adicional, usa el cache
+async function _scanNewsForAlerts(){
+  const tgToken=localStorage.getItem('telegram_bot_token')||'';
+  if(!tgToken)return; // sin Telegram configurado — no hacer nada
+  for(const sym of _signalTickers){
+    const cached=_newsCache[sym];
+    if(!cached||!cached.items||!cached.items.length)continue;
+    for(const item of cached.items){
+      if(!item.title)continue;
+      await _sendNewsAlert(sym,item.title,item.pubDate);
+    }
+  }
+}
+
 // Auto-load ALL news on init
 function initNews(){
   setTimeout(()=>loadNews('ALL'),2000);
+  // Después de cargar noticias, escanear para alertas de Telegram
+  setTimeout(()=>_scanNewsForAlerts(),4000);
   // Refresh independiente del masterTick — funciona en fin de semana también
-  // Intervalo: 15min en weekend (noticias frescas), 30min en días de trading
   setInterval(()=>{
     if(!_newsActive)return;
-    // Limpiar cache para forzar fetch fresco — no mostrar datos stale
     _newsCache={};
     loadNews(_newsActive);
-  },15*60*1000); // 15min — en días de trading el cache interno de 30min filtra el exceso
+    // Escanear para nuevas alertas después del refresh
+    setTimeout(()=>_scanNewsForAlerts(),3000);
+  },15*60*1000);
 }
 
 // ═══════════════════════════════════════════════════════════════

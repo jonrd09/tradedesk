@@ -3883,8 +3883,10 @@ function _autoFillHLines(sym, ohlcD){
     const n=hD.length;
     if(n<2)return;
 
-    const prevHigh=hD[n-2];
-    const prevLow=lD[n-2];
+    // Velas diarias de Schwab: n-1 = última sesión cerrada (viernes si hoy es lunes)
+    // Schwab NO incluye la vela del día actual hasta que cierra — n-1 siempre es la última completa
+    const prevHigh=hD[n-1];
+    const prevLow=lD[n-1];
     if(!prevHigh||!prevLow||prevHigh<=0||prevLow<=0)return;
 
     const stored=JSON.parse(localStorage.getItem('levels_'+sym)||'{}');
@@ -3986,8 +3988,9 @@ async function _forceRefreshHLines(){
     if(cached&&cached.data){
       const hD=highs(cached.data),lD=lows(cached.data);
       const n=hD.length;
-      if(n>=2&&hD[n-2]>0&&lD[n-2]>0){
-        _apply(hD[n-2],lD[n-2]);
+      // n-1 = última vela diaria cerrada (Schwab no incluye la vela del día en curso)
+      if(n>=1&&hD[n-1]>0&&lD[n-1]>0){
+        _apply(hD[n-1],lD[n-1]);
         return;
       }
     }
@@ -4018,9 +4021,9 @@ async function _forceRefreshHLines(){
       if(btn){btn.textContent='↻ Auto';btn.disabled=false;}
       return;
     }
-    // Penúltima vela = sesión anterior completa
+    // Última vela = sesión anterior completa (Schwab Daily no incluye la vela del día en curso)
     const n=d.candles.length;
-    const prevCandle=d.candles[n-2];
+    const prevCandle=d.candles[n-1];
     _apply(prevCandle.high,prevCandle.low);
 
   }catch(e){

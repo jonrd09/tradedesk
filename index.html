@@ -3941,26 +3941,57 @@ function loadStrikeLevels(ticker){
   }catch(e){}
 }
 
-// Fuerza recálculo de HLines desde velas de Schwab — borra valores actuales y recalcula
+// Fuerza recálculo de HLines — lee directamente del cache de velas diarias
+// No espera buildSignals — calcula y muestra al instante
 function _forceRefreshHLines(){
   if(!_strikeTicker)return;
-  // Borrar hi y lo del storage para forzar el recálculo en el siguiente buildSignals
+  const sym=_strikeTicker;
   try{
-    const s=JSON.parse(localStorage.getItem('levels_'+_strikeTicker)||'{}');
+    // Limpiar valores actuales del storage
+    const s=JSON.parse(localStorage.getItem('levels_'+sym)||'{}');
     delete s.hi; delete s.lo;
-    localStorage.setItem('levels_'+_strikeTicker,JSON.stringify(s));
-    // Reset el flag de fecha para que _autoFillHLines corra de nuevo
-    delete _autoHLinesDate[_strikeTicker];
-    // Limpiar los campos UI
-    const h=document.getElementById('lvlLastHigh'),l=document.getElementById('lvlLastLow');
-    if(h)h.value=''; if(l)l.value='';
+    localStorage.setItem('levels_'+sym,JSON.stringify(s));
+    delete _autoHLinesDate[sym];
+
+    // Limpiar UI campos
+    const hEl=document.getElementById('lvlLastHigh'),lEl=document.getElementById('lvlLastLow');
+    if(hEl)hEl.value=''; if(lEl)lEl.value='';
     const badgeLH=document.getElementById('hlAutoLH'),badgeLL=document.getElementById('hlAutoLL');
     if(badgeLH)badgeLH.style.display='none';
     if(badgeLL)badgeLL.style.display='none';
-    addLog('info','HLines',`${_strikeTicker} → HLines reseteados, se recalcularán en el próximo refresh`);
-    // Disparar buildSignals para recalcular inmediatamente
+
+    // Leer velas diarias del cache directamente — sin esperar buildSignals
+    const cached=_candleCache[sym+'_D'];
+    if(cached&&cached.data){
+      const hD=highs(cached.data),lD=lows(cached.data);
+      const n=hD.length;
+      if(n>=2){
+        const prevHigh=hD[n-2];
+        const prevLow=lD[n-2];
+        if(prevHigh>0&&prevLow>0){
+          // Guardar en storage
+          s.hi=prevHigh.toFixed(2);
+          s.lo=prevLow.toFixed(2);
+          localStorage.setItem('levels_'+sym,JSON.stringify(s));
+          // Actualizar UI inmediatamente
+          if(hEl){hEl.value=s.hi;}
+          if(lEl){lEl.value=s.lo;}
+          if(badgeLH)badgeLH.style.display='inline';
+          if(badgeLL)badgeLL.style.display='inline';
+          const etNow=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+          _autoHLinesDate[sym]=`${etNow.getFullYear()}-${etNow.getMonth()+1}-${etNow.getDate()}`;
+          addLog('info','HLines',`${sym} → LH: $${s.hi} · LL: $${s.lo} (sesión anterior, desde cache)`);
+          return;
+        }
+      }
+    }
+
+    // Cache no disponible — disparar buildSignals que lo rellenará cuando termine
+    addLog('info','HLines',`${sym} → cache no disponible, rellenando en próximo refresh`);
     buildSignals();
-  }catch(e){}
+  }catch(e){
+    addLog('warn','HLines',`_forceRefreshHLines: ${e.message}`);
+  }
 }
 // Devuelve {ath,hi,lo} numéricos (o null) para un ticker — usado por las señales
 function getLevels(sym){

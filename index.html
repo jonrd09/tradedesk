@@ -3941,56 +3941,91 @@ function loadStrikeLevels(ticker){
   }catch(e){}
 }
 
-// Fuerza recálculo de HLines — lee directamente del cache de velas diarias
-// No espera buildSignals — calcula y muestra al instante
-function _forceRefreshHLines(){
+// ↻ Auto — calcula Last High y Last Low desde la sesión anterior de Schwab
+// Primero intenta el cache en memoria, si no hace fetch directo
+async function _forceRefreshHLines(){
   if(!_strikeTicker)return;
   const sym=_strikeTicker;
-  try{
-    // Limpiar valores actuales del storage
-    const s=JSON.parse(localStorage.getItem('levels_'+sym)||'{}');
-    delete s.hi; delete s.lo;
-    localStorage.setItem('levels_'+sym,JSON.stringify(s));
-    delete _autoHLinesDate[sym];
+  const btn=document.querySelector('[onclick="_forceRefreshHLines()"]');
 
-    // Limpiar UI campos
-    const hEl=document.getElementById('lvlLastHigh'),lEl=document.getElementById('lvlLastLow');
-    if(hEl)hEl.value=''; if(lEl)lEl.value='';
-    const badgeLH=document.getElementById('hlAutoLH'),badgeLL=document.getElementById('hlAutoLL');
+  // Feedback visual en el botón
+  if(btn){btn.textContent='⟳';btn.disabled=true;}
+
+  try{
+    // Limpiar campos UI
+    const hEl=document.getElementById('lvlLastHigh');
+    const lEl=document.getElementById('lvlLastLow');
+    const badgeLH=document.getElementById('hlAutoLH');
+    const badgeLL=document.getElementById('hlAutoLL');
+    if(hEl)hEl.value='';
+    if(lEl)lEl.value='';
     if(badgeLH)badgeLH.style.display='none';
     if(badgeLL)badgeLL.style.display='none';
 
-    // Leer velas diarias del cache directamente — sin esperar buildSignals
-    const cached=_candleCache[sym+'_D'];
+    // Limpiar storage para este ticker
+    const s=JSON.parse(localStorage.getItem('levels_'+sym)||'{}');
+    delete s.hi; delete s.lo;
+
+    // Función helper para aplicar los valores a la UI y storage
+    const _apply=(hi,lo)=>{
+      s.hi=parseFloat(hi).toFixed(2);
+      s.lo=parseFloat(lo).toFixed(2);
+      localStorage.setItem('levels_'+sym,JSON.stringify(s));
+      if(hEl)hEl.value=s.hi;
+      if(lEl)lEl.value=s.lo;
+      if(badgeLH)badgeLH.style.display='inline';
+      if(badgeLL)badgeLL.style.display='inline';
+      const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+      _autoHLinesDate[sym]=`${et.getFullYear()}-${et.getMonth()+1}-${et.getDate()}`;
+      addLog('info','HLines',`${sym} → LH: $${s.hi} · LL: $${s.lo} (sesión anterior)`);
+      if(btn){btn.textContent='✓ Auto';btn.disabled=false;setTimeout(()=>{btn.textContent='↻ Auto';},2000);}
+    };
+
+    // 1. Intentar desde cache en memoria (más rápido)
+    const cached=_candleCache&&_candleCache[sym+'_D'];
     if(cached&&cached.data){
       const hD=highs(cached.data),lD=lows(cached.data);
       const n=hD.length;
-      if(n>=2){
-        const prevHigh=hD[n-2];
-        const prevLow=lD[n-2];
-        if(prevHigh>0&&prevLow>0){
-          // Guardar en storage
-          s.hi=prevHigh.toFixed(2);
-          s.lo=prevLow.toFixed(2);
-          localStorage.setItem('levels_'+sym,JSON.stringify(s));
-          // Actualizar UI inmediatamente
-          if(hEl){hEl.value=s.hi;}
-          if(lEl){lEl.value=s.lo;}
-          if(badgeLH)badgeLH.style.display='inline';
-          if(badgeLL)badgeLL.style.display='inline';
-          const etNow=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
-          _autoHLinesDate[sym]=`${etNow.getFullYear()}-${etNow.getMonth()+1}-${etNow.getDate()}`;
-          addLog('info','HLines',`${sym} → LH: $${s.hi} · LL: $${s.lo} (sesión anterior, desde cache)`);
-          return;
-        }
+      if(n>=2&&hD[n-2]>0&&lD[n-2]>0){
+        _apply(hD[n-2],lD[n-2]);
+        return;
       }
     }
 
-    // Cache no disponible — disparar buildSignals que lo rellenará cuando termine
-    addLog('info','HLines',`${sym} → cache no disponible, rellenando en próximo refresh`);
-    buildSignals();
+    // 2. Fetch directo de velas diarias desde Schwab
+    addLog('info','HLines',`${sym} → cache no disponible, fetching velas diarias...`);
+    const token=await getSchwabToken();
+    if(!token){
+      addLog('warn','HLines',`${sym} → sin token Schwab`);
+      if(btn){btn.textContent='↻ Auto';btn.disabled=false;}
+      return;
+    }
+    const endMs=Date.now();
+    const startMs=endMs-(10*24*60*60*1000); // 10 días atrás
+    const url=`${SCHWAB_API_BASE}/pricehistory?symbol=${sym}&periodType=day&period=10&frequencyType=daily&frequency=1&startDate=${startMs}&endDate=${endMs}&needExtendedHoursData=false`;
+    const r=await fetch(url,{
+      headers:{'Authorization':'Bearer '+token},
+      signal:AbortSignal.timeout(8000)
+    });
+    if(!r.ok){
+      addLog('warn','HLines',`${sym} → HTTP ${r.status}`);
+      if(btn){btn.textContent='↻ Auto';btn.disabled=false;}
+      return;
+    }
+    const d=await r.json();
+    if(!d.candles||d.candles.length<2){
+      addLog('warn','HLines',`${sym} → sin velas diarias`);
+      if(btn){btn.textContent='↻ Auto';btn.disabled=false;}
+      return;
+    }
+    // Penúltima vela = sesión anterior completa
+    const n=d.candles.length;
+    const prevCandle=d.candles[n-2];
+    _apply(prevCandle.high,prevCandle.low);
+
   }catch(e){
     addLog('warn','HLines',`_forceRefreshHLines: ${e.message}`);
+    if(btn){btn.textContent='↻ Auto';btn.disabled=false;}
   }
 }
 // Devuelve {ath,hi,lo} numéricos (o null) para un ticker — usado por las señales
@@ -8040,7 +8075,7 @@ async function updateFuturesSemaphore(){
       </div>
       <div style="display:flex;align-items:center;gap:5px;">
         <label style="font-size:11px;color:var(--green);font-weight:700;">LAST HIGH</label>
-        <input type="number" id="lvlLastHigh" placeholder="auto" step="0.01"
+        <input type="number" id="lvlLastHigh" placeholder="0.00" step="0.01"
           style="width:80px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--green);padding:4px 8px;font-size:12px;font-family:var(--mono);outline:none;text-align:center;"
           oninput="saveStrikeLevels();document.getElementById('hlAutoLH').style.display='none';">
         <span id="hlAutoLH" title="Calculado automáticamente desde la sesión anterior"
@@ -8048,7 +8083,7 @@ async function updateFuturesSemaphore(){
       </div>
       <div style="display:flex;align-items:center;gap:5px;">
         <label style="font-size:11px;color:var(--red);font-weight:700;">LAST LOW</label>
-        <input type="number" id="lvlLastLow" placeholder="auto" step="0.01"
+        <input type="number" id="lvlLastLow" placeholder="0.00" step="0.01"
           style="width:80px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--red);padding:4px 8px;font-size:12px;font-family:var(--mono);outline:none;text-align:center;"
           oninput="saveStrikeLevels();document.getElementById('hlAutoLL').style.display='none';">
         <span id="hlAutoLL" title="Calculado automáticamente desde la sesión anterior"
@@ -8056,7 +8091,7 @@ async function updateFuturesSemaphore(){
       </div>
       <!-- Botón para forzar recálculo desde velas Schwab -->
       <button onclick="_forceRefreshHLines()"
-        title="Recalcular Last High y Last Low desde la sesión anterior de Schwab"
+        title="Calcular Last High y Last Low desde la sesión anterior de Schwab"
         style="margin-left:auto;background:none;border:1px solid var(--border2);border-radius:var(--r);color:var(--text3);font-size:11px;padding:3px 10px;cursor:pointer;">
         ↻ Auto
       </button>

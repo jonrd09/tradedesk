@@ -1552,7 +1552,31 @@ async function buildSignals(){
 async function _buildSignalsCore(){
   const area=document.getElementById('signalArea');
   _purgeCandleCache(); // M-09: cleanup stale entries
-  area.innerHTML='<div style="text-align:center;padding:20px;color:var(--text2);font-size:13px;">⟳ Obteniendo datos reales…</div>';
+
+  // ── PERSISTENCE FIX ────────────────────────────────────────────────────────
+  // No borrar el área al inicio del refresh — las tarjetas activas se quedan
+  // visibles mientras se obtienen datos nuevos. El estado de carga se muestra
+  // solo en el header (o en el countdown) sin interrumpir las señales visibles.
+  // Si el área está vacía (primera carga) → mostrar loading normal.
+  const _hasExistingCards=area.querySelectorAll('[data-sigkey]').length>0;
+  if(!_hasExistingCards){
+    area.innerHTML='<div style="text-align:center;padding:20px;color:var(--text2);font-size:13px;">⟳ Obteniendo datos reales…</div>';
+  }else{
+    // Área tiene tarjetas — mostrar indicador sutil en el header sin borrar nada
+    const _hdr=area.querySelector('[data-signal-header]');
+    if(_hdr){
+      const _refreshBadge=_hdr.querySelector('#_refreshingBadge');
+      if(!_refreshBadge){
+        const _b=document.createElement('span');
+        _b.id='_refreshingBadge';
+        _b.style.cssText='font-size:10px;color:var(--text3);margin-left:8px;font-weight:400;';
+        _b.textContent='⟳ actualizando…';
+        _hdr.appendChild(_b);
+      }
+    }
+  }
+  // ───────────────────────────────────────────────────────────────────────────
+
   const all=[];
   // Check market hours — skip after hours (low volume, unreliable signals)
   const _etSig=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
@@ -2604,7 +2628,10 @@ async function _buildSignalsCore(){
     [...area.querySelectorAll('[data-sigkey]')].map(el=>el.dataset.sigkey)
   );
 
-  // Primera carga (área vacía) — render completo normal
+  // Quitar badge de "actualizando" si existe
+  area.querySelector('#_refreshingBadge')?.remove();
+
+  // Primera carga (área vacía o solo tenía el loading spinner) — render completo normal
   if(_existingKeys.size===0){
     area.innerHTML=`<div data-signal-header>${_headerHtml}</div>`+html.join('');
     return;

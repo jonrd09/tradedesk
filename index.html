@@ -1770,6 +1770,10 @@ async function _buildSignalsCore(){
 
     // ── Indicadores Daily ────────────────────────────────────────────────────
     const cD=closes(ohlcD),hD=highs(ohlcD),lD_arr=lows(ohlcD),oD=opens(ohlcD);
+
+    // ── Auto-rellenar Last High / Last Low desde la sesión anterior ───────────
+    // Solo si los campos están vacíos en Configuration — respeta valores manuales
+    _autoFillHLines(sym, ohlcD);
     const nD=cD.length;
     const ma20D=sma(cD,Math.min(20,nD-1));
     const ma40D=sma(cD,Math.min(40,nD-1));
@@ -3867,6 +3871,57 @@ function notifyInsiderUpdate(count){
 
 function saveGainPct(){try{localStorage.setItem('gainPct',document.getElementById('gainPct').value);}catch(e){}}
 // Niveles técnicos por ticker: ATH, LAST HIGH, LAST LOW (avisan en Telegram a 2%)
+// ── Auto-cálculo de Last High / Last Low desde velas diarias de Schwab ────────
+// Lee el High y Low de la sesión anterior (penúltima vela diaria).
+// Solo rellena si el campo está vacío — respeta valores manuales del trader.
+// Se llama al inicio de buildSignalsForTicker, antes del cálculo de señales.
+// El flag _autoHLines guarda la fecha de auto-cálculo para no repetirlo cada tick.
+const _autoHLinesDate={};
+function _autoFillHLines(sym, ohlcD){
+  try{
+    const hD=highs(ohlcD),lD=lows(ohlcD);
+    const n=hD.length;
+    if(n<2)return; // necesitamos al menos 2 velas diarias
+
+    // La penúltima vela = sesión anterior completa
+    // [-1] puede ser la sesión actual (incompleta) o la más reciente cerrada
+    // Usamos [-2] para garantizar que es una sesión cerrada
+    const prevHigh=hD[n-2];
+    const prevLow=lD[n-2];
+    if(!prevHigh||!prevLow||prevHigh<=0||prevLow<=0)return;
+
+    // Solo ejecutar una vez por día por ticker
+    const etNow=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+    const todayKey=`${etNow.getFullYear()}-${etNow.getMonth()+1}-${etNow.getDate()}`;
+    if(_autoHLinesDate[sym]===todayKey)return;
+
+    const stored=JSON.parse(localStorage.getItem('levels_'+sym)||'{}');
+
+    // Solo rellenar campos vacíos — no sobrescribir valores manuales
+    let changed=false;
+    if(!stored.hi||parseFloat(stored.hi)<=0){
+      stored.hi=prevHigh.toFixed(2);
+      changed=true;
+    }
+    if(!stored.lo||parseFloat(stored.lo)<=0){
+      stored.lo=prevLow.toFixed(2);
+      changed=true;
+    }
+
+    if(changed){
+      localStorage.setItem('levels_'+sym,JSON.stringify(stored));
+      _autoHLinesDate[sym]=todayKey;
+      addLog('info','HLines',`${sym} → Last High auto: $${stored.hi} · Last Low auto: $${stored.lo} (sesión anterior)`);
+      // Actualizar la UI del modal si está abierto en este ticker
+      if(typeof _strikeTicker!=='undefined'&&_strikeTicker===sym){
+        loadStrikeLevels(sym);
+      }
+    }
+  }catch(e){
+    addLog('debug','HLines',`_autoFillHLines ${sym}: ${e.message}`);
+  }
+}
+
 function saveStrikeLevels(){
   if(!_strikeTicker)return;
   const ath=document.getElementById('lvlATH')?.value||'';
@@ -3878,7 +3933,40 @@ function loadStrikeLevels(ticker){
   try{
     const s=JSON.parse(localStorage.getItem('levels_'+ticker)||'{}');
     const a=document.getElementById('lvlATH'),h=document.getElementById('lvlLastHigh'),l=document.getElementById('lvlLastLow');
-    if(a)a.value=s.ath||'';if(h)h.value=s.hi||'';if(l)l.value=s.lo||'';
+    if(a)a.value=s.ath||'';
+    if(h)h.value=s.hi||'';
+    if(l)l.value=s.lo||'';
+    // Mostrar badge AUTO si el valor fue calculado automáticamente hoy
+    const etNow=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+    const todayKey=`${etNow.getFullYear()}-${etNow.getMonth()+1}-${etNow.getDate()}`;
+    const isAutoHi=_autoHLinesDate[ticker]===todayKey&&s.hi;
+    const isAutoLo=_autoHLinesDate[ticker]===todayKey&&s.lo;
+    const badgeLH=document.getElementById('hlAutoLH');
+    const badgeLL=document.getElementById('hlAutoLL');
+    if(badgeLH)badgeLH.style.display=isAutoHi?'inline':'none';
+    if(badgeLL)badgeLL.style.display=isAutoLo?'inline':'none';
+  }catch(e){}
+}
+
+// Fuerza recálculo de HLines desde velas de Schwab — borra valores actuales y recalcula
+function _forceRefreshHLines(){
+  if(!_strikeTicker)return;
+  // Borrar hi y lo del storage para forzar el recálculo en el siguiente buildSignals
+  try{
+    const s=JSON.parse(localStorage.getItem('levels_'+_strikeTicker)||'{}');
+    delete s.hi; delete s.lo;
+    localStorage.setItem('levels_'+_strikeTicker,JSON.stringify(s));
+    // Reset el flag de fecha para que _autoFillHLines corra de nuevo
+    delete _autoHLinesDate[_strikeTicker];
+    // Limpiar los campos UI
+    const h=document.getElementById('lvlLastHigh'),l=document.getElementById('lvlLastLow');
+    if(h)h.value=''; if(l)l.value='';
+    const badgeLH=document.getElementById('hlAutoLH'),badgeLL=document.getElementById('hlAutoLL');
+    if(badgeLH)badgeLH.style.display='none';
+    if(badgeLL)badgeLL.style.display='none';
+    addLog('info','HLines',`${_strikeTicker} → HLines reseteados, se recalcularán en el próximo refresh`);
+    // Disparar buildSignals para recalcular inmediatamente
+    buildSignals();
   }catch(e){}
 }
 // Devuelve {ath,hi,lo} numéricos (o null) para un ticker — usado por las señales
@@ -7928,16 +8016,26 @@ async function updateFuturesSemaphore(){
       </div>
       <div style="display:flex;align-items:center;gap:5px;">
         <label style="font-size:11px;color:var(--green);font-weight:700;">LAST HIGH</label>
-        <input type="number" id="lvlLastHigh" placeholder="0.00" step="0.01"
+        <input type="number" id="lvlLastHigh" placeholder="auto" step="0.01"
           style="width:80px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--green);padding:4px 8px;font-size:12px;font-family:var(--mono);outline:none;text-align:center;"
-          oninput="saveStrikeLevels()">
+          oninput="saveStrikeLevels();document.getElementById('hlAutoLH').style.display='none';">
+        <span id="hlAutoLH" title="Calculado automáticamente desde la sesión anterior"
+          style="display:none;font-size:9px;font-weight:700;padding:1px 5px;border-radius:6px;background:rgba(0,209,122,.15);color:var(--green);letter-spacing:.04em;">AUTO</span>
       </div>
       <div style="display:flex;align-items:center;gap:5px;">
         <label style="font-size:11px;color:var(--red);font-weight:700;">LAST LOW</label>
-        <input type="number" id="lvlLastLow" placeholder="0.00" step="0.01"
+        <input type="number" id="lvlLastLow" placeholder="auto" step="0.01"
           style="width:80px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--red);padding:4px 8px;font-size:12px;font-family:var(--mono);outline:none;text-align:center;"
-          oninput="saveStrikeLevels()">
+          oninput="saveStrikeLevels();document.getElementById('hlAutoLL').style.display='none';">
+        <span id="hlAutoLL" title="Calculado automáticamente desde la sesión anterior"
+          style="display:none;font-size:9px;font-weight:700;padding:1px 5px;border-radius:6px;background:rgba(255,77,109,.15);color:var(--red);letter-spacing:.04em;">AUTO</span>
       </div>
+      <!-- Botón para forzar recálculo desde velas Schwab -->
+      <button onclick="_forceRefreshHLines()"
+        title="Recalcular Last High y Last Low desde la sesión anterior de Schwab"
+        style="margin-left:auto;background:none;border:1px solid var(--border2);border-radius:var(--r);color:var(--text3);font-size:11px;padding:3px 10px;cursor:pointer;">
+        ↻ Auto
+      </button>
     </div>
     <!-- Add entry row -->
     <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;gap:6px;flex-wrap:wrap;align-items:center;">

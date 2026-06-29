@@ -165,7 +165,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
     ⟳ —:——
   </button>
 
-  <!-- Semáforo SPX/NDX — sesgo de mercado via $SPX.X y $NDX.X de Schwab (solo topbar) -->
+  <!-- Semáforo SPY/QQQ — sesgo de mercado via Schwab quotes (solo topbar) -->
   <span id="futuresSemaphore"
     style="display:none;font-family:var(--mono);font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap;cursor:default;border:1px solid transparent;">
   </span>
@@ -7610,65 +7610,74 @@ async function _pmPDF(id){
 // Actualiza cada 10min junto al masterTick. Cache 9min.
 // Visible en premarket, sesión regular y after-hours (futuros = 23h).
 // ═══════════════════════════════════════════════════════════════
-// ── Semáforo de índices S&P500 / Nasdaq ──────────────────────────────────────
-// /ES y /NQ requieren el código de contrato activo (/ESU25) — cambia cada trimestre.
-// $SPX.X y $NDX.X son los índices perpetuos que Schwab siempre resuelve en /quotes.
-// Reflejan exactamente el mismo precio institucional que los futuros, sin fecha de vencimiento.
-const _FUT_SYMBOLS=['$SPX.X','$NDX.X'];
-const _FUT_LABELS={'$SPX.X':'SPX','$NDX.X':'NDX'};
+// ── Semáforo SPY / QQQ — sesgo de mercado ────────────────────────────────────
+// Usa SPY (S&P500) y QQQ (Nasdaq) en lugar de índices o futuros.
+// Razón: $SPX.X / $NDX.X fallan esporádicamente en Schwab API.
+//        /ES /NQ requieren código de contrato activo (cambia cada trimestre).
+//        SPY y QQQ son ETFs líquidos — Schwab siempre los resuelve en /quotes.
+// Sin llamada adicional: lee _livePrices que ya tiene los precios frescos,
+// y si no están disponibles hace un fetch puntual al mismo endpoint de Schwab.
 const _futCache={};
 
 async function _fetchFuturesBias(){
+  // Primero intentar leer de _livePrices — ya están cargados por loadLivePrices()
+  const spyLive=_livePrices?.['SPY'];
+  const qqqLive=_livePrices?.['QQQ'];
+  const liveOk=(d)=>d&&d.price>0&&(Date.now()-d.ts<15*60*1000);
+
+  if(liveOk(spyLive)&&liveOk(qqqLive)){
+    return{
+      SPY:{bias:spyLive.pct>0.15?'bull':spyLive.pct<-0.15?'bear':'neutral',
+           price:spyLive.price,pct:spyLive.pct,ts:Date.now()},
+      QQQ:{bias:qqqLive.pct>0.15?'bull':qqqLive.pct<-0.15?'bear':'neutral',
+           price:qqqLive.price,pct:qqqLive.pct,ts:Date.now()}
+    };
+  }
+
+  // Fallback: fetch directo si _livePrices no tiene SPY/QQQ (no están en signal tickers)
   const token=await getSchwabToken();
   if(!token)return null;
-  // Cache válido 9min
-  if(_FUT_SYMBOLS.every(s=>_futCache[s]&&Date.now()-_futCache[s].ts<9*60*1000))
-    return{'$SPX.X':_futCache['$SPX.X'],'$NDX.X':_futCache['$NDX.X']};
+  // Cache 9min para el fallback
+  if(_futCache['SPY']&&_futCache['QQQ']&&Date.now()-_futCache['SPY'].ts<9*60*1000)
+    return{SPY:_futCache['SPY'],QQQ:_futCache['QQQ']};
   try{
-    // $SPX.X y $NDX.X son símbolos válidos en Schwab /quotes — no necesitan encodeURIComponent especial
-    const symsParam=_FUT_SYMBOLS.map(s=>encodeURIComponent(s)).join('%2C');
-    const url=`${SCHWAB_API_BASE}/quotes?symbols=${symsParam}&fields=quote`;
-    const r=await fetch(url,{
-      headers:{'Authorization':'Bearer '+token},
-      signal:AbortSignal.timeout(6000)
-    });
+    const url=`${SCHWAB_API_BASE}/quotes?symbols=SPY%2CQQQ&fields=quote`;
+    const r=await fetch(url,{headers:{'Authorization':'Bearer '+token},signal:AbortSignal.timeout(6000)});
     if(!r.ok){addLog('warn','Índices',`quotes HTTP ${r.status}`);return null;}
     const d=await r.json();
     const results={};
-    for(const sym of _FUT_SYMBOLS){
-      // Schwab puede devolver la key con o sin $ — probar ambas
-      const entry=d[sym]||d[sym.replace('$','')]||null;
-      const q=entry?.quote||entry?.reference||null;
+    for(const sym of ['SPY','QQQ']){
+      const q=d[sym]?.quote||null;
       if(!q)continue;
-      const last=q.lastPrice||q.mark||q.closePrice||0;
+      const last=q.lastPrice||q.mark||0;
       const prev=q.closePrice||q.openPrice||last;
       if(!last||last<=0)continue;
       const pct=prev>0?((last-prev)/prev*100):0;
       const bias=pct>0.15?'bull':pct<-0.15?'bear':'neutral';
       _futCache[sym]={bias,price:last,prev,pct,ts:Date.now()};
       results[sym]=_futCache[sym];
-      addLog('debug','Índices',`${sym} $${last.toFixed(2)} prev $${prev.toFixed(2)} → ${pct>=0?'+':''}${pct.toFixed(2)}% → ${bias}`);
+      addLog('debug','Índices',`${sym} $${last.toFixed(2)} → ${pct>=0?'+':''}${pct.toFixed(2)}% → ${bias}`);
     }
-    return Object.keys(results).length===2?results:null;
+    return results['SPY']&&results['QQQ']?results:null;
   }catch(e){addLog('warn','Índices',`_fetchFuturesBias: ${e.message}`);return null;}
 }
 
 function _renderFuturesSemaphore(data){
   const el=document.getElementById('futuresSemaphore');
   if(!el)return;
-  const spx=data?.['$SPX.X'],ndx=data?.['$NDX.X'];
-  if(!spx||!ndx){el.style.display='none';return;}
-  const bullCount=[spx,ndx].filter(f=>f.bias==='bull').length;
-  const bearCount=[spx,ndx].filter(f=>f.bias==='bear').length;
+  const spy=data?.['SPY'],qqq=data?.['QQQ'];
+  if(!spy||!qqq){el.style.display='none';return;}
+  const bullCount=[spy,qqq].filter(f=>f.bias==='bull').length;
+  const bearCount=[spy,qqq].filter(f=>f.bias==='bear').length;
   let bg,border,color,dot;
   if(bullCount===2){bg='rgba(0,209,122,.12)';border='rgba(0,209,122,.35)';color='var(--green)';dot='▲';}
   else if(bearCount===2){bg='rgba(255,77,109,.12)';border='rgba(255,77,109,.35)';color='var(--red)';dot='▼';}
   else{bg='rgba(255,194,52,.1)';border='rgba(255,194,52,.3)';color='var(--yellow)';dot='◆';}
-  const spxPct=(spx.pct>=0?'+':'')+spx.pct.toFixed(2)+'%';
-  const ndxPct=(ndx.pct>=0?'+':'')+ndx.pct.toFixed(2)+'%';
+  const spyPct=(spy.pct>=0?'+':'')+spy.pct.toFixed(2)+'%';
+  const qqqPct=(qqq.pct>=0?'+':'')+qqq.pct.toFixed(2)+'%';
   el.style.cssText=`display:inline-flex;align-items:center;gap:5px;background:${bg};border:1px solid ${border};color:${color};font-family:var(--mono);font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap;cursor:default;`;
-  el.title=`Sesgo de índices (vs cierre anterior)\nSPX $${spx.price.toFixed(2)} → ${spxPct}\nNDX $${ndx.price.toFixed(2)} → ${ndxPct}\nFuente: Schwab $SPX.X / $NDX.X`;
-  el.textContent=`${dot} SPX ${spxPct}  NDX ${ndxPct}`;
+  el.title=`Sesgo de mercado (vs cierre anterior)\nSPY $${spy.price.toFixed(2)} → ${spyPct}\nQQQ $${qqq.price.toFixed(2)} → ${qqqPct}\nFuente: Schwab /quotes (tiempo real)`;
+  el.textContent=`${dot} SPY ${spyPct}  QQQ ${qqqPct}`;
 }
 
 async function updateFuturesSemaphore(){
@@ -7677,7 +7686,7 @@ async function updateFuturesSemaphore(){
   const _showOffline=(reason)=>{
     el.style.cssText='display:inline-flex;align-items:center;gap:4px;background:rgba(176,191,212,.07);border:1px solid rgba(176,191,212,.18);color:var(--text3,#6b7a8d);font-family:var(--mono);font-size:11px;font-weight:600;padding:3px 10px;border-radius:20px;white-space:nowrap;cursor:default;opacity:.7;';
     el.title=reason;
-    el.textContent='\u25cc ES —  NQ —';
+    el.textContent='\u25cc SPY —  QQQ —';
   };
   try{
     // Si Schwab no está configurado — ocultar completamente

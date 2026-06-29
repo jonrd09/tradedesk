@@ -165,7 +165,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
     ⟳ —:——
   </button>
 
-  <!-- Futures semaphore — /ES y /NQ sesgo de mercado (solo topbar, sin tarjetas) -->
+  <!-- Semáforo SPX/NDX — sesgo de mercado via $SPX.X y $NDX.X de Schwab (solo topbar) -->
   <span id="futuresSemaphore"
     style="display:none;font-family:var(--mono);font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap;cursor:default;border:1px solid transparent;">
   </span>
@@ -1699,7 +1699,45 @@ async function _buildSignalsCore(){
     const _etNow15=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
     const _mNow=_etNow15.getHours()*60+_etNow15.getMinutes();
     const _isOpen15=_mNow>=570&&_mNow<=580; // 9:30–9:40 AM ET only
-    // Stochastics 15min
+
+    // ── GUARD C-03: Primera vela real de la sesión ────────────────────────────
+    // Problema: en premarket el sistema solo tiene velas del viernes + vela sintética.
+    // La vela de cierre del viernes (3:45–4:00 PM) tiene movimientos bruscos de baja
+    // liquidez que contaminan los indicadores de Bollinger y generan falsos breakouts.
+    // Fix: bloquear estrategias BB hasta que exista al menos 1 vela real de la sesión actual.
+    //
+    // Una vela ES real si:
+    //   1. No tiene el flag _synthetic
+    //   2. Su datetime es de hoy ET (no del viernes)
+    //   3. Su timestamp es ≥ 9:30 AM ET (apertura real)
+    //
+    // _hasRealSessionCandle = false → BB-A, BB-B, BB-C, BB-D, RPM bloqueados
+    // _hasRealSessionCandle = true  → todo funciona normal
+    const _todayStrET=_etNow15.toDateString();
+    const _sessionOpenMs=(()=>{
+      const d=new Date(_etNow15);
+      d.setHours(9,30,0,0);
+      return d.getTime();
+    })();
+    const _allCandles15=ohlc15.t||[]; // timestamps de las velas
+    const _hasRealSessionCandle=(()=>{
+      if(!ohlc15||!ohlc15.t||!ohlc15.t.length)return false;
+      // Buscar cualquier vela con timestamp ≥ 9:30 AM ET de hoy y sin flag sintético
+      for(let i=ohlc15.t.length-1;i>=Math.max(0,ohlc15.t.length-10);i--){
+        const candleTs=ohlc15.t[i];
+        const candleEt=new Date(new Date(candleTs).toLocaleString('en-US',{timeZone:'America/New_York'}));
+        // Vela de hoy ET y después de las 9:30 AM
+        if(candleEt.toDateString()===_todayStrET&&candleTs>=_sessionOpenMs){
+          // Verificar que no sea la vela sintética inyectada
+          const isSynthetic=ohlc15._synthetic&&i===ohlc15.t.length-1;
+          if(!isSynthetic)return true;
+        }
+      }
+      return false;
+    })();
+    // En premarket (antes de 9:30) o si no hay vela real → bloquear BB
+    // Excepción: _testMode y _debugMode ignoran este guard para testing
+    const _bbSessionOk=_hasRealSessionCandle||_testMode||_debugMode;
     const stoch15=stochastic(h15,l15,c15,12,3);
     const lK15=stoch15.k.slice(-1)[0]||50;
     const pK15=stoch15.k.slice(-2)[0]||lK15;
@@ -1913,7 +1951,7 @@ async function _buildSignalsCore(){
     const _putGuardOk=!(_priceAboveMA20_15&&_bullMomentum3&&_distFromMA20_15pct>0.3)&&!(_openingGapBlock&&_priceAboveMA20_15);
 
     // BB-A: CALL — Bollinger (gate) alcista
-    const bollGateCall=lBBW15>=1.5&&mediaUp&&bbCallTrigger&&bigBodyCall&&_callGuardOk;
+    const bollGateCall=lBBW15>=1.5&&mediaUp&&bbCallTrigger&&bigBodyCall&&_callGuardOk&&_bbSessionOk;
     if(_stratEnabled('BB-A')&&bollGateCall){
       let score=W.bollinger;            // gate cumplido → 60
       if(maCallCross)  score+=W.medias; // +25
@@ -1933,7 +1971,7 @@ async function _buildSignalsCore(){
       ]});
     }
     // BB-B: PUT — Bollinger (gate) bajista
-    const bollGatePut=lBBW15>=1.5&&mediaDn&&bbPutTrigger&&bigBodyPut&&_putGuardOk;
+    const bollGatePut=lBBW15>=1.5&&mediaDn&&bbPutTrigger&&bigBodyPut&&_putGuardOk&&_bbSessionOk;
     if(_stratEnabled('BB-B')&&bollGatePut){
       let score=W.bollinger;
       if(maPutCross)  score+=W.medias;
@@ -1977,7 +2015,7 @@ async function _buildSignalsCore(){
     const bbCompressed15=lBBW15<_bbwPct25*1.3; // within 30% of historical low = compressed
     // Worden en el GATILLO: la sobrecompra valida que el precio regrese (efecto imán)
     const pC_above=lL15>lUp15&&bbCompressed15&&lK15>75, pC_ret=lP15<lO15;
-    if(pC_above&&(_stratEnabled('BB-C'))&&(_imanWindow||_testMode||_debugMode)){
+    if(pC_above&&(_stratEnabled('BB-C'))&&(_imanWindow||_testMode||_debugMode)&&_bbSessionOk){
       all.push({...meta,code:'BB-C',name:'BB Efecto Imán Alza — PUT',type:'put',reqs:[
         {ok:lL15>lUp15,   tf:'15m',text:`Vela COMPLETA sobre BB: low $${lL15.toFixed(2)} > $${lUp15.toFixed(2)}`},
         {ok:pC_ret,       tf:'15m',text:`Primera vela bajista de regreso ($${lP15.toFixed(2)} < $${lO15.toFixed(2)})`},
@@ -1989,7 +2027,7 @@ async function _buildSignalsCore(){
       ]});
     }
     const pD_below=lH15<lLow15&&bbCompressed15&&lK15<25, pD_ret=lP15>lO15;
-    if(pD_below&&(_stratEnabled('BB-D'))&&(_imanWindow||_testMode||_debugMode)){
+    if(pD_below&&(_stratEnabled('BB-D'))&&(_imanWindow||_testMode||_debugMode)&&_bbSessionOk){
       all.push({...meta,code:'BB-D',name:'BB Efecto Imán Baja — CALL',type:'call',reqs:[
         {ok:lH15<lLow15,  tf:'15m',text:`Vela COMPLETA bajo BB: high $${lH15.toFixed(2)} < $${lLow15.toFixed(2)}`},
         {ok:pD_ret,       tf:'15m',text:`Primera vela alcista de rebote ($${lP15.toFixed(2)} > $${lO15.toFixed(2)})`},
@@ -2112,7 +2150,7 @@ async function _buildSignalsCore(){
     // ESTRATEGIA RPM — REBOTE EN PUNTO MEDIO (MA20 Daily)
     // Daily alcista/bajista + pullback hacia MA20 Daily + rebote + confirmación 1H
     // ════════════════════════════════════════════════════════════════════════
-    if(_stratEnabled('RPM')){
+    if(_stratEnabled('RPM')&&_bbSessionOk){
       // Distancia del precio actual a la MA20 del Daily (punto de rebote)
       // M-02: Dynamic nearMA20D threshold — based on daily ATR (not fixed 1.5%)
       // Daily ATR14 adapts: SPY ~0.6% → threshold ~0.8%; TSLA ~3% → threshold ~2%
@@ -7572,7 +7610,12 @@ async function _pmPDF(id){
 // Actualiza cada 10min junto al masterTick. Cache 9min.
 // Visible en premarket, sesión regular y after-hours (futuros = 23h).
 // ═══════════════════════════════════════════════════════════════
-const _FUT_SYMBOLS=['/ES','/NQ'];
+// ── Semáforo de índices S&P500 / Nasdaq ──────────────────────────────────────
+// /ES y /NQ requieren el código de contrato activo (/ESU25) — cambia cada trimestre.
+// $SPX.X y $NDX.X son los índices perpetuos que Schwab siempre resuelve en /quotes.
+// Reflejan exactamente el mismo precio institucional que los futuros, sin fecha de vencimiento.
+const _FUT_SYMBOLS=['$SPX.X','$NDX.X'];
+const _FUT_LABELS={'$SPX.X':'SPX','$NDX.X':'NDX'};
 const _futCache={};
 
 async function _fetchFuturesBias(){
@@ -7580,51 +7623,52 @@ async function _fetchFuturesBias(){
   if(!token)return null;
   // Cache válido 9min
   if(_FUT_SYMBOLS.every(s=>_futCache[s]&&Date.now()-_futCache[s].ts<9*60*1000))
-    return{'/ES':_futCache['/ES'],'/NQ':_futCache['/NQ']};
+    return{'$SPX.X':_futCache['$SPX.X'],'$NDX.X':_futCache['$NDX.X']};
   try{
-    // encodeURIComponent convierte '/' en '%2F' — requerido por Schwab para futuros
+    // $SPX.X y $NDX.X son símbolos válidos en Schwab /quotes — no necesitan encodeURIComponent especial
     const symsParam=_FUT_SYMBOLS.map(s=>encodeURIComponent(s)).join('%2C');
     const url=`${SCHWAB_API_BASE}/quotes?symbols=${symsParam}&fields=quote`;
     const r=await fetch(url,{
       headers:{'Authorization':'Bearer '+token},
       signal:AbortSignal.timeout(6000)
     });
-    if(!r.ok){addLog('warn','Futuros',`quotes HTTP ${r.status}`);return null;}
+    if(!r.ok){addLog('warn','Índices',`quotes HTTP ${r.status}`);return null;}
     const d=await r.json();
     const results={};
     for(const sym of _FUT_SYMBOLS){
-      const entry=d[sym]||d[sym.replace('/','')]||null;
-      const q=entry?.quote||null;
+      // Schwab puede devolver la key con o sin $ — probar ambas
+      const entry=d[sym]||d[sym.replace('$','')]||null;
+      const q=entry?.quote||entry?.reference||null;
       if(!q)continue;
-      const last=q.lastPrice||q.mark||0;
+      const last=q.lastPrice||q.mark||q.closePrice||0;
       const prev=q.closePrice||q.openPrice||last;
       if(!last||last<=0)continue;
       const pct=prev>0?((last-prev)/prev*100):0;
       const bias=pct>0.15?'bull':pct<-0.15?'bear':'neutral';
       _futCache[sym]={bias,price:last,prev,pct,ts:Date.now()};
       results[sym]=_futCache[sym];
-      addLog('debug','Futuros',`${sym} $${last.toFixed(2)} prev $${prev.toFixed(2)} → ${pct>=0?'+':''}${pct.toFixed(2)}% → ${bias}`);
+      addLog('debug','Índices',`${sym} $${last.toFixed(2)} prev $${prev.toFixed(2)} → ${pct>=0?'+':''}${pct.toFixed(2)}% → ${bias}`);
     }
     return Object.keys(results).length===2?results:null;
-  }catch(e){addLog('warn','Futuros',`_fetchFuturesBias: ${e.message}`);return null;}
+  }catch(e){addLog('warn','Índices',`_fetchFuturesBias: ${e.message}`);return null;}
 }
 
 function _renderFuturesSemaphore(data){
   const el=document.getElementById('futuresSemaphore');
   if(!el)return;
-  if(!data||!data['/ES']||!data['/NQ']){el.style.display='none';return;}
-  const es=data['/ES'],nq=data['/NQ'];
-  const bullCount=[es,nq].filter(f=>f.bias==='bull').length;
-  const bearCount=[es,nq].filter(f=>f.bias==='bear').length;
+  const spx=data?.['$SPX.X'],ndx=data?.['$NDX.X'];
+  if(!spx||!ndx){el.style.display='none';return;}
+  const bullCount=[spx,ndx].filter(f=>f.bias==='bull').length;
+  const bearCount=[spx,ndx].filter(f=>f.bias==='bear').length;
   let bg,border,color,dot;
   if(bullCount===2){bg='rgba(0,209,122,.12)';border='rgba(0,209,122,.35)';color='var(--green)';dot='▲';}
   else if(bearCount===2){bg='rgba(255,77,109,.12)';border='rgba(255,77,109,.35)';color='var(--red)';dot='▼';}
   else{bg='rgba(255,194,52,.1)';border='rgba(255,194,52,.3)';color='var(--yellow)';dot='◆';}
-  const esPct=(es.pct>=0?'+':'')+es.pct.toFixed(2)+'%';
-  const nqPct=(nq.pct>=0?'+':'')+nq.pct.toFixed(2)+'%';
+  const spxPct=(spx.pct>=0?'+':'')+spx.pct.toFixed(2)+'%';
+  const ndxPct=(ndx.pct>=0?'+':'')+ndx.pct.toFixed(2)+'%';
   el.style.cssText=`display:inline-flex;align-items:center;gap:5px;background:${bg};border:1px solid ${border};color:${color};font-family:var(--mono);font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap;cursor:default;`;
-  el.title=`Sesgo futuros (vs cierre anterior)\n/ES $${es.price.toFixed(2)} → ${esPct}\n/NQ $${nq.price.toFixed(2)} → ${nqPct}\nFuente: Schwab quotes`;
-  el.textContent=`${dot} ES ${esPct}  NQ ${nqPct}`;
+  el.title=`Sesgo de índices (vs cierre anterior)\nSPX $${spx.price.toFixed(2)} → ${spxPct}\nNDX $${ndx.price.toFixed(2)} → ${ndxPct}\nFuente: Schwab $SPX.X / $NDX.X`;
+  el.textContent=`${dot} SPX ${spxPct}  NDX ${ndxPct}`;
 }
 
 async function updateFuturesSemaphore(){

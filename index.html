@@ -1771,9 +1771,9 @@ async function _buildSignalsCore(){
     // ── Indicadores Daily ────────────────────────────────────────────────────
     const cD=closes(ohlcD),hD=highs(ohlcD),lD_arr=lows(ohlcD),oD=opens(ohlcD);
 
-    // ── Auto-rellenar Last High / Last Low desde la sesión anterior ───────────
+    // ── Auto-rellenar Last High / Last Low — detección de swing real en 1H ────
     // Solo si los campos están vacíos en Configuration — respeta valores manuales
-    _autoFillHLines(sym, ohlcD);
+    _autoFillHLines(sym, ohlc1h);
     const nD=cD.length;
     const ma20D=sma(cD,Math.min(20,nD-1));
     const ma40D=sma(cD,Math.min(40,nD-1));
@@ -3876,38 +3876,71 @@ function saveGainPct(){try{localStorage.setItem('gainPct',document.getElementByI
 // Solo rellena si el campo está vacío — respeta valores manuales del trader.
 // Se llama al inicio de buildSignalsForTicker, antes del cálculo de señales.
 // El flag _autoHLines guarda la fecha de auto-cálculo para no repetirlo cada tick.
-const _autoHLinesDate={};
-function _autoFillHLines(sym, ohlcD){
-  try{
-    const hD=highs(ohlcD),lD=lows(ohlcD);
-    const n=hD.length;
-    if(n<2)return;
+// ── Detección de Swing High / Swing Low ──────────────────────────────────────
+// Un swing high es una vela cuyo high es MAYOR que el high de N velas antes Y N velas después.
+// Un swing low es una vela cuyo low es MENOR que el low de N velas antes Y N velas después.
+// Esto encuentra el último techo/piso REAL que el precio respetó — no solo el high
+// del día calendario anterior, que puede no ser un pivote significativo.
+//
+// lookback=3 → la vela debe ser el extremo de una ventana de 7 velas (3 antes + ella + 3 después)
+// Usamos velas de 1H porque dan mejor resolución que Daily para encontrar el pivote exacto
+// donde el precio realmente rebotó, sin importar si fue ayer o hace varios días.
+function _findLastSwingHigh(h,l,lookback=3,maxLookbackBars=60){
+  const n=h.length;
+  if(n<lookback*2+1)return null;
+  // Buscar desde la vela más reciente posible hacia atrás (excluyendo las últimas `lookback`
+  // porque aún no se puede confirmar si son swing — necesitan velas después para validarse)
+  const start=n-1-lookback;
+  const limit=Math.max(lookback,n-maxLookbackBars);
+  for(let i=start;i>=limit;i--){
+    const hi=h[i];
+    let isSwing=true;
+    for(let k=1;k<=lookback;k++){
+      if(h[i-k]>=hi||h[i+k]>=hi){isSwing=false;break;}
+    }
+    if(isSwing)return hi;
+  }
+  return null;
+}
+function _findLastSwingLow(h,l,lookback=3,maxLookbackBars=60){
+  const n=l.length;
+  if(n<lookback*2+1)return null;
+  const start=n-1-lookback;
+  const limit=Math.max(lookback,n-maxLookbackBars);
+  for(let i=start;i>=limit;i--){
+    const lo=l[i];
+    let isSwing=true;
+    for(let k=1;k<=lookback;k++){
+      if(l[i-k]<=lo||l[i+k]<=lo){isSwing=false;break;}
+    }
+    if(isSwing)return lo;
+  }
+  return null;
+}
 
-    // Velas diarias de Schwab: n-1 = última sesión cerrada (viernes si hoy es lunes)
-    // Schwab NO incluye la vela del día actual hasta que cierra — n-1 siempre es la última completa
-    const prevHigh=hD[n-1];
-    const prevLow=lD[n-1];
-    if(!prevHigh||!prevLow||prevHigh<=0||prevLow<=0)return;
+const _autoHLinesDate={};
+function _autoFillHLines(sym, ohlc1h){
+  try{
+    const h1=highs(ohlc1h),l1=lows(ohlc1h);
+    if(h1.length<10)return; // necesitamos suficientes velas de 1H para detectar swings
 
     const stored=JSON.parse(localStorage.getItem('levels_'+sym)||'{}');
     const hiEmpty=!stored.hi||parseFloat(stored.hi)<=0;
     const loEmpty=!stored.lo||parseFloat(stored.lo)<=0;
+    if(!hiEmpty&&!loEmpty)return; // ambos ya tienen valor manual — no tocar
 
-    // Si ambos campos ya tienen valor — no hacer nada (respeta manual)
-    if(!hiEmpty&&!loEmpty)return;
+    const swingHigh=_findLastSwingHigh(h1,l1);
+    const swingLow=_findLastSwingLow(h1,l1);
 
-    // Rellenar solo los campos vacíos
     let changed=false;
-    if(hiEmpty){stored.hi=prevHigh.toFixed(2);changed=true;}
-    if(loEmpty){stored.lo=prevLow.toFixed(2);changed=true;}
+    if(hiEmpty&&swingHigh>0){stored.hi=swingHigh.toFixed(2);changed=true;}
+    if(loEmpty&&swingLow>0){stored.lo=swingLow.toFixed(2);changed=true;}
 
     if(changed){
       localStorage.setItem('levels_'+sym,JSON.stringify(stored));
-      // Marcar como auto-calculado para el badge en la UI
       const etNow=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
       _autoHLinesDate[sym]=`${etNow.getFullYear()}-${etNow.getMonth()+1}-${etNow.getDate()}`;
-      addLog('info','HLines',`${sym} → LH auto: $${stored.hi} · LL auto: $${stored.lo} (sesión anterior)`);
-      // Actualizar UI si el modal de ese ticker está abierto
+      addLog('info','HLines',`${sym} → LH swing: $${stored.hi||'—'} · LL swing: $${stored.lo||'—'} (último pivote 1H)`);
       if(typeof _strikeTicker!=='undefined'&&_strikeTicker===sym){
         loadStrikeLevels(sym);
       }
@@ -3970,33 +4003,35 @@ async function _forceRefreshHLines(){
 
     // Función helper para aplicar los valores a la UI y storage
     const _apply=(hi,lo)=>{
-      s.hi=parseFloat(hi).toFixed(2);
-      s.lo=parseFloat(lo).toFixed(2);
+      if(hi>0)s.hi=parseFloat(hi).toFixed(2);
+      if(lo>0)s.lo=parseFloat(lo).toFixed(2);
       localStorage.setItem('levels_'+sym,JSON.stringify(s));
-      if(hEl)hEl.value=s.hi;
-      if(lEl)lEl.value=s.lo;
-      if(badgeLH)badgeLH.style.display='inline';
-      if(badgeLL)badgeLL.style.display='inline';
+      if(hEl&&s.hi)hEl.value=s.hi;
+      if(lEl&&s.lo)lEl.value=s.lo;
+      if(badgeLH&&s.hi)badgeLH.style.display='inline';
+      if(badgeLL&&s.lo)badgeLL.style.display='inline';
       const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
       _autoHLinesDate[sym]=`${et.getFullYear()}-${et.getMonth()+1}-${et.getDate()}`;
-      addLog('info','HLines',`${sym} → LH: $${s.hi} · LL: $${s.lo} (sesión anterior)`);
+      addLog('info','HLines',`${sym} → LH swing: $${s.hi||'—'} · LL swing: $${s.lo||'—'} (último pivote 1H)`);
       if(btn){btn.textContent='✓ Auto';btn.disabled=false;setTimeout(()=>{btn.textContent='↻ Auto';},2000);}
     };
 
-    // 1. Intentar desde cache en memoria (más rápido)
-    const cached=_candleCache&&_candleCache[sym+'_D'];
+    // 1. Intentar desde cache en memoria (velas de 1H — más rápido)
+    const cached=_candleCache&&_candleCache[sym+'_60'];
     if(cached&&cached.data){
-      const hD=highs(cached.data),lD=lows(cached.data);
-      const n=hD.length;
-      // n-1 = última vela diaria cerrada (Schwab no incluye la vela del día en curso)
-      if(n>=1&&hD[n-1]>0&&lD[n-1]>0){
-        _apply(hD[n-1],lD[n-1]);
-        return;
+      const h1=highs(cached.data),l1=lows(cached.data);
+      if(h1.length>=10){
+        const swingHigh=_findLastSwingHigh(h1,l1);
+        const swingLow=_findLastSwingLow(h1,l1);
+        if(swingHigh>0||swingLow>0){
+          _apply(swingHigh,swingLow);
+          return;
+        }
       }
     }
 
-    // 2. Fetch directo de velas diarias desde Schwab
-    addLog('info','HLines',`${sym} → cache no disponible, fetching velas diarias...`);
+    // 2. Fetch directo de velas de 1H desde Schwab
+    addLog('info','HLines',`${sym} → cache no disponible, fetching velas 1H...`);
     const token=await getSchwabToken();
     if(!token){
       addLog('warn','HLines',`${sym} → sin token Schwab`);
@@ -4004,8 +4039,8 @@ async function _forceRefreshHLines(){
       return;
     }
     const endMs=Date.now();
-    const startMs=endMs-(10*24*60*60*1000); // 10 días atrás
-    const url=`${SCHWAB_API_BASE}/pricehistory?symbol=${sym}&periodType=day&period=10&frequencyType=daily&frequency=1&startDate=${startMs}&endDate=${endMs}&needExtendedHoursData=false`;
+    const startMs=endMs-(10*24*60*60*1000); // 10 días atrás — suficiente para encontrar swings en 1H
+    const url=`${SCHWAB_API_BASE}/pricehistory?symbol=${sym}&periodType=day&period=10&frequencyType=minute&frequency=60&startDate=${startMs}&endDate=${endMs}&needExtendedHoursData=false`;
     const r=await fetch(url,{
       headers:{'Authorization':'Bearer '+token},
       signal:AbortSignal.timeout(8000)
@@ -4016,15 +4051,16 @@ async function _forceRefreshHLines(){
       return;
     }
     const d=await r.json();
-    if(!d.candles||d.candles.length<2){
-      addLog('warn','HLines',`${sym} → sin velas diarias`);
+    if(!d.candles||d.candles.length<10){
+      addLog('warn','HLines',`${sym} → sin suficientes velas 1H`);
       if(btn){btn.textContent='↻ Auto';btn.disabled=false;}
       return;
     }
-    // Última vela = sesión anterior completa (Schwab Daily no incluye la vela del día en curso)
-    const n=d.candles.length;
-    const prevCandle=d.candles[n-1];
-    _apply(prevCandle.high,prevCandle.low);
+    const h1=d.candles.map(c=>c.high);
+    const l1=d.candles.map(c=>c.low);
+    const swingHigh=_findLastSwingHigh(h1,l1);
+    const swingLow=_findLastSwingLow(h1,l1);
+    _apply(swingHigh,swingLow);
 
   }catch(e){
     addLog('warn','HLines',`_forceRefreshHLines: ${e.message}`);

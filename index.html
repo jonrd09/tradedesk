@@ -3881,38 +3881,31 @@ function _autoFillHLines(sym, ohlcD){
   try{
     const hD=highs(ohlcD),lD=lows(ohlcD);
     const n=hD.length;
-    if(n<2)return; // necesitamos al menos 2 velas diarias
+    if(n<2)return;
 
-    // La penúltima vela = sesión anterior completa
-    // [-1] puede ser la sesión actual (incompleta) o la más reciente cerrada
-    // Usamos [-2] para garantizar que es una sesión cerrada
     const prevHigh=hD[n-2];
     const prevLow=lD[n-2];
     if(!prevHigh||!prevLow||prevHigh<=0||prevLow<=0)return;
 
-    // Solo ejecutar una vez por día por ticker
-    const etNow=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
-    const todayKey=`${etNow.getFullYear()}-${etNow.getMonth()+1}-${etNow.getDate()}`;
-    if(_autoHLinesDate[sym]===todayKey)return;
-
     const stored=JSON.parse(localStorage.getItem('levels_'+sym)||'{}');
+    const hiEmpty=!stored.hi||parseFloat(stored.hi)<=0;
+    const loEmpty=!stored.lo||parseFloat(stored.lo)<=0;
 
-    // Solo rellenar campos vacíos — no sobrescribir valores manuales
+    // Si ambos campos ya tienen valor — no hacer nada (respeta manual)
+    if(!hiEmpty&&!loEmpty)return;
+
+    // Rellenar solo los campos vacíos
     let changed=false;
-    if(!stored.hi||parseFloat(stored.hi)<=0){
-      stored.hi=prevHigh.toFixed(2);
-      changed=true;
-    }
-    if(!stored.lo||parseFloat(stored.lo)<=0){
-      stored.lo=prevLow.toFixed(2);
-      changed=true;
-    }
+    if(hiEmpty){stored.hi=prevHigh.toFixed(2);changed=true;}
+    if(loEmpty){stored.lo=prevLow.toFixed(2);changed=true;}
 
     if(changed){
       localStorage.setItem('levels_'+sym,JSON.stringify(stored));
-      _autoHLinesDate[sym]=todayKey;
-      addLog('info','HLines',`${sym} → Last High auto: $${stored.hi} · Last Low auto: $${stored.lo} (sesión anterior)`);
-      // Actualizar la UI del modal si está abierto en este ticker
+      // Marcar como auto-calculado para el badge en la UI
+      const etNow=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+      _autoHLinesDate[sym]=`${etNow.getFullYear()}-${etNow.getMonth()+1}-${etNow.getDate()}`;
+      addLog('info','HLines',`${sym} → LH auto: $${stored.hi} · LL auto: $${stored.lo} (sesión anterior)`);
+      // Actualizar UI si el modal de ese ticker está abierto
       if(typeof _strikeTicker!=='undefined'&&_strikeTicker===sym){
         loadStrikeLevels(sym);
       }

@@ -2135,11 +2135,12 @@ async function _buildSignalsCore(){
     const ma20Touch=Math.abs(lL15-lMA20_15)/lMA20_15<_ma20TouchTol||Math.abs(lH15-lMA20_15)/lMA20_15<_ma20TouchTol;
     const ma20Bull   = lP15>lMA20_15&&pP15>lMA20_15; // precio sobre MA20
     const ma20Bear   = lP15<lMA20_15&&pP15<lMA20_15; // precio bajo MA20
-    const ma20BounceCall = ma20Touch && lP15>lO15 && ma20Bull && lL15<=lMA20_15*1.002 && align1hBull && _callGuardOk;
-    const ma20BouncePut  = ma20Touch && lP15<lO15 && ma20Bear && lH15>=lMA20_15*0.998 && align1hBear && _putGuardOk;
+    // Gate puro MA20-R: toca MA20 + vela de confirmación + precio en dirección correcta
+    // align1hBull y _callGuardOk pasan a ser contexto (suman al score, no bloquean)
+    const ma20BounceCall = ma20Touch && lP15>lO15 && ma20Bull && lL15<=lMA20_15*1.002;
+    const ma20BouncePut  = ma20Touch && lP15<lO15 && ma20Bear && lH15>=lMA20_15*0.998;
 
     if(_stratEnabled('MA20-R')&&ma20BounceCall){
-      // Solo el primer rebote alcista del día por ticker (en debug, siempre muestra)
       const _ma20Key=`ma20r_call_${sym}_${new Date().toLocaleDateString('es-PR')}`;
       if(_debugMode||!sessionStorage.getItem(_ma20Key)){
         if(!_debugMode)sessionStorage.setItem(_ma20Key,'1');
@@ -2149,12 +2150,12 @@ async function _buildSignalsCore(){
           {ok:ma20Bull,      tf:'15m',text:`Precio sobre MA20 — soporte confirmado`},
           {ok:stochA,        tf:'15m',text:`Worden: %K (${lK15.toFixed(0)}) > %D (${lD15.toFixed(0)})`},
           {ok:volActive15,   tf:'15m',text:`Volumen activo${volLabel}`},
+          {ok:align1hBull,   tf:'1H', text:`Contexto 1H alcista: MA20>MA40`},
           {ok:_hlCallOk,     tf:'H/D',text:_hlCallText(),_hlBanner:_hlCallWarnBanner},
         ]});
       }
     }
     if(_stratEnabled('MA20-R')&&ma20BouncePut){
-      // Solo el primer rebote bajista del día por ticker (en debug, siempre muestra)
       const _ma20Key=`ma20r_put_${sym}_${new Date().toLocaleDateString('es-PR')}`;
       if(_debugMode||!sessionStorage.getItem(_ma20Key)){
         if(!_debugMode)sessionStorage.setItem(_ma20Key,'1');
@@ -2164,6 +2165,7 @@ async function _buildSignalsCore(){
           {ok:ma20Bear,      tf:'15m',text:`Precio bajo MA20 — resistencia confirmada`},
           {ok:stochB,        tf:'15m',text:`Worden: %K (${lK15.toFixed(0)}) < %D (${lD15.toFixed(0)})`},
           {ok:volActive15,   tf:'15m',text:`Volumen activo${volLabel}`},
+          {ok:align1hBear,   tf:'1H', text:`Contexto 1H bajista: MA40>MA20`},
           {ok:_hlPutOk,      tf:'H/D',text:_hlPutText(),_hlBanner:_hlPutWarnBanner},
         ]});
       }

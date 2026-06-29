@@ -1951,42 +1951,94 @@ async function _buildSignalsCore(){
     const _putGuardOk=!(_priceAboveMA20_15&&_bullMomentum3&&_distFromMA20_15pct>0.3)&&!(_openingGapBlock&&_priceAboveMA20_15);
 
     // BB-A: CALL — Bollinger (gate) alcista
-    const bollGateCall=lBBW15>=1.5&&mediaUp&&bbCallTrigger&&bigBodyCall&&_callGuardOk&&_bbSessionOk;
-    if(_stratEnabled('BB-A')&&bollGateCall){
-      let score=W.bollinger;            // gate cumplido → 60
-      if(maCallCross)  score+=W.medias; // +25
-      if(volOverLine)  score+=W.volumen;// +5
-      if(stochCallDir) score+=W.estocastico; // +5
-      // hlines (5%) es manual — no se autocalcula; queda como recordatorio en la tarjeta
-      all.push({...meta,code:'BB-A',name:'BB Entrada Temprana — CALL',type:'call',
-        weighted:true,score,threshold:SCORE_THRESHOLD,reqs:[
-        {ok:lBBW15>=1.5,      tf:'15m',weight:'BB',text:`Alta volatilidad: bandas abiertas (BBW ${lBBW15.toFixed(1)}%)`},
-        {ok:mediaUp,          tf:'15m',weight:'BB',text:`Media de Bollinger apuntando arriba: $${lMA20_15.toFixed(2)}`},
-        {ok:bbCallTrigger,    tf:'15m',weight:'BB',text:piercingUpper?`Vela perforando banda superior ($${lUp15.toFixed(2)}) — precio $${lP15.toFixed(2)}`:`Precio acercándose a banda superior desde adentro ($${lH15.toFixed(2)} → $${lUp15.toFixed(2)})`},
-        {ok:bigBodyCall,      tf:'15m',weight:'BB',text:`Vela verde con cuerpo ${candleBody15.toFixed(2)}%`},
-        {ok:maCallCross,      tf:'H/D',weight:'25%',text:`Contexto alcista: MA20>MA40 en Hora y Día`},
-        {ok:volOverLine,      tf:'15m',weight:'5%',text:`Volumen sobre la línea${volLabel}`},
-        {ok:stochCallDir,     tf:'15m',weight:'5%',text:`Worden a favor: %K ${lK15.toFixed(0)} > %D ${lD15.toFixed(0)}`},
-        {ok:_hlCallOk,        tf:'H/D',weight:'5%',text:_hlCallText(),_hlBanner:_hlCallWarnBanner},
+    // ── BB-A / BB-B: Pure BB Breakout ──────────────────────────────────────────
+    // Gate: solo 4 condiciones duras de Bollinger puro
+    //   1. BBW ≥ 1.5%       → bandas abiertas, hay volatilidad real
+    //   2. piercingUpper/Lower → precio cerrando FUERA de la banda (no solo tocando)
+    //   3. bigBodyCall/Put   → vela con cuerpo real (no wick trampa)
+    //   4. volOverLine       → volumen confirma el movimiento institucional
+    //
+    // Score: contexto suma puntos pero NO bloquea — MAs, estocástico, HLines = información
+    // Threshold: 60 (el gate ya es estricto — solo breakouts reales pasan)
+    //
+    // Por qué se quitó mediaUp/mediaDn del gate:
+    //   La media de BB tarda 2-4 velas en girar después del breakout.
+    //   Un gap de apertura alcista fuerte rompe la banda ANTES de que la media gire.
+    //   Bloquear por mediaUp perdía los mejores setups de apertura (GOOG, META, SPY 6/29).
+    //
+    // Por qué se quitó _callGuardOk/_putGuardOk del gate:
+    //   MA20>MA40 en 1H puede estar en orden bajista el viernes y revertir el lunes.
+    //   El breakout con fuerza ES la señal — el contexto de MAs suma al score.
+    // ───────────────────────────────────────────────────────────────────────────
+
+    // Pesos redefinidos para Pure BB: Bollinger ocupa 60%, contexto el 40% restante
+    const _WBB={
+      bb_expansion: 20,  // BBW abierto
+      bb_pierce:    20,  // precio fuera de la banda
+      bb_body:      10,  // cuerpo de vela confirmando
+      bb_volume:    10,  // volumen institucional
+      // contexto — suman pero no bloquean:
+      ctx_media:    10,  // media BB apuntando en la dirección
+      ctx_ma_cross: 10,  // MA20>MA40 en 1H y Día
+      ctx_stoch:     5,  // estocástico a favor
+      ctx_hlines:    5,  // HLines libres (no hay resistencia encima)
+      ctx_bbw_pct:  10,  // BBW sobre percentil 50 histórico (expansión real, no lateral)
+    };
+
+    // Gate puro — solo los 4 de Bollinger
+    const bbPureGateCall=lBBW15>=1.5&&piercingUpper&&bigBodyCall&&volOverLine&&_bbSessionOk;
+    const bbPureGatePut =lBBW15>=1.5&&piercingLower&&bigBodyPut &&volOverLine&&_bbSessionOk;
+
+    // BBW sobre percentil 50 histórico — expansión real vs lateral ruidoso
+    const _bbwMedian=_bbwHistory.length?_bbwHistory[Math.floor(_bbwHistory.length*0.5)]||lBBW15:lBBW15;
+    const bbwAboveMedian=lBBW15>=_bbwMedian;
+
+    if(_stratEnabled('BB-A')&&bbPureGateCall){
+      let score=_WBB.bb_expansion+_WBB.bb_pierce+_WBB.bb_body+_WBB.bb_volume; // 60 base
+      if(mediaUp)      score+=_WBB.ctx_media;    // +10 media BB a favor
+      if(maCallCross)  score+=_WBB.ctx_ma_cross; // +10 MA20>MA40 contexto
+      if(stochCallDir) score+=_WBB.ctx_stoch;    // +5  estocástico
+      if(_hlCallOk)    score+=_WBB.ctx_hlines;   // +5  sin resistencia encima
+      if(bbwAboveMedian) score+=_WBB.ctx_bbw_pct;// +10 expansión real
+
+      all.push({...meta,code:'BB-A',name:'BB Breakout — CALL',type:'call',
+        weighted:true,score,threshold:60,reqs:[
+        // ── GATE: las 4 condiciones duras ──
+        {ok:lBBW15>=1.5,    tf:'15m',weight:'BB',text:`Expansión BB: bandas abiertas (BBW ${lBBW15.toFixed(1)}%)`},
+        {ok:piercingUpper,  tf:'15m',weight:'BB',text:`Precio cerrando FUERA de banda superior: $${lP15.toFixed(2)} > $${lUp15.toFixed(2)}`},
+        {ok:bigBodyCall,    tf:'15m',weight:'BB',text:`Vela verde con cuerpo ${candleBody15.toFixed(2)}% — momentum real`},
+        {ok:volOverLine,    tf:'15m',weight:'BB',text:`Volumen institucional${volLabel}`},
+        // ── CONTEXTO: suman al score pero no bloquean ──
+        {ok:mediaUp,        tf:'15m',weight:'10%',text:`Media BB apuntando arriba: $${lMA20_15.toFixed(2)}`},
+        {ok:maCallCross,    tf:'H/D', weight:'10%',text:`Tendencia alcista: MA20>MA40 en 1H y Día`},
+        {ok:stochCallDir,   tf:'15m',weight:'5%', text:`Estocástico a favor: %K ${lK15.toFixed(0)} > %D ${lD15.toFixed(0)}`},
+        {ok:_hlCallOk,      tf:'H/D', weight:'5%', text:_hlCallText(),_hlBanner:_hlCallWarnBanner},
+        {ok:bbwAboveMedian, tf:'15m',weight:'10%',text:`BBW sobre mediana histórica (expansión real, no ruido)`},
       ]});
     }
-    // BB-B: PUT — Bollinger (gate) bajista
-    const bollGatePut=lBBW15>=1.5&&mediaDn&&bbPutTrigger&&bigBodyPut&&_putGuardOk&&_bbSessionOk;
-    if(_stratEnabled('BB-B')&&bollGatePut){
-      let score=W.bollinger;
-      if(maPutCross)  score+=W.medias;
-      if(volOverLine) score+=W.volumen;
-      if(stochPutDir) score+=W.estocastico;
-      all.push({...meta,code:'BB-B',name:'BB Entrada Temprana — PUT',type:'put',
-        weighted:true,score,threshold:SCORE_THRESHOLD,reqs:[
-        {ok:lBBW15>=1.5,      tf:'15m',weight:'BB',text:`Alta volatilidad: bandas abiertas (BBW ${lBBW15.toFixed(1)}%)`},
-        {ok:mediaDn,          tf:'15m',weight:'BB',text:`Media de Bollinger apuntando abajo: $${lMA20_15.toFixed(2)}`},
-        {ok:bbPutTrigger,     tf:'15m',weight:'BB',text:piercingLower?`Vela perforando banda inferior ($${lLow15.toFixed(2)}) — precio $${lP15.toFixed(2)}`:`Precio acercándose a banda inferior desde adentro ($${lL15.toFixed(2)} → $${lLow15.toFixed(2)})`},
-        {ok:bigBodyPut,       tf:'15m',weight:'BB',text:`Vela roja con cuerpo ${candleBody15.toFixed(2)}%`},
-        {ok:maPutCross,       tf:'H/D',weight:'25%',text:`Contexto bajista: MA40>MA20 en Hora y Día`},
-        {ok:volOverLine,      tf:'15m',weight:'5%',text:`Volumen sobre la línea${volLabel}`},
-        {ok:stochPutDir,      tf:'15m',weight:'5%',text:`Worden a favor: %K ${lK15.toFixed(0)} < %D ${lD15.toFixed(0)}`},
-        {ok:_hlPutOk,         tf:'H/D',weight:'5%',text:_hlPutText(),_hlBanner:_hlPutWarnBanner},
+
+    // BB-B: PUT — Pure BB Breakout bajista
+    if(_stratEnabled('BB-B')&&bbPureGatePut){
+      let score=_WBB.bb_expansion+_WBB.bb_pierce+_WBB.bb_body+_WBB.bb_volume; // 60 base
+      if(mediaDn)      score+=_WBB.ctx_media;
+      if(maPutCross)   score+=_WBB.ctx_ma_cross;
+      if(stochPutDir)  score+=_WBB.ctx_stoch;
+      if(_hlPutOk)     score+=_WBB.ctx_hlines;
+      if(bbwAboveMedian) score+=_WBB.ctx_bbw_pct;
+
+      all.push({...meta,code:'BB-B',name:'BB Breakout — PUT',type:'put',
+        weighted:true,score,threshold:60,reqs:[
+        // ── GATE ──
+        {ok:lBBW15>=1.5,    tf:'15m',weight:'BB',text:`Expansión BB: bandas abiertas (BBW ${lBBW15.toFixed(1)}%)`},
+        {ok:piercingLower,  tf:'15m',weight:'BB',text:`Precio cerrando FUERA de banda inferior: $${lP15.toFixed(2)} < $${lLow15.toFixed(2)}`},
+        {ok:bigBodyPut,     tf:'15m',weight:'BB',text:`Vela roja con cuerpo ${candleBody15.toFixed(2)}% — momentum real`},
+        {ok:volOverLine,    tf:'15m',weight:'BB',text:`Volumen institucional${volLabel}`},
+        // ── CONTEXTO ──
+        {ok:mediaDn,        tf:'15m',weight:'10%',text:`Media BB apuntando abajo: $${lMA20_15.toFixed(2)}`},
+        {ok:maPutCross,     tf:'H/D', weight:'10%',text:`Tendencia bajista: MA40>MA20 en 1H y Día`},
+        {ok:stochPutDir,    tf:'15m',weight:'5%', text:`Estocástico a favor: %K ${lK15.toFixed(0)} < %D ${lD15.toFixed(0)}`},
+        {ok:_hlPutOk,       tf:'H/D', weight:'5%', text:_hlPutText(),_hlBanner:_hlPutWarnBanner},
+        {ok:bbwAboveMedian, tf:'15m',weight:'10%',text:`BBW sobre mediana histórica (expansión real, no ruido)`},
       ]});
     }
     // Patrón C: PUT de regreso — EFECTO IMÁN: vela completa SOBRE la banda superior

@@ -780,6 +780,29 @@ async function fetchSchwabCandles(sym,freqType,freq,bars=50){
         // Mercado debe estar abierto para que tenga sentido inyectar
         const nowMins=nowEt.getHours()*60+nowEt.getMinutes();
         if(nowMins<570||nowMins>=960)return candles; // fuera de horario
+        // ── FIX (auditoría 2026-06-30): usar tracker del WebSocket si está disponible ──
+        // Antes: siempre hacía una llamada REST a Schwab /quotes (2-4s de latencia).
+        // Ahora: si el WS ya tiene datos de la sesión de hoy, los usa directamente
+        // (latencia ~0ms) — crítico para las primeras velas de 9:30 AM donde cada
+        // segundo cuenta. Si el WS no tiene datos todavía, cae al REST como respaldo.
+        const _wsC=_wsSessionCandle[sym];
+        if(_wsC&&_wsC.date===nowEt.toDateString()&&_wsC.close>0){
+          const _recentVols=candles.slice(-10).map(c=>c.volume||0).filter(v=>v>0);
+          const _avgVol=_recentVols.length?_recentVols.reduce((a,b)=>a+b,0)/_recentVols.length:0;
+          const todayCandle={
+            datetime:_wsC.ts,
+            open:_wsC.open,
+            high:_wsC.high,
+            low:_wsC.low,
+            close:_wsC.close,
+            volume:_avgVol>0?Math.round(_avgVol*1.1):0,
+            _synthetic:true,
+            _fromWS:true
+          };
+          addLog('debug','WS Candle',`${sym} vela WS: O:${_wsC.open.toFixed(2)} H:${_wsC.high.toFixed(2)} L:${_wsC.low.toFixed(2)} C:${_wsC.close.toFixed(2)}`);
+          return[...candles,todayCandle];
+        }
+        // Respaldo: llamada REST a Schwab /quotes si WS no tiene datos
         try{
           const tok=await getSchwabToken();
           if(!tok)return candles;
@@ -1397,6 +1420,38 @@ let _wsSubscribed=new Set();
 let _wsLastBuildTrigger=0;
 const _WS_BUILD_THROTTLE_MS=45000; // no relanzar buildSignals() más de 1x/45s desde el WS
 
+// ── Tracker de vela de apertura en tiempo real (alimentado por WS) ──────────
+// Cada ticker tiene su propio objeto {open, high, low, close, ts} desde 9:30 AM.
+// Esto permite construir la "vela de hoy" con datos en tiempo real del WS
+// en vez de esperar a la llamada REST de Schwab /quotes (que tarda 2-4s).
+// Se resetea cada mañana al detectar que la fecha ET cambió.
+const _wsSessionCandle={}; // { SYM: {open,high,low,close,ts,date} }
+let _wsSessionDate=''; // fecha ET del día actual (para detectar cambio de día)
+
+function _wsUpdateSessionCandle(sym, price){
+  const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+  const dateStr=et.toDateString();
+  const mins=et.getHours()*60+et.getMinutes();
+  // Resetear todos los trackers si cambió el día
+  if(_wsSessionDate&&_wsSessionDate!==dateStr){
+    Object.keys(_wsSessionCandle).forEach(k=>delete _wsSessionCandle[k]);
+    addLog('debug','WS Candle','Nuevo día ET — trackers de vela de apertura reseteados');
+  }
+  _wsSessionDate=dateStr;
+  // Solo trackear en horario de mercado regular (9:30 AM – 4:00 PM ET)
+  if(mins<570||mins>=960)return;
+  if(!_wsSessionCandle[sym]){
+    // Primera vez que vemos precio hoy → es el open de la sesión
+    _wsSessionCandle[sym]={open:price,high:price,low:price,close:price,ts:Date.now(),date:dateStr};
+  }else{
+    const c=_wsSessionCandle[sym];
+    c.high=Math.max(c.high,price);
+    c.low=Math.min(c.low,price);
+    c.close=price;
+    c.ts=Date.now();
+  }
+}
+
 function _wsLog(level,msg){addLog(level,'Finnhub WS',msg);}
 
 function connectFinnhubWS(){
@@ -1435,6 +1490,7 @@ function connectFinnhubWS(){
       // Algunos símbolos de Finnhub llegan con sufijo de exchange (raro en US equities, pero por seguridad)
       const cleanSym=sym.split('.')[0];
       if(!_signalTickers.includes(cleanSym))return;
+      _wsUpdateSessionCandle(cleanSym, price); // actualizar O/H/L/C de la vela de hoy
       const prev=_livePrices[cleanSym]?.prev;
       if(prev&&prev>0){
         const pct=+((price-prev)/prev*100).toFixed(2);
@@ -1493,12 +1549,15 @@ function _scheduleWsReconnect(){
     connectFinnhubWS();
   },delay);
 }
-// Throttle — evita disparar buildSignals() en cada trade individual (pueden
-// llegar varios por segundo en SPY/QQQ). Como máximo 1 reconstrucción cada
-// 45s activada por el WebSocket, además del ciclo regular del masterTick.
 function _wsMaybeTriggerBuildSignals(){
   const now=Date.now();
-  if(now-_wsLastBuildTrigger<_WS_BUILD_THROTTLE_MS)return;
+  // Durante 9:30–10:00 AM ET (ventana de mayor volatilidad), reducir el throttle
+  // a 20s para reaccionar más rápido a breakouts de las primeras velas.
+  // El resto del día mantiene 45s para no saturar Schwab.
+  const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+  const mins=et.getHours()*60+et.getMinutes();
+  const _throttle=(mins>=570&&mins<600)?20000:_WS_BUILD_THROTTLE_MS; // 20s apertura, 45s resto
+  if(now-_wsLastBuildTrigger<_throttle)return;
   if(_signalsBusy)return; // ya hay una corriendo, no hace falta encolar otra desde el WS
   _wsLastBuildTrigger=now;
   buildSignals();
@@ -2035,24 +2094,121 @@ async function _buildSignalsCore(){
     // F4: Volumen activo
     const volLabel=avgVol15_10>0?` (${(lVol15/avgVol15_10*100).toFixed(0)}% del promedio)`:'';
 
-    // ── SETUP — Pre-ruptura ─────────────────────────────────────────────────
-    const distToUpper=(lUp15-lP15)/lP15*100;
-    const distToLower=(lP15-lLow15)/lP15*100;
-    const nearUpper=distToUpper>=0&&distToUpper<0.3;
-    const nearLower=distToLower>=0&&distToLower<0.3;
-    const setupBull=lBBW15<2.0&&nearUpper&&lP15>lMA20_15&&bbwRising&&stochCallOk&&align1hBull;
-    const setupBear=lBBW15<2.0&&nearLower&&lP15<lMA20_15&&bbwRising&&stochPutOk&&align1hBear;
-    if(setupBull||setupBear){
+    // ════════════════════════════════════════════════════════════════════════
+    // SETUP — Sistema de alerta de 3 niveles antes de la ruptura
+    // ════════════════════════════════════════════════════════════════════════
+    //
+    // Antes: solo medía la distancia del CLOSE a la banda (0.3%).
+    // Problema: cuando el close ya estaba a 0.3% la vela casi había terminado,
+    // y el sistema ignoraba por completo si el HIGH/LOW de la vela ya había
+    // tocado la banda (el intento real que el trader quiere ver).
+    //
+    // Ahora hay 3 niveles de alerta progresivos:
+    //
+    //  NIVEL 1 — "ACERCÁNDOSE" (aviso temprano):
+    //    Close dentro del 1.0% de la banda + BBW expandiéndose
+    //    → Primera advertencia, el precio se está aproximando
+    //
+    //  NIVEL 2 — "INTENTO" (alarma crítica):
+    //    El HIGH de la vela actual tocó la banda superior (o LOW tocó inferior)
+    //    pero el CLOSE está ADENTRO. La vela está probando la banda ahora mismo.
+    //    Este nivel usa el tracker del WebSocket (_wsSessionCandle) para detectar
+    //    el intento en tiempo real, sin esperar al cierre de la vela.
+    //    → Es el aviso que más importa: "está intentando salir AHORA"
+    //
+    //  NIVEL 3 — "PRE-RUPTURA" (señal fuerte):
+    //    Close dentro del 0.3% de la banda + todas las condiciones del SETUP
+    //    original. La ruptura es inminente en la próxima vela o al final de esta.
+    //    → Ya es casi una señal BB-A/BB-B, entra en posición
+
+    // Datos de la vela actual — close (para niveles 1 y 3)
+    const distClosToUpper=(lUp15-lP15)/lP15*100;
+    const distClosToLower=(lP15-lLow15)/lP15*100;
+
+    // Datos del HIGH/LOW real de la vela — usar WS si disponible, si no, Schwab
+    const _wsC=_wsSessionCandle[sym];
+    const _etNow15d=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+    const _wsIsToday=_wsC&&_wsC.date===_etNow15d.toDateString()&&_wsC.close>0;
+    // El high de la vela actual: si el WS tiene datos del día de hoy, usarlo
+    // (es el high tick-a-tick desde las 9:30). Si no, usar el high de la última vela cerrada.
+    const _candleHigh=(_wsIsToday&&_wsC.high>lH15)?_wsC.high:lH15;
+    const _candleLow=(_wsIsToday&&_wsC.low<lL15)?_wsC.low:lL15;
+    const _candleClose=(_wsIsToday&&_wsC.close>0)?_wsC.close:lP15;
+
+    // Distancia del HIGH/LOW de la vela a la banda (negativo = ya la tocó/cruzó)
+    const distHighToUpper=(lUp15-_candleHigh)/lP15*100;  // <0 → el high ya pasó la banda
+    const distLowToLower=(_candleLow-lLow15)/lP15*100;   // <0 → el low ya pasó la banda
+
+    // Nivel 1: Acercándose — close dentro del 1.0% de la banda
+    const approachingUpper1=distClosToUpper>=0&&distClosToUpper<1.0;
+    const approachingLower1=distClosToLower>=0&&distClosToLower<1.0;
+
+    // Nivel 2: Intento — el HIGH/LOW tocó la banda pero el CLOSE está adentro
+    // distHighToUpper <= 0.05%: el high llegó o superó la banda superior
+    // lP15 < lUp15: el close todavía está adentro (si cerró afuera ya es BB-A/BB-B)
+    const wickTestingUpper=distHighToUpper<=0.05&&_candleClose<lUp15;
+    const wickTestingLower=distLowToLower<=0.05&&_candleClose>lLow15;
+
+    // Nivel 3: Pre-ruptura — close dentro del 0.3% (el SETUP original mejorado)
+    const nearUpper=distClosToUpper>=0&&distClosToUpper<0.3;
+    const nearLower=distClosToLower>=0&&distClosToLower<0.3;
+
+    // Condiciones base compartidas por los 3 niveles
+    const _baseCallConds=lP15>lMA20_15&&bbwRising&&align1hBull;
+    const _basePutConds=lP15<lMA20_15&&bbwRising&&align1hBear;
+
+    // Aceleración del BBW — qué tan rápido se está expandiendo
+    // Si lBBW15 creció >0.15% en las últimas 2 velas, la expansión está acelerando
+    const bbwAccelerating=(lBBW15-lBBW15_2)>0.15;
+
+    // ── Nivel 2: INTENTO DE RUPTURA ──────────────────────────────────────────
+    // Tiene prioridad sobre los otros niveles — si hay intento, no mostrar nivel 1
+    const intentoBull=wickTestingUpper&&_baseCallConds;
+    const intentoBear=wickTestingLower&&_basePutConds;
+    if((intentoBull||intentoBear)&&_bbSessionOk){
+      const iType=intentoBull?'call':'put';
+      const iDir=intentoBull?'Superior':'Inferior';
+      const iDist=intentoBull?distHighToUpper:distLowToLower;
+      const iWick=intentoBull?`H: $${_candleHigh.toFixed(2)} vs Banda: $${lUp15.toFixed(2)}`:`L: $${_candleLow.toFixed(2)} vs Banda: $${lLow15.toFixed(2)}`;
+      all.push({...meta,code:'INTENTO',name:`⚡ Intento de ruptura — Banda ${iDir}`,type:iType,isSetup:true,_setupLevel:2,reqs:[
+        {ok:true,             tf:'15m',text:`🔥 VELA TOCANDO banda ${iDir} (${iWick})`},
+        {ok:_wsIsToday,       tf:'WS', text:_wsIsToday?`Dato en tiempo real (WebSocket Finnhub activo)`:`Dato de última vela cerrada (WS sin datos de hoy)`},
+        {ok:bbwRising,        tf:'15m',text:`BBW expandiéndose: ${lBBW15.toFixed(2)}% ${bbwAccelerating?'⚡ ACELERANDO':'> '+lBBW15_1.toFixed(2)+'%'}`},
+        {ok:intentoBull?lP15>lMA20_15:lP15<lMA20_15, tf:'15m',text:`MA20 alineada: $${lMA20_15.toFixed(2)}`},
+        {ok:intentoBull?align1hBull:align1hBear, tf:'1H',text:`1H confirma dirección`},
+        {ok:stochCallOk||stochPutOk, tf:'15m',text:`Stochastics apoyando (%K ${lK15.toFixed(0)})`},
+      ]});
+    }
+
+    // ── Nivel 3: PRE-RUPTURA (solo si no hubo intento ya detectado) ──────────
+    const setupBull=!intentoBull&&lBBW15<2.0&&nearUpper&&_baseCallConds&&stochCallOk;
+    const setupBear=!intentoBear&&lBBW15<2.0&&nearLower&&_basePutConds&&stochPutOk;
+    if((setupBull||setupBear)&&_bbSessionOk){
       const setupType=setupBull?'call':'put';
       const setupDir=setupBull?'Superior':'Inferior';
-      const setupDist=(setupBull?distToUpper:distToLower).toFixed(2);
-      all.push({...meta,code:'SETUP',name:`Setup BB — Precio cerca de banda ${setupDir}`,type:setupType,isSetup:true,reqs:[
+      const setupDist=(setupBull?distClosToUpper:distClosToLower).toFixed(2);
+      all.push({...meta,code:'SETUP',name:`Setup BB — Precio cerca de banda ${setupDir}`,type:setupType,isSetup:true,_setupLevel:3,reqs:[
         {ok:lBBW15<2.0,              tf:'15m',text:`BB comprimido (BBW ${lBBW15.toFixed(1)}% < 2%)`},
-        {ok:setupBull||setupBear,    tf:'15m',text:`Precio a ${setupDist}% de banda ${setupDir} ($${(setupBull?lUp15:lLow15).toFixed(2)})`},
+        {ok:setupBull||setupBear,    tf:'15m',text:`Close a ${setupDist}% de banda ${setupDir} ($${(setupBull?lUp15:lLow15).toFixed(2)})`},
         {ok:setupBull?lP15>lMA20_15:lP15<lMA20_15,tf:'15m',text:`MA20 alineada: $${lMA20_15.toFixed(2)}`},
         {ok:stochCallOk||stochPutOk, tf:'15m',text:`Stochastics apoyando (%K ${lK15.toFixed(0)})`},
         {ok:bbwRising,               tf:'15m',text:`BBW expandiéndose: ${lBBW15.toFixed(2)}% > ${lBBW15_1.toFixed(2)}%`},
-        {ok:setupBull?align1hBull:align1hBear, tf:'1H', text:`1H confirma dirección: precio ${setupBull?'sobre':'bajo'} MA20 1H con slope ${setupBull?'alcista':'bajista'}`},
+        {ok:setupBull?align1hBull:align1hBear, tf:'1H', text:`1H confirma dirección: precio ${setupBull?'sobre':'bajo'} MA20 1H`},
+      ]});
+    }
+
+    // ── Nivel 1: ACERCÁNDOSE (solo si no hay intento ni pre-ruptura ya) ───────
+    const acercBull=!intentoBull&&!setupBull&&approachingUpper1&&_baseCallConds&&bbwAccelerating;
+    const acercBear=!intentoBear&&!setupBear&&approachingLower1&&_basePutConds&&bbwAccelerating;
+    if((acercBull||acercBear)&&_bbSessionOk){
+      const acType=acercBull?'call':'put';
+      const acDir=acercBull?'Superior':'Inferior';
+      const acDist=(acercBull?distClosToUpper:distClosToLower).toFixed(2);
+      all.push({...meta,code:'AVISO',name:`📡 Precio acercándose a banda ${acDir}`,type:acType,isSetup:true,_setupLevel:1,reqs:[
+        {ok:true,             tf:'15m',text:`Precio a ${acDist}% de banda ${acDir} ($${(acercBull?lUp15:lLow15).toFixed(2)})`},
+        {ok:bbwAccelerating,  tf:'15m',text:`BBW acelerando: ${lBBW15_2.toFixed(2)}% → ${lBBW15_1.toFixed(2)}% → ${lBBW15.toFixed(2)}%`},
+        {ok:acercBull?lP15>lMA20_15:lP15<lMA20_15, tf:'15m',text:`MA20 alineada: $${lMA20_15.toFixed(2)}`},
+        {ok:acercBull?align1hBull:align1hBear, tf:'1H',text:`1H confirma dirección`},
       ]});
     }
 
@@ -2646,37 +2802,50 @@ async function _buildSignalsCore(){
       addLog('warn','Telegram',`${s.sym} ${s.code} — Telegram BLOQUEADO: precio sin confirmar por Finnhub ($${s.price.toFixed(2)}) ⚠`);
     }
 
-    // Send Telegram SETUP notification (solo si precio confirmado)
+    // Send Telegram SETUP/INTENTO/AVISO notification (solo si precio confirmado)
     if(s.isSetup&&_priceConfirmed){
       const _etSetup=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
       const _today=_etSetup.toLocaleDateString('es-PR');
-      // FIX (memoria/auditoría 2026-06-30): antes la clave era solo sym+día,
-      // así que UN solo SETUP avisado bloqueaba CUALQUIER otro setup nuevo del
-      // mismo ticker el resto del día (ej. setup a las 9:45 AM tapaba uno
-      // genuino y distinto a las 2:00 PM). Ahora se bucketiza por hora ET para
-      // permitir avisos de setups realmente nuevos sin volver a spamear el
-      // mismo setup cada 3 minutos dentro de la misma hora.
-      const _setupKey=`tg_sent_setup_${s.sym}_${_today}_${_etSetup.getHours()}`;
+      const _level=s._setupLevel||3;
+      // FIX (auditoría 2026-06-30): dedup por hora ET para no spamear el
+      // mismo estado cada 3 minutos, pero sí avisar si escala de nivel.
+      // La clave incluye el nivel para que si pasa de AVISO → INTENTO → SETUP
+      // en la misma hora, cada escalada dispare un aviso nuevo.
+      const _setupKey=`tg_sent_setup_${s.sym}_${s.code}_${_level}_${_today}_${_etSetup.getHours()}`;
       if(!localStorage.getItem(_setupKey)){
         localStorage.setItem(_setupKey,'1');
         const time=_etSetup.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true});
-        const msg=`⚡ *SETUP DETECTADO — ${s.sym}*
-
-`+
-          `📊 ${s.name}
-`+
-          `💰 Precio: *$${s.price.toFixed(2)}* ✅ Finnhub
-`+
-          `🎯 BB comprimido — ruptura inminente
-`+
-          `🕐 ${time} ET
-
-`+
-          `_Prepárate para la señal real_`;
+        let msg='';
+        if(_level===2){
+          // INTENTO — máxima urgencia
+          msg=`🔥 *INTENTO DE RUPTURA — ${s.sym}*\n\n`+
+            `📊 ${s.name}\n`+
+            `💰 Precio: *$${s.price.toFixed(2)}*\n`+
+            `🕐 ${time} ET\n\n`+
+            `⚡ *La vela está tocando la banda de Bollinger AHORA MISMO*\n`+
+            `Prepárate para entrar si el cierre confirma la ruptura\n\n`+
+            `_TradeDesk Pro_`;
+        }else if(_level===3){
+          // SETUP — pre-ruptura inminente
+          msg=`⚡ *SETUP DETECTADO — ${s.sym}*\n\n`+
+            `📊 ${s.name}\n`+
+            `💰 Precio: *$${s.price.toFixed(2)}*\n`+
+            `🎯 BB comprimido — ruptura inminente\n`+
+            `🕐 ${time} ET\n\n`+
+            `_Prepárate para la señal real_`;
+        }else{
+          // AVISO — acercándose (nivel 1)
+          msg=`📡 *ACERCÁNDOSE A BOLLINGER — ${s.sym}*\n\n`+
+            `📊 ${s.name}\n`+
+            `💰 Precio: *$${s.price.toFixed(2)}*\n`+
+            `🕐 ${time} ET\n\n`+
+            `📈 BBW acelerando — precio apuntando a la banda\n`+
+            `_Monitorea de cerca, puede haber ruptura pronto_`;
+        }
         const _tok=getTgToken(),_chat=getTgChat();
         if(_tok&&_chat){
           sendTelegram(msg,_tok,_chat).then(_ok=>{
-            if(!_ok)addLog('error','Telegram',`${s.sym} SETUP — Telegram no se pudo enviar`);
+            if(!_ok)addLog('error','Telegram',`${s.sym} ${s.code} L${_level} — Telegram no se pudo enviar`);
           });
         }
       }
@@ -2888,193 +3057,19 @@ async function _buildSignalsCore(){
   // Reaplicar el filtro de ticker activo a las tarjetas (nuevas y existentes)
   applySignalTickerFilter();
 
-  if(!area)return; // Morning Scanner replaced momentum panel
-  const results=[];
-  const _momSkipped=[];
-  const _momTimeout=setTimeout(()=>{
-    if(area.innerHTML.includes('⟳'))
-      area.innerHTML='<div style="text-align:center;padding:20px;color:var(--text3);font-size:12px;"><div style="color:var(--yellow);">⏱ Tiempo agotado</div><div style="font-size:11px;margin-top:4px;">Schwab tardó demasiado</div></div>';
-  },60000);
-  // Get token once before loop — avoids concurrent refresh race
-  const _momToken=await getSchwabToken();
-  if(!_momToken){
-    clearTimeout(_momTimeout);
-    area.innerHTML='<div style="text-align:center;padding:20px;color:var(--text2);font-size:12px;"><div style="font-size:22px;margin-bottom:8px">🔗</div><div style="color:var(--yellow);font-weight:600;">Schwab desconectado</div><div style="font-size:11px;margin-top:4px;color:var(--text3);">Ve a Configuración → APIs para reconectar</div></div>';
-    return;
-  }
-
-  for(const[sym,info]of Object.entries(MOM_STOCKS)){
-    const base=info.price;
-    let pDay=null,p1h=null;
-    try{
-      pDay=await Promise.race([fetchSchwabCandles(sym,'D',1,90),   new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),12000))]);
-      await new Promise(r=>setTimeout(r,200));
-      p1h=await Promise.race([fetchSchwabCandles(sym,'minute',60,100),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),12000))]);
-      await new Promise(r=>setTimeout(r,200));
-    }catch(e){}
-    // Sin datos reales de Schwab = saltar este símbolo
-    if(!pDay||closes(pDay).length<20||!p1h||closes(p1h).length<10){
-      _momSkipped.push(sym);
-      continue;
-    }
-    // ── Indicadores Diario ───────────────────────────────────────────────────
-    const _cd=closes(pDay),_oD=opens(pDay);
-    const n_cd=_cd.length;
-    const ma20d=sma(_cd,20),ma40d=sma(_cd,40);
-    const bbd=bollinger(_cd);
-    const lPd=_cd[n_cd-1],pPd=_cd[n_cd-2]||lPd;
-    const pOd=_oD[n_cd-1]||lPd;
-    const lMA20d=ma20d.filter(v=>v!=null).slice(-1)[0]||lPd;
-    const pMA20d=ma20d.filter(v=>v!=null).slice(-2)[0]||lMA20d;
-    const lMA40d=ma40d.filter(v=>v!=null).slice(-1)[0]||lPd;
-    const pMA40d=ma40d.filter(v=>v!=null).slice(-2)[0]||lMA40d;
-    const lBBUp=bbd.upper.filter(v=>v!=null).slice(-1)[0]||lPd;
-    const lBBLow=bbd.lower.filter(v=>v!=null).slice(-1)[0]||lPd;
-    const lBBMid=bbd.mid.filter(v=>v!=null).slice(-1)[0]||lPd;
-    const bbWd=lBBMid?(lBBUp-lBBLow)/lBBMid*100:0;
-
-    // ── Indicadores 1H ───────────────────────────────────────────────────────
-    const _c1=closes(p1h),_h1=highs(p1h),_l1=lows(p1h);
-    const n_c1=_c1.length;
-    const ma100h=sma(_c1,Math.min(100,n_c1-1));
-    const ma200h=sma(_c1,Math.min(200,n_c1-1));
-    const lPh=_c1[n_c1-1];
-    const lMA100h=ma100h.filter(v=>v!=null).slice(-1)[0]||lPh;
-    const lMA200h=ma200h.filter(v=>v!=null).slice(-1)[0]||lPh;
-
-    // ════════════════════════════════════════════════════════════════════════
-    // MOMENTUM AL ALZA (BULL) — 6 condiciones según metodología
-    // Contexto: venía bajando, ahora inicia tendencia alcista con volatilidad
-    // ════════════════════════════════════════════════════════════════════════
-    // C1: Venía en tendencia bajista clara — precio entre MA200h y MA100h (bajo ambas o entre ellas)
-    const comingFromDowntrend = lPh<=lMA100h||( lPh<lMA200h&&lPh<lMA100h);
-    // C2: MA20d cruza por arriba de MA40d (cruce alcista en diario)
-    const ma20CrossAboveMa40 = lMA20d>lMA40d && pMA20d<=pMA40d;
-    // C3: Precio rompe MA100h y MA200h en hora (precio sobre ambas)
-    const priceAboveMa100_200h = lPh>lMA100h && lPh>lMA200h;
-    // C4: Precio rompe MA20d en diario (cierre sobre MA20)
-    const priceAboveMa20d = lPd>lMA20d && pPd<=lMA20d;
-    // C5: Precio rompe MA40d en diario (cierre sobre MA40 — después de MA20)
-    const priceAboveMa40d = lPd>lMA40d;
-    // C6: Confirmación Bollinger — BB expandiéndose + precio sobre banda media
-    const bbConfirmBull = bbWd>3 && lPd>lBBMid;
-
-    // ════════════════════════════════════════════════════════════════════════
-    // MOMENTUM A LA BAJA (BEAR) — 6 condiciones según metodología
-    // Contexto: venía subiendo, ahora inicia tendencia bajista con volatilidad
-    // ════════════════════════════════════════════════════════════════════════
-    // C1: Venía en tendencia alcista clara — precio entre MA100h y MA200h (sobre ambas o entre ellas)
-    const comingFromUptrend = lPh>=lMA100h||(lPh>lMA200h&&lPh>lMA100h);
-    // C2: MA20d cruza por debajo de MA40d (cruce bajista en diario)
-    const ma20CrossBelowMa40 = lMA20d<lMA40d && pMA20d>=pMA40d;
-    // C3: Precio rompe MA100h y MA200h a la baja en hora
-    const priceBelowMa100_200h = lPh<lMA100h && lPh<lMA200h;
-    // C4: Precio rompe MA20d a la baja en diario
-    const priceBelowMa20d = lPd<lMA20d && pPd>=lMA20d;
-    // C5: Precio rompe MA40d a la baja en diario
-    const priceBelowMa40d = lPd<lMA40d;
-    // C6: Confirmación Bollinger — BB expandiéndose + precio bajo banda media
-    const bbConfirmBear = bbWd>3 && lPd<lBBMid;
-
-    const bullR=[
-      {ok:comingFromDowntrend,    tf:'1H', text:`Venía bajando: precio bajo/entre MA100h ($${lMA100h.toFixed(2)}) y MA200h ($${lMA200h.toFixed(2)})`},
-      {ok:ma20CrossAboveMa40,     tf:'D',  text:`MA20d ($${lMA20d.toFixed(2)}) cruza por arriba de MA40d ($${lMA40d.toFixed(2)})`},
-      {ok:priceAboveMa100_200h,   tf:'1H', text:`Precio rompe MA100h y MA200h al alza ($${lPh.toFixed(2)})`},
-      {ok:priceAboveMa20d,        tf:'D',  text:`Precio rompe MA20d al alza ($${lPd.toFixed(2)} > $${lMA20d.toFixed(2)})`},
-      {ok:priceAboveMa40d,        tf:'D',  text:`Precio sobre MA40d ($${lPd.toFixed(2)} > $${lMA40d.toFixed(2)})`},
-      {ok:bbConfirmBull,          tf:'D',  text:`BB confirma: expandiéndose (${bbWd.toFixed(1)}%) + precio sobre media`},
-    ];
-    const bearR=[
-      {ok:comingFromUptrend,      tf:'1H', text:`Venía subiendo: precio sobre/entre MA100h ($${lMA100h.toFixed(2)}) y MA200h ($${lMA200h.toFixed(2)})`},
-      {ok:ma20CrossBelowMa40,     tf:'D',  text:`MA20d ($${lMA20d.toFixed(2)}) cruza por debajo de MA40d ($${lMA40d.toFixed(2)})`},
-      {ok:priceBelowMa100_200h,   tf:'1H', text:`Precio rompe MA100h y MA200h a la baja ($${lPh.toFixed(2)})`},
-      {ok:priceBelowMa20d,        tf:'D',  text:`Precio rompe MA20d a la baja ($${lPd.toFixed(2)} < $${lMA20d.toFixed(2)})`},
-      {ok:priceBelowMa40d,        tf:'D',  text:`Precio bajo MA40d ($${lPd.toFixed(2)} < $${lMA40d.toFixed(2)})`},
-      {ok:bbConfirmBear,          tf:'D',  text:`BB confirma: expandiéndose (${bbWd.toFixed(1)}%) + precio bajo media`},
-    ];
-
-    const bp=bullR.filter(r=>r.ok).length,brp=bearR.filter(r=>r.ok).length;
-    const isBull=bp>=brp;
-    const pct=Math.round(Math.max(bp,brp)/6*100);
-
-    // PUERTAS OBLIGATORIAS — sin estas no hay señal
-    // Bull: DEBE cruzar MA20d + MA40d en diario (condiciones C4+C5 obligatorias)
-    // Bear: DEBE cruzar MA20d + MA40d a la baja (condiciones C4+C5 obligatorias)
-    const gateOk=isBull?(priceAboveMa20d&&priceAboveMa40d):(priceBelowMa20d&&priceBelowMa40d);
-
-    if(pct>=80&&gateOk){
-      const type=isBull?'bull':'bear';
-      const lev=type==='bull'?info.lev2:info.inv;
-      const levName=type==='bull'?info.lev2name:info.invname;
-      results.push({sym,name:info.name,price:lPd,type,reqs:isBull?bullR:bearR,passed:Math.max(bp,brp),total:6,lev,levName});
-    }
-  }
-  results.sort((a,b)=>b.passed-a.passed);
-  if(!results.length){area.innerHTML='<div style="text-align:center;padding:20px;color:var(--text2);font-size:12px;"><div style="font-size:22px;margin-bottom:8px">📊</div><div>Sin Momentum detectado</div><div style="font-size:11px;margin-top:6px;color:var(--text3)">Requiere Schwab conectado</div></div>';return;}
-  clearTimeout(_momTimeout);
-  // Log skipped symbols once as a summary (not once per symbol per call)
-  if(_momSkipped.length>0){
-    const schwabOk=await getSchwabToken();
-    if(!schwabOk)addLog('error','Momentum',`Sin token Schwab — ${_momSkipped.length} símbolos omitidos`,_momSkipped.join(', '));
-    else addLog('warn','Momentum',`${_momSkipped.length} símbolos sin datos: ${_momSkipped.join(', ')}`);
-  }
-  // Telegram notifications for momentum signals
-  for(const r of results){
-    const _etMom=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
-    const _momDate=_etMom.toLocaleDateString('es-PR');
-    const _mKey=`tg_sent_mom_${r.sym}_${r.type}_${_momDate}`;
-    if(!localStorage.getItem(_mKey)){
-      localStorage.setItem(_mKey,'1');
-      const dir=r.type==='bull'?'📈 ALCISTA':'📉 BAJISTA';
-      const emoji=r.type==='bull'?'🚀':'🔻';
-      const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
-      const time=et.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true});
-      const msg=`${emoji} *MOMENTUM ${dir} — ${r.sym}*\n\n`+
-        `📊 ${r.name} · BB Daily Breakout\n`+
-        `💰 Precio: *$${r.price.toFixed(2)}*\n`+
-        `🎯 Confianza: *${Math.round(r.passed/(r.total||6)*100)}%*\n`+
-        `🏷 Ticker a comprar: *${r.lev}*\n`+
-        `🕐 ${time} ET\n\n`+
-        `_TradeDesk Pro_`;
-      notifySignal && getTgToken() && sendTelegram(msg, getTgToken(), getTgChat());
-    }
-  }
-  area.innerHTML=results.map(r=>{
-    const pct=Math.round(r.passed/(r.total||6)*100);
-    const col='#00d17a'; // siempre verde porque filtramos >=80%
-    const hdr=r.type==='bull'?'mom-bull':'mom-bear';
-    const dir=r.type==='bull'?'📈 ALCISTA':'📉 BAJISTA';
-    const dirCol=r.type==='bull'?'#00d17a':'#ff4d6d';
-    return`<div class="mom-card">
-      <div class="mom-hdr ${hdr}">
-        <div>
-          <div style="display:flex;align-items:center;gap:6px;">
-            <span style="font-family:var(--mono);font-size:16px;font-weight:700;color:#fff">${r.sym}</span>
-            <span style="font-size:10px;background:rgba(0,0,0,.3);color:#fff;padding:2px 8px;border-radius:8px;font-weight:700;">${dir}</span>
-          </div>
-          <div style="font-size:11px;color:rgba(255,255,255,.7);margin-top:2px;">$${r.price.toFixed(2)} · ${r.name} · 📡 Schwab</div>
-        </div>
-        <div style="text-align:right;">
-          <div style="font-family:var(--mono);font-size:20px;font-weight:700;color:#fff">${pct}%</div>
-          <div style="font-size:10px;color:rgba(255,255,255,.7)">${r.passed}/5 cond.</div>
-        </div>
-      </div>
-      <div class="mom-body">
-        ${r.reqs.map(q=>`<div class="mom-req">
-          <span style="font-size:12px;flex-shrink:0">${q.ok?'✅':'❌'}</span>
-          <span style="color:${q.ok?'var(--text)':'var(--text3)'};font-size:12px;line-height:1.4">${q.text}</span>
-        </div>`).join('')}
-        <div style="height:3px;background:var(--bg4);border-radius:2px;margin-top:8px;overflow:hidden;">
-          <div style="height:100%;width:${pct}%;background:${col};border-radius:2px;"></div>
-        </div>
-        <div style="margin-top:8px;background:rgba(0,0,0,.25);border-radius:var(--r);padding:8px 10px;display:flex;align-items:center;justify-content:space-between;">
-          <span style="font-size:11px;color:rgba(255,255,255,.6);">Ticker a comprar:</span>
-          <span style="font-family:var(--mono);font-size:16px;font-weight:700;color:${dirCol};">${r.lev}</span>
-          <span style="font-size:10px;color:rgba(255,255,255,.5);">${r.levName}</span>
-        </div>
-      </div>
-    </div>`;
-  }).join('');
+  // ── FIN de _buildSignalsCore ─────────────────────────────────────────────
+  // NOTA (auditoría 2026-06-30): se eliminó el bloque de "Momentum Scanner"
+  // que existía aquí. Ese bloque:
+  //   1. Nunca era alcanzado en primera carga (return temprano en línea 2847).
+  //   2. En el path incremental SÍ ejecutaba: hacía 16 llamadas a Schwab por
+  //      ciclo (2 por cada uno de los 8 símbolos de MOM_STOCKS) y al final
+  //      sobreescribía area.innerHTML con "Sin Momentum detectado" — borrando
+  //      todas las tarjetas de señal activas en pantalla cada 3 minutos.
+  //   3. El panel de momentum fue reemplazado por el Morning Scanner; el
+  //      elemento DOM que esperaba ya no existe en el HTML.
+  // El análisis de momentum de tendencia diaria (MA20/MA40 Diario, Bollinger
+  // Diario) puede reimplementarse correctamente como un panel separado con
+  // su propio contenedor cuando sea necesario.
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -7603,7 +7598,45 @@ async function init(){
     .forEach(k=>localStorage.removeItem(k));
   // Load strike ranges on init
   loadStrikeRanges();
-  // Web Notifications — request permission after 30s
+  // ── Wake Lock API ─────────────────────────────────────────────────────────
+  // Evita que el SO apague la pantalla / el browser duerma la pestaña mientras
+  // la plataforma está activa. Sin esto, en muchos laptops el SO empieza a
+  // throttlear los timers de JS tras unos minutos de inactividad de pantalla,
+  // lo que puede retrasar o perder el scan de apertura y los ciclos de 3min.
+  // La API es estándar en Chrome/Edge desde 2021 y no consume recursos extra.
+  // Se reintenta automáticamente si el sistema la libera (por ejemplo, cuando
+  // el usuario bloquea/desbloquea manualmente la pantalla).
+  (function initWakeLock(){
+    if(!('wakeLock' in navigator)){
+      addLog('debug','WakeLock','Wake Lock no soportado en este navegador (requiere Chrome/Edge/Safari 16.4+)');
+      return;
+    }
+    let _wl=null;
+    async function _requestWakeLock(){
+      if(_isWeekendClosed())return; // no tiene sentido en fin de semana
+      try{
+        _wl=await navigator.wakeLock.request('screen');
+        _wl.addEventListener('release',()=>{
+          addLog('debug','WakeLock','Wake Lock liberado por el sistema — reintentando en 5s');
+          // El SO puede liberar el lock al bloquear pantalla, modo ahorro, etc.
+          // Reintentamos automáticamente cuando la pestaña vuelve a estar visible.
+        });
+        addLog('debug','WakeLock','✅ Wake Lock activo — pantalla no se apagará');
+      }catch(e){
+        addLog('debug','WakeLock',`Wake Lock no disponible: ${e.message}`);
+      }
+    }
+    // Solicitar al cargar
+    _requestWakeLock();
+    // Re-solicitar cuando la pestaña vuelve a primer plano (el lock se libera
+    // automáticamente cuando el tab pasa a segundo plano — es comportamiento
+    // estándar del navegador, no un error)
+    document.addEventListener('visibilitychange',()=>{
+      if(document.visibilityState==='visible'&&(!_wl||_wl.released)){
+        _requestWakeLock();
+      }
+    });
+  })();
   initWebNotifications();
   // Init news panel
   initNews();
@@ -7855,17 +7888,73 @@ async function init(){
       const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
       const day=et.getDay(),h=et.getHours(),m=et.getMinutes();
       const isWeekday=day>=1&&day<=5;
-      // Ventana 9:35–9:37 AM ET — 2 min de margen para no perder el momento
-      // (vela en formación — BB-C/BB-D "Efecto Imán" usan datos intra-vela)
+
+      // ── Pre-carga de velas 9:20–9:22 AM ─────────────────────────────────────
+      // Carga TODAS las velas históricas (15min, 1H, Daily) para todos los
+      // tickers ANTES de que abra el mercado. Esto elimina el cuello de botella
+      // clave: el sistema tardaba 10-20s en cargar velas justo cuando empezaban
+      // las primeras velas (9:30-9:45), el período más rentable del día.
+      // Con la pre-carga hecha, a las 9:30 solo necesita el precio en tiempo real
+      // (ya disponible vía WebSocket) y reconstruir los indicadores — sin esperar
+      // ninguna llamada de red.
+      if(isWeekday&&h===9&&m>=20&&m<=22){
+        const _today=new Date().toLocaleDateString('es-PR');
+        if(!localStorage.getItem(`preload_ran_${_today}`)){
+          localStorage.setItem(`preload_ran_${_today}`,'1');
+          addLog('warn','Pre-carga','🔄 Precargando velas históricas antes de apertura (9:20 AM)...');
+          (async()=>{
+            const schwabToken=await getSchwabToken().catch(()=>null);
+            if(!schwabToken){addLog('warn','Pre-carga','Sin token Schwab — pre-carga omitida');return;}
+            let loaded=0,failed=0;
+            for(const sym of _signalTickers){
+              try{
+                // Los tres timeframes que usa buildSignals para cada símbolo
+                await Promise.all([
+                  fetchSchwabCandles(sym,'minute',15,100),
+                  fetchSchwabCandles(sym,'minute',60,60),
+                  fetchSchwabCandles(sym,'D',1,90),
+                ]);
+                loaded++;
+              }catch(e){failed++;}
+              // Pausa mínima entre símbolos para no saturar el rate limit de Schwab
+              await new Promise(r=>setTimeout(r,300));
+            }
+            addLog('warn','Pre-carga',
+              `✅ Pre-carga completa: ${loaded}/${_signalTickers.length} tickers listos${failed?` (${failed} fallaron)`:''}. ` +
+              `BB listo para disparar a las 9:30 AM.`);
+            if(isTgEnabled()&&getTgToken()&&getTgChat()){
+              sendTelegram(
+                `🔄 *TradeDesk Pro — Pre-carga lista*\n\n` +
+                `📊 ${loaded}/${_signalTickers.length} tickers cargados\n` +
+                `🕐 Sistema listo para apertura 9:30 AM ET\n` +
+                `_BB e indicadores precalculados — esperando primera vela_`,
+                getTgToken(),getTgChat()
+              );
+            }
+          })();
+        }
+      }
+
+      // Scan 9:35 AM — primera vela en formación
       if(isWeekday&&h===9&&m>=35&&m<=37) runOpeningScanner('9:35 AM','opening_scan_ran');
-      // FIX (memoria/auditoría 2026-06-30): segundo scan a las 9:46-9:48 AM,
-      // justo después de que CIERRA la primera vela de 15min (9:30-9:45).
-      // BB-A/BB-B (breakout puro) y RPM necesitan la vela ya cerrada — el
-      // scan de las 9:35 solo ve la vela a medio formar y nunca los captura.
-      // Esto explica señales como "SPY CALL 9:45 AM" que dependían del
-      // cierre exacto de esa vela y se perdían si el masterTick regular
-      // (cada 3min) no caía justo en ese minuto.
+      // Scan 9:46 AM — primera vela cerrada (BB-A/BB-B necesitan el cierre real)
       if(isWeekday&&h===9&&m>=46&&m<=48) runOpeningScanner('9:45 AM (cierre 1ra vela)','closing_scan_ran');
+
+      // ── Ciclo rápido de apertura 9:30–10:00 AM ──────────────────────────────
+      // Durante la ventana de mayor volatilidad, escanea cada 60 segundos en vez
+      // de esperar el masterTick de 3 minutos. Con el WebSocket ya dando precios
+      // en tiempo real y la pre-carga de velas hecha a las 9:20, este scan es
+      // casi instantáneo (solo recalcula indicadores sobre datos ya cargados).
+      if(isWeekday&&h===9&&m>=30&&m<60){
+        const _fastKey=`fast_scan_${new Date().toLocaleDateString('es-PR')}_${h}_${m}`;
+        if(!sessionStorage.getItem(_fastKey)){
+          sessionStorage.setItem(_fastKey,'1');
+          if(!_signalsBusy){
+            addLog('debug','Scanner','⚡ Scan rápido apertura');
+            buildSignals().catch(()=>{});
+          }
+        }
+      }
     }
     // Revisar cada 30 segundos — liviano
     setInterval(checkOpeningTime,30000);

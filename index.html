@@ -7653,9 +7653,9 @@ async function init(){
   // Corre UNA vez por día exactamente a las 9:35 AM para detectar breakouts
   // de la primera vela de 15min y disparar Telegram con prioridad máxima
   (function scheduleOpeningScanner(){
-    function runOpeningScanner(){
+    function runOpeningScanner(label,ranKeyPrefix){
       const _today=new Date().toLocaleDateString('es-PR');
-      const _ranKey=`opening_scan_ran_${_today}`;
+      const _ranKey=`${ranKeyPrefix}_${_today}`;
       if(localStorage.getItem(_ranKey))return; // ya corrió hoy
       localStorage.setItem(_ranKey,'1');
       // Limpiar todas las claves de deduplicación de Telegram para este scan
@@ -7667,8 +7667,29 @@ async function init(){
       Object.keys(sessionStorage).filter(k=>k.startsWith('sig_expired_')).forEach(k=>sessionStorage.removeItem(k));
       // Resetear _sigDetectedAt para que las señales de apertura arranquen el timer desde cero
       Object.keys(_sigDetectedAt).forEach(k=>delete _sigDetectedAt[k]);
-      addLog('warn','Scanner','🔔 Scanner de apertura 9:35 AM — ejecutando');
-      buildSignals().then(()=>{
+      addLog('warn','Scanner',`🔔 Scanner de apertura ${label} — ejecutando`);
+      // ── FIX CRÍTICO (memoria/auditoría 2026-06-30) ───────────────────────
+      // Este scanner llamaba directo a buildSignals() SIN refrescar primero
+      // _livePrices con Finnhub. A las 9:30-9:45 AM, si el ciclo regular del
+      // masterTick aún no había corrido ese día (o su último fetch de Finnhub
+      // tenía >30min, p.ej. quedó de premarket o del cierre de ayer),
+      // _livePrices llegaba vacío/viejo → _priceStale=true para TODOS los
+      // tickers → Telegram bloqueado para TODAS las señales de apertura, sin
+      // ningún aviso de error (es justo el patrón que reportaste: META, SPY,
+      // QQQ y AAPL fallando todas juntas entre 9:30-9:45 AM). Ahora se fuerza
+      // un refresh de Finnhub ANTES de construir señales, igual que hace el
+      // ciclo normal del masterTick.
+      const _hasFinnhubKey=getKey()&&getKey().length>8;
+      // loadLivePrices() ya dispara buildSignals() internamente al terminar,
+      // pero sin esperarlo (fire-and-forget) — por eso lo esperamos explícitamente
+      // aquí también para no leer el conteo de tarjetas antes de que termine de
+      // renderizar (buildSignals tiene su propio mutex _signalsBusy, así que
+      // llamarlo dos veces seguidas es seguro: la segunda simplemente espera).
+      const _runOpenScan=async()=>{
+        if(_hasFinnhubKey)await loadLivePrices().catch(()=>{});
+        await buildSignals().catch(()=>{});
+      };
+      _runOpenScan().then(()=>{
         // Enviar resumen de apertura por Telegram si hay token configurado
         if(isTgEnabled()&&getTgToken()&&getTgChat()){
           const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
@@ -7676,8 +7697,8 @@ async function init(){
           const area=document.getElementById('signalArea');
           const count=area?.querySelectorAll('.sig-card')?.length||0;
           const msg=count>0
-            ?`🔔 *SCANNER 9:35 AM — ${count} señal${count>1?'es':''} detectada${count>1?'s':''}*\n\n🕐 ${time} ET\n_Revisa TradeDesk Pro para entrar 9:40–9:45 AM_`
-            :`📊 *SCANNER 9:35 AM — Sin señales de breakout*\n\n🕐 ${time} ET\n_Mercado abrió sin ruptura de Bollinger_`;
+            ?`🔔 *SCANNER ${label} — ${count} señal${count>1?'es':''} detectada${count>1?'s':''}*\n\n🕐 ${time} ET\n_Revisa TradeDesk Pro para entrar_`
+            :`📊 *SCANNER ${label} — Sin señales de breakout*\n\n🕐 ${time} ET\n_Mercado abrió sin ruptura de Bollinger_`;
           sendTelegram(msg,getTgToken(),getTgChat());
         }
       });
@@ -7687,7 +7708,16 @@ async function init(){
       const day=et.getDay(),h=et.getHours(),m=et.getMinutes();
       const isWeekday=day>=1&&day<=5;
       // Ventana 9:35–9:37 AM ET — 2 min de margen para no perder el momento
-      if(isWeekday&&h===9&&m>=35&&m<=37) runOpeningScanner();
+      // (vela en formación — BB-C/BB-D "Efecto Imán" usan datos intra-vela)
+      if(isWeekday&&h===9&&m>=35&&m<=37) runOpeningScanner('9:35 AM','opening_scan_ran');
+      // FIX (memoria/auditoría 2026-06-30): segundo scan a las 9:46-9:48 AM,
+      // justo después de que CIERRA la primera vela de 15min (9:30-9:45).
+      // BB-A/BB-B (breakout puro) y RPM necesitan la vela ya cerrada — el
+      // scan de las 9:35 solo ve la vela a medio formar y nunca los captura.
+      // Esto explica señales como "SPY CALL 9:45 AM" que dependían del
+      // cierre exacto de esa vela y se perdían si el masterTick regular
+      // (cada 3min) no caía justo en ese minuto.
+      if(isWeekday&&h===9&&m>=46&&m<=48) runOpeningScanner('9:45 AM (cierre 1ra vela)','closing_scan_ran');
     }
     // Revisar cada 30 segundos — liviano
     setInterval(checkOpeningTime,30000);

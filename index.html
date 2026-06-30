@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- TradeDeskPro v5 | build:20260630_signals_fix | web-notif desacoplado de TG · logs reales de error TG · masterTick 3min · dedup SETUP por hora · context scan no bloqueante -->
+<!-- TradeDeskPro v5 | build:20260629_152427 | _bbwHistory fix -->
 <html lang="es">
 <head>
 <meta charset="UTF-8">
@@ -2554,7 +2554,12 @@ async function _buildSignalsCore(){
       :`<span style="background:rgba(255,194,52,.25);color:#ffc234;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;">★ ${pctLabel}% — EN FORMACIÓN</span>`;
 
     html.push(`<div class="sig-card" data-sigkey="${s.sym}_${s.code}_${s.type}" style="margin-bottom:12px;${fullSignal?`box-shadow:0 0 0 2px ${accentCol};`:''}">
-      <div class="sig-hdr ${hdr}" data-card-header style="padding:12px 14px;">
+      <div class="sig-hdr ${hdr}" data-card-header style="padding:12px 14px;position:relative;">
+        <button onclick="dismissSignal('${s.sym}','${s.code}','${s.type}')"
+          title="Cerrar señal"
+          style="position:absolute;top:8px;right:8px;background:rgba(0,0,0,.25);border:none;border-radius:50%;width:22px;height:22px;color:rgba(255,255,255,.55);cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:center;padding:0;z-index:2;"
+          onmouseover="this.style.background='rgba(255,77,109,.4)';this.style.color='#fff'"
+          onmouseout="this.style.background='rgba(0,0,0,.25)';this.style.color='rgba(255,255,255,.55)'">✕</button>
         <div style="flex:1;min-width:0;">
           <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:4px;">
             <span style="font-family:var(--mono);font-size:18px;font-weight:700;color:#fff;">${s.sym}</span>
@@ -2567,14 +2572,9 @@ async function _buildSignalsCore(){
             ${s._timeET?`<span style="color:rgba(255,194,52,.8);margin-left:4px;">· ${s._timeET} ET</span>`:''}
           </div>
         </div>
-        <div style="text-align:right;flex-shrink:0;margin-left:10px;">
+        <div style="text-align:right;flex-shrink:0;margin-left:10px;margin-top:18px;">
           <div style="font-family:var(--mono);font-size:28px;font-weight:700;color:${col};line-height:1;">${disp}%</div>
           <div style="font-size:10px;color:rgba(255,255,255,.45);margin-top:2px;">${s.passed}/${total} cond.</div>
-          <button onclick="dismissSignal('${s.sym}','${s.code}','${s.type}')"
-            title="Cerrar señal"
-            style="margin-top:6px;background:rgba(255,255,255,.08);border:none;border-radius:50%;width:22px;height:22px;color:rgba(255,255,255,.4);cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:center;padding:0;"
-            onmouseover="this.style.background='rgba(255,77,109,.3)';this.style.color='#fff'"
-            onmouseout="this.style.background='rgba(255,255,255,.08)';this.style.color='rgba(255,255,255,.4)'">✕</button>
         </div>
       </div>
       <div class="sig-body" style="padding:10px 14px;">

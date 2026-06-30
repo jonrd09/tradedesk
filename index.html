@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- TradeDeskPro v5 | build:20260629_152427 | _bbwHistory fix -->
+<!-- TradeDeskPro v5 | build:20260630_signals_fix | web-notif desacoplado de TG · logs reales de error TG · masterTick 3min · dedup SETUP por hora · context scan no bloqueante -->
 <html lang="es">
 <head>
 <meta charset="UTF-8">
@@ -1537,7 +1537,7 @@ async function buildSignals(){
   }
   _signalsBusy=true;
   _signalsPendingRetry=false;
-  _refreshCountdown=600; // M-08: reset countdown on each run
+  _refreshCountdown=180; // M-08: reset countdown on each run — alineado con masterTick de 3min
   try{
     await _buildSignalsCore();
   }finally{
@@ -2461,12 +2461,18 @@ async function _buildSignalsCore(){
 
     // Send Telegram SETUP notification (solo si precio confirmado)
     if(s.isSetup&&_priceConfirmed){
-      const _today=new Date().toLocaleDateString('es-PR');
-      const _setupKey=`tg_sent_setup_${s.sym}_${_today}`;
+      const _etSetup=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+      const _today=_etSetup.toLocaleDateString('es-PR');
+      // FIX (memoria/auditoría 2026-06-30): antes la clave era solo sym+día,
+      // así que UN solo SETUP avisado bloqueaba CUALQUIER otro setup nuevo del
+      // mismo ticker el resto del día (ej. setup a las 9:45 AM tapaba uno
+      // genuino y distinto a las 2:00 PM). Ahora se bucketiza por hora ET para
+      // permitir avisos de setups realmente nuevos sin volver a spamear el
+      // mismo setup cada 3 minutos dentro de la misma hora.
+      const _setupKey=`tg_sent_setup_${s.sym}_${_today}_${_etSetup.getHours()}`;
       if(!localStorage.getItem(_setupKey)){
         localStorage.setItem(_setupKey,'1');
-        const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
-        const time=et.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true});
+        const time=_etSetup.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true});
         const msg=`⚡ *SETUP DETECTADO — ${s.sym}*
 
 `+
@@ -2480,7 +2486,12 @@ async function _buildSignalsCore(){
 
 `+
           `_Prepárate para la señal real_`;
-        getTgToken()&&sendTelegram(msg,getTgToken(),getTgChat());
+        const _tok=getTgToken(),_chat=getTgChat();
+        if(_tok&&_chat){
+          sendTelegram(msg,_tok,_chat).then(_ok=>{
+            if(!_ok)addLog('error','Telegram',`${s.sym} SETUP — Telegram no se pudo enviar`);
+          });
+        }
       }
     }
     // Send Telegram notification for new signals
@@ -5010,6 +5021,10 @@ async function testTelegram(){
 }
 
 async function sendTelegram(msg, token, chatId){
+  if(!token||!chatId){
+    addLog('error','Telegram','sendTelegram() llamado sin token o chat_id — revisa Configuración → Telegram');
+    return false;
+  }
   try{
     const r=await fetch(`https://api.telegram.org/bot${token}/sendMessage`,{
       method:'POST',
@@ -5017,8 +5032,20 @@ async function sendTelegram(msg, token, chatId){
       body:JSON.stringify({chat_id:chatId,text:msg,parse_mode:'Markdown'}),
       signal:AbortSignal.timeout(6000)
     });
+    if(!r.ok){
+      // FIX (memoria/auditoría 2026-06-30): antes este caso era indistinguible de
+      // un error de red — ahora queda registrado con el código y motivo exactos
+      // que devuelve la API de Telegram (ej. token inválido, chat_id incorrecto,
+      // Markdown mal formado, bot bloqueado por el usuario, etc.)
+      let _reason='';
+      try{const _j=await r.json();_reason=_j.description||'';}catch(_e){}
+      addLog('error','Telegram',`sendMessage falló (HTTP ${r.status}) ${_reason}`);
+    }
     return r.ok;
-  }catch(e){return false;}
+  }catch(e){
+    addLog('error','Telegram',`sendMessage error de red/timeout: ${e.message}`);
+    return false;
+  }
 }
 
 // ── sendTelegramOnce — wrapper con dedup para alertas de sistema ──────────────
@@ -5148,6 +5175,13 @@ RULES:
 }
 
 async function notifySignal(sym, code, name, type, pct, price, pctChange){
+  // FIX (memoria/auditoría 2026-06-30): la notificación del navegador es un canal
+  // independiente de Telegram y debe dispararse SIEMPRE, sin importar si Telegram
+  // está habilitado o configurado. Antes vivía después de un `return` temprano de
+  // Telegram, así que si Telegram fallaba/no estaba activo, el usuario no recibía
+  // NINGUNA alerta (ni Telegram ni push del navegador).
+  _sendWebNotif(sym, type, code, pct, price);
+
   if(!isTgEnabled())return;
   const tok=getTgToken(),chat=getTgChat();
   if(!tok||!chat)return;
@@ -5155,11 +5189,6 @@ async function notifySignal(sym, code, name, type, pct, price, pctChange){
   const emoji=type==='call'?'🚀':'🔻';
   const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
   const time=et.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true});
-
-  // ── Context Scanner — busca catalizadores antes de armar el mensaje ────────
-  // Corre en paralelo con la construcción del mensaje para no añadir latencia
-  // Si no hay API key o falla, contextBlock queda '' y el Telegram sale normal
-  const contextBlock=await _claudeContextScan(sym, type, code, price).catch(()=>'');
 
   // Aviso de nivel técnico — CALL: techo (LH/ATH), PUT: piso (LL)
   let levelWarn='';
@@ -5174,6 +5203,12 @@ async function notifySignal(sym, code, name, type, pct, price, pctChange){
       if(within(lv.lo))  levelWarn+=`\n⚠️ *Próx a LL* $${lv.lo.toFixed(2)} (a ${distPct(lv.lo)}% — posible piso)`;
     }
   }
+  // FIX (memoria/auditoría 2026-06-30): el escaneo de Claude (_claudeContextScan)
+  // puede tardar hasta 15s con timeout. Antes se hacía `await` ANTES de armar y
+  // enviar el Telegram, retrasando la alerta justo cuando más importan los segundos
+  // ("avisar minutos antes"). Ahora el Telegram principal sale de inmediato, y el
+  // contexto catalítico (earnings/demandas) llega como mensaje de seguimiento
+  // independiente, sin bloquear la alerta de la señal.
   // FIX 3: precio siempre viene de Finnhub cuando llegamos aquí
   // (bloqueo en _priceStale garantiza que notifySignal solo se llama con precio confirmado)
   const msg=`${emoji} *SEÑAL ${dir} — ${sym}*
@@ -5181,14 +5216,23 @@ async function notifySignal(sym, code, name, type, pct, price, pctChange){
 `+
     `📊 Estrategia: *${code}* — ${name}
 `+
-    `💰 Precio: *$${price.toFixed(2)}* ✅ ${pctChange!==null&&pctChange!==undefined?'('+( pctChange>=0?'+':'')+pctChange.toFixed(2)+'%)':'(% n/d)'}`+
+    `💰 Precio: *$${price.toFixed(2)}* ✅ ${pctChange!==null&&pctChange!==undefined?'('+( pctChange>=0?'+':'')+pctChange.toFixed(2)+'%)':'(% n/d)'}
+`+
     `🎯 Confianza: *${pct}%*
 `+
     `🕐 ${time} ET`+levelWarn+
-    (contextBlock?`\n\n━━━━━━━━━━━━━━━━━━━━\n🚨 *ALERTA CATALÍTICA*\n${contextBlock}`:'')+
     `\n\n`+
     `_TradeDesk Pro — jonrd09.github.io/tradedesk/_`;
-  await sendTelegram(msg, tok, chat);
+  const _tgOk=await sendTelegram(msg, tok, chat);
+  if(!_tgOk)addLog('error','Telegram',`${sym} ${code} — Telegram de señal NO se pudo enviar (token/chat inválido o API caída)`);
+
+  // Mensaje de seguimiento con contexto catalítico — fire-and-forget, no bloquea la alerta principal
+  _claudeContextScan(sym, type, code, price).then(contextBlock=>{
+    if(contextBlock&&_tgOk){
+      const followUp=`🚨 *ALERTA CATALÍTICA — ${sym}*\n${contextBlock}`;
+      sendTelegram(followUp, tok, chat);
+    }
+  }).catch(()=>{});
 
   // Adjuntar mensaje Telegram al historial entry correspondiente
   try{
@@ -5205,7 +5249,7 @@ async function notifySignal(sym, code, name, type, pct, price, pctChange){
         .replace(/\*/g,'')
         .trim();
       _match.tgRef=_tgPlain;
-      _match.tgSent=true;
+      _match.tgSent=_tgOk;
       saveHistorial(_entries);
       addLog('debug','Historial','📎 TG adjuntado: '+sym+' '+code);
       if(document.getElementById('historialModal')&&document.getElementById('historialModal').style.display==='flex')
@@ -5214,9 +5258,6 @@ async function notifySignal(sym, code, name, type, pct, price, pctChange){
         _renderCfgHistorial();
     }
   }catch(_tgErr){addLog('warn','Historial','Error adjuntando TG: '+_tgErr.message);}
-
-  // Web Notification — fires even if Telegram is not configured
-  _sendWebNotif(sym, type, code, pct, price);
 }
 
 // Close modal on backdrop click
@@ -7456,7 +7497,11 @@ async function init(){
           return;
         }
         if(_isOpenM||_isPreM){
-          Object.keys(sessionStorage).filter(k=>k.startsWith('tg_sent_setup_')).forEach(k=>sessionStorage.removeItem(k));
+          // FIX (memoria/auditoría 2026-06-30): se eliminó una línea que intentaba
+          // limpiar `tg_sent_setup_*` de sessionStorage en cada ciclo — la clave
+          // real vive en localStorage (ver buildSignals), así que esa limpieza
+          // nunca tuvo efecto. Ya no hace falta: el dedup de SETUP ahora es por
+          // hora ET, se vence solo.
           const _hasKey=getKey()&&getKey().length>8;
           if(_hasKey){await loadLivePrices();}else{await buildSignals();}
           await checkMarketBlockMove();
@@ -7466,9 +7511,15 @@ async function init(){
         updateFuturesSemaphore().catch(()=>{});
       };
 
+      // FIX (memoria/auditoría 2026-06-30): el intervalo era de 10 minutos para
+      // velas de 15 minutos — demasiado lento para avisar "minutos antes" de una
+      // ruptura. Con 3 minutos se revisa el estado de SETUP/BBW varias veces
+      // dentro de cada vela, sin generar carga relevante en las APIs (Schwab no
+      // tiene límite estricto por minuto y Finnhub free tier permite 60 req/min;
+      // aquí se hacen ~6-12 requests cada 3min con la lista de tickers default).
       // Arrancar con jitter (3-7s) para desincronizarse de _tokenInterval (20min)
       const _jitterMs=Math.floor(Math.random()*4000)+3000;
-      setTimeout(()=>{ window._priceInterval=setInterval(_masterTick,10*60*1000); },_jitterMs);
+      setTimeout(()=>{ window._priceInterval=setInterval(_masterTick,3*60*1000); },_jitterMs);
 
       // ── Page Visibility API — evita burst al volver del background ────────
       // Cuando el browser throttlea los timers y la pestaña vuelve al frente,
@@ -7482,7 +7533,7 @@ async function init(){
             if(window._priceInterval)clearInterval(window._priceInterval);
             setTimeout(()=>{
               if(!_isWeekendClosed()) _masterTick(); // no disparar en weekend
-              window._priceInterval=setInterval(_masterTick,10*60*1000);
+              window._priceInterval=setInterval(_masterTick,3*60*1000);
             },3000);
           }
         });
@@ -7585,7 +7636,7 @@ async function init(){
   })();
 
   // M-08: Refresh countdown — visible to user (10min cycle)
-  let _refreshCountdown=600;
+  let _refreshCountdown=180; // alineado con masterTick de 3min
   if(window._refreshCountTimer)clearInterval(window._refreshCountTimer);
   const _updateCountdownUI=()=>{
     const el=document.getElementById('refreshCountdown');
@@ -7605,12 +7656,12 @@ async function init(){
     el.textContent=`⟳ ${m}:${String(s).padStart(2,'0')}`;
     el.title=`Próxima actualización en ${m}m ${s}s`;
   };
-  window._resetRefreshCountdown=()=>{_refreshCountdown=600;_updateCountdownUI();};
+  window._resetRefreshCountdown=()=>{_refreshCountdown=180;_updateCountdownUI();};
   _updateCountdownUI();
   window._refreshCountTimer=setInterval(()=>{
     if(_isWeekendClosed()){_updateCountdownUI();return;} // Weekend: no decrementar
     _refreshCountdown--;
-    if(_refreshCountdown<0)_refreshCountdown=600;
+    if(_refreshCountdown<0)_refreshCountdown=180;
     _updateCountdownUI();
   },1000);
 

@@ -1771,9 +1771,9 @@ async function _buildSignalsCore(){
     // ── Indicadores Daily ────────────────────────────────────────────────────
     const cD=closes(ohlcD),hD=highs(ohlcD),lD_arr=lows(ohlcD),oD=opens(ohlcD);
 
-    // ── Auto-rellenar Last High / Last Low — detección de swing real en 1H ────
+    // ── Auto-rellenar Last High / Last Low — máx/mín últimas 5 sesiones diarias ─
     // Solo si los campos están vacíos en Configuration — respeta valores manuales
-    _autoFillHLines(sym, ohlc1h);
+    _autoFillHLines(sym, ohlc1h, ohlcD);
     const nD=cD.length;
     const ma20D=sma(cD,Math.min(20,nD-1));
     const ma40D=sma(cD,Math.min(40,nD-1));
@@ -3876,20 +3876,19 @@ function saveGainPct(){try{localStorage.setItem('gainPct',document.getElementByI
 // Solo rellena si el campo está vacío — respeta valores manuales del trader.
 // Se llama al inicio de buildSignalsForTicker, antes del cálculo de señales.
 // El flag _autoHLines guarda la fecha de auto-cálculo para no repetirlo cada tick.
-// ── Detección de Swing High / Swing Low ──────────────────────────────────────
-// Un swing high es una vela cuyo high es MAYOR que el high de N velas antes Y N velas después.
-// Un swing low es una vela cuyo low es MENOR que el low de N velas antes Y N velas después.
-// Esto encuentra el último techo/piso REAL que el precio respetó — no solo el high
-// del día calendario anterior, que puede no ser un pivote significativo.
+// ── Detección de Last High / Last Low desde velas diarias ────────────────────
+// Estrategia: máximo high y mínimo low de las últimas 5 sesiones diarias.
+// Esto encuentra el último techo y piso relevante sin importar qué día ocurrió.
+// Ejemplo META: high de $571 del martes pasado aparece como Last High porque es
+// el máximo de las últimas 5 sesiones — exactamente lo que el trader necesita.
 //
-// lookback=3 → la vela debe ser el extremo de una ventana de 7 velas (3 antes + ella + 3 después)
-// Usamos velas de 1H porque dan mejor resolución que Daily para encontrar el pivote exacto
-// donde el precio realmente rebotó, sin importar si fue ayer o hace varios días.
+// Las funciones de swing point (lookback=3) quedaban cortas cuando las velas
+// adyacentes tenían highs similares ($569-$570) y no clasificaban el pivote.
+// El enfoque de "máximo de N sesiones" es más robusto para este propósito.
 function _findLastSwingHigh(h,l,lookback=3,maxLookbackBars=60){
+  // Mantenida para compatibilidad — no usada por HLines
   const n=h.length;
   if(n<lookback*2+1)return null;
-  // Buscar desde la vela más reciente posible hacia atrás (excluyendo las últimas `lookback`
-  // porque aún no se puede confirmar si son swing — necesitan velas después para validarse)
   const start=n-1-lookback;
   const limit=Math.max(lookback,n-maxLookbackBars);
   for(let i=start;i>=limit;i--){
@@ -3903,6 +3902,7 @@ function _findLastSwingHigh(h,l,lookback=3,maxLookbackBars=60){
   return null;
 }
 function _findLastSwingLow(h,l,lookback=3,maxLookbackBars=60){
+  // Mantenida para compatibilidad — no usada por HLines
   const n=l.length;
   if(n<lookback*2+1)return null;
   const start=n-1-lookback;
@@ -3918,29 +3918,43 @@ function _findLastSwingLow(h,l,lookback=3,maxLookbackBars=60){
   return null;
 }
 
-const _autoHLinesDate={};
-function _autoFillHLines(sym, ohlc1h){
-  try{
-    const h1=highs(ohlc1h),l1=lows(ohlc1h);
-    if(h1.length<10)return; // necesitamos suficientes velas de 1H para detectar swings
+// Máximo high y mínimo low de las últimas N sesiones diarias
+// ohlcD = velas diarias de Schwab (no incluye el día actual en curso)
+function _findRecentHigh(ohlcD,sessions=5){
+  const h=highs(ohlcD);
+  if(!h||h.length<1)return null;
+  const slice=h.slice(-sessions);
+  return Math.max(...slice.filter(v=>v>0));
+}
+function _findRecentLow(ohlcD,sessions=5){
+  const l=lows(ohlcD);
+  if(!l||l.length<1)return null;
+  const slice=l.slice(-sessions);
+  const valid=slice.filter(v=>v>0);
+  return valid.length?Math.min(...valid):null;
+}
 
+const _autoHLinesDate={};
+function _autoFillHLines(sym, ohlc1h, ohlcD){
+  try{
+    if(!ohlcD)return;
     const stored=JSON.parse(localStorage.getItem('levels_'+sym)||'{}');
     const hiEmpty=!stored.hi||parseFloat(stored.hi)<=0;
     const loEmpty=!stored.lo||parseFloat(stored.lo)<=0;
-    if(!hiEmpty&&!loEmpty)return; // ambos ya tienen valor manual — no tocar
+    if(!hiEmpty&&!loEmpty)return;
 
-    const swingHigh=_findLastSwingHigh(h1,l1);
-    const swingLow=_findLastSwingLow(h1,l1);
+    const recentHigh=_findRecentHigh(ohlcD,5);
+    const recentLow=_findRecentLow(ohlcD,5);
 
     let changed=false;
-    if(hiEmpty&&swingHigh>0){stored.hi=swingHigh.toFixed(2);changed=true;}
-    if(loEmpty&&swingLow>0){stored.lo=swingLow.toFixed(2);changed=true;}
+    if(hiEmpty&&recentHigh>0){stored.hi=recentHigh.toFixed(2);changed=true;}
+    if(loEmpty&&recentLow>0){stored.lo=recentLow.toFixed(2);changed=true;}
 
     if(changed){
       localStorage.setItem('levels_'+sym,JSON.stringify(stored));
       const etNow=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
       _autoHLinesDate[sym]=`${etNow.getFullYear()}-${etNow.getMonth()+1}-${etNow.getDate()}`;
-      addLog('info','HLines',`${sym} → LH swing: $${stored.hi||'—'} · LL swing: $${stored.lo||'—'} (último pivote 1H)`);
+      addLog('info','HLines',`${sym} → LH auto: $${stored.hi||'—'} · LL auto: $${stored.lo||'—'} (máx/mín últimas 5 sesiones)`);
       if(typeof _strikeTicker!=='undefined'&&_strikeTicker===sym){
         loadStrikeLevels(sym);
       }
@@ -4016,22 +4030,19 @@ async function _forceRefreshHLines(){
       if(btn){btn.textContent='✓ Auto';btn.disabled=false;setTimeout(()=>{btn.textContent='↻ Auto';},2000);}
     };
 
-    // 1. Intentar desde cache en memoria (velas de 1H — más rápido)
-    const cached=_candleCache&&_candleCache[sym+'_60'];
+    // 1. Intentar desde cache en memoria (velas diarias)
+    const cached=_candleCache&&(_candleCache[sym+'_D']);
     if(cached&&cached.data){
-      const h1=highs(cached.data),l1=lows(cached.data);
-      if(h1.length>=10){
-        const swingHigh=_findLastSwingHigh(h1,l1);
-        const swingLow=_findLastSwingLow(h1,l1);
-        if(swingHigh>0||swingLow>0){
-          _apply(swingHigh,swingLow);
-          return;
-        }
+      const rHigh=_findRecentHigh(cached.data,5);
+      const rLow=_findRecentLow(cached.data,5);
+      if(rHigh>0||rLow>0){
+        _apply(rHigh,rLow);
+        return;
       }
     }
 
-    // 2. Fetch directo de velas de 1H desde Schwab
-    addLog('info','HLines',`${sym} → cache no disponible, fetching velas 1H...`);
+    // 2. Fetch directo de velas diarias desde Schwab
+    addLog('info','HLines',`${sym} → cache no disponible, fetching velas diarias...`);
     const token=await getSchwabToken();
     if(!token){
       addLog('warn','HLines',`${sym} → sin token Schwab`);
@@ -4039,8 +4050,8 @@ async function _forceRefreshHLines(){
       return;
     }
     const endMs=Date.now();
-    const startMs=endMs-(10*24*60*60*1000); // 10 días atrás — suficiente para encontrar swings en 1H
-    const url=`${SCHWAB_API_BASE}/pricehistory?symbol=${sym}&periodType=day&period=10&frequencyType=minute&frequency=60&startDate=${startMs}&endDate=${endMs}&needExtendedHoursData=false`;
+    const startMs=endMs-(10*24*60*60*1000);
+    const url=`${SCHWAB_API_BASE}/pricehistory?symbol=${sym}&periodType=day&period=10&frequencyType=daily&frequency=1&startDate=${startMs}&endDate=${endMs}&needExtendedHoursData=false`;
     const r=await fetch(url,{
       headers:{'Authorization':'Bearer '+token},
       signal:AbortSignal.timeout(8000)
@@ -4051,16 +4062,16 @@ async function _forceRefreshHLines(){
       return;
     }
     const d=await r.json();
-    if(!d.candles||d.candles.length<10){
-      addLog('warn','HLines',`${sym} → sin suficientes velas 1H`);
+    if(!d.candles||d.candles.length<1){
+      addLog('warn','HLines',`${sym} → sin velas diarias`);
       if(btn){btn.textContent='↻ Auto';btn.disabled=false;}
       return;
     }
-    const h1=d.candles.map(c=>c.high);
-    const l1=d.candles.map(c=>c.low);
-    const swingHigh=_findLastSwingHigh(h1,l1);
-    const swingLow=_findLastSwingLow(h1,l1);
-    _apply(swingHigh,swingLow);
+    // Máximo high y mínimo low de las últimas 5 sesiones
+    const slice=d.candles.slice(-5);
+    const rHigh=Math.max(...slice.map(c=>c.high).filter(v=>v>0));
+    const rLow=Math.min(...slice.map(c=>c.low).filter(v=>v>0));
+    _apply(rHigh,rLow);
 
   }catch(e){
     addLog('warn','HLines',`_forceRefreshHLines: ${e.message}`);

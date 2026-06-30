@@ -1326,7 +1326,7 @@ async function loadLivePrices(){
   for(const s of syms){
     const q=await fetchQuote(s).catch(()=>null);
     if(q&&q.price>0){
-      _livePrices[s]={price:q.price,pct:q.pct,change:q.change,_pctReliable:q._pctReliable,ts:Date.now()};
+      _livePrices[s]={price:q.price,pct:q.pct,change:q.change,_pctReliable:q._pctReliable,prev:q.prev,ts:Date.now()};
       // Update DEFAULTS and MOM_STOCKS with live data
       if(DEFAULTS[s])Object.assign(DEFAULTS[s],{price:q.price,pct:q.pct});
       else DEFAULTS[s]={price:q.price,pct:q.pct,name:s};
@@ -1353,6 +1353,13 @@ async function loadLivePrices(){
   if(lrt)lrt.textContent=timeStr;
   const ks=document.getElementById('keyStatus');
   if(ks){ks.textContent='● Key activa';ks.style.background='var(--green-bg)';ks.style.color='var(--green)';}
+  // Asegurar que el WebSocket esté conectado y con las suscripciones al día.
+  // loadLivePrices() ya se llama desde todos los puntos de entrada relevantes
+  // (guardar key, masterTick, scanner de apertura, cambios de ticker en Config),
+  // así que enganchar aquí garantiza que el WS arranque/se mantenga sin tener
+  // que tocar cada call site por separado. Ambas funciones son idempotentes.
+  connectFinnhubWS();
+  syncWsSubscriptions();
   // FIX: Rebuild signals NOW that Finnhub prices are confirmed
   // Any signal that was blocked (stale price) will now retry with live prices
   // and send Telegram if threshold still met
@@ -1368,6 +1375,133 @@ function _isPriceLive(sym){
   const lp=_livePrices[sym];
   if(!lp||!lp.price)return false;
   return Date.now()-lp.ts<30*60*1000; // live within last 30min
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// WEBSOCKET FINNHUB — precios en tiempo real (reemplaza el polling REST)
+// ════════════════════════════════════════════════════════════════════════
+// Antes: loadLivePrices() pedía precio ticker-por-ticker por REST cada 3min,
+// con 1.2s de espera entre cada uno por el rate limit. Eso significaba que
+// el precio más "fresco" que el sistema podía tener era de hasta 3 minutos
+// atrás, y construir señales sobre eso siempre llega tarde a un breakout
+// de 15min con alta volatilidad.
+// Ahora: un solo WebSocket recibe cada trade real apenas ocurre (push, no
+// polling) — el mismo API key de Finnhub, mismo límite gratuito (hasta 50
+// símbolos). loadLivePrices() se conserva como "semilla" inicial (necesita
+// el cierre anterior del día, prev close, para calcular %) y como red de
+// seguridad si el WebSocket se cae.
+let _finnhubWS=null;
+let _wsReconnectAttempts=0;
+let _wsReconnectTimer=null;
+let _wsSubscribed=new Set();
+let _wsLastBuildTrigger=0;
+const _WS_BUILD_THROTTLE_MS=45000; // no relanzar buildSignals() más de 1x/45s desde el WS
+
+function _wsLog(level,msg){addLog(level,'Finnhub WS',msg);}
+
+function connectFinnhubWS(){
+  const key=getKey();
+  if(!key||key.length<8)return; // sin key, no hay nada que conectar
+  if(_isWeekendClosed())return; // no tiene sentido conectar en fin de semana
+  if(_finnhubWS&&(_finnhubWS.readyState===WebSocket.OPEN||_finnhubWS.readyState===WebSocket.CONNECTING))return; // ya conectado/conectando
+
+  try{
+    _finnhubWS=new WebSocket(`wss://ws.finnhub.io?token=${key}`);
+  }catch(e){
+    _wsLog('error',`No se pudo crear el WebSocket: ${e.message}`);
+    _scheduleWsReconnect();
+    return;
+  }
+
+  _finnhubWS.onopen=()=>{
+    _wsReconnectAttempts=0;
+    _wsLog('warn','🟢 Conectado — suscribiendo tickers');
+    _wsSubscribed.clear();
+    const syms=[..._signalTickers].filter((v,i,a)=>a.indexOf(v)===i);
+    syms.forEach(s=>_wsSubscribeSymbol(s));
+    const tag=document.getElementById('liveTag');
+    if(tag){tag.title='WebSocket Finnhub activo — precios en tiempo real';}
+  };
+
+  _finnhubWS.onmessage=(ev)=>{
+    let msg;
+    try{msg=JSON.parse(ev.data);}catch(e){return;}
+    if(msg.type==='ping')return;
+    if(msg.type!=='trade'||!Array.isArray(msg.data))return;
+    let _moved=false;
+    msg.data.forEach(t=>{
+      const sym=t.s,price=t.p;
+      if(!sym||!price||price<=0)return;
+      // Algunos símbolos de Finnhub llegan con sufijo de exchange (raro en US equities, pero por seguridad)
+      const cleanSym=sym.split('.')[0];
+      if(!_signalTickers.includes(cleanSym))return;
+      const prev=_livePrices[cleanSym]?.prev;
+      if(prev&&prev>0){
+        const pct=+((price-prev)/prev*100).toFixed(2);
+        _livePrices[cleanSym]={price,pct,change:+(price-prev).toFixed(2),_pctReliable:Math.abs(pct)<=25,prev,ts:Date.now()};
+      }else{
+        // Aún no tenemos prevClose (loadLivePrices no ha corrido) — guardamos
+        // el precio igual para que _isPriceLive() funcione, pero sin % confiable
+        _livePrices[cleanSym]={...(_livePrices[cleanSym]||{}),price,_pctReliable:false,ts:Date.now()};
+      }
+      if(DEFAULTS[cleanSym])DEFAULTS[cleanSym].price=price;
+      if(MOM_STOCKS[cleanSym])MOM_STOCKS[cleanSym].price=price;
+      _moved=true;
+    });
+    if(_moved)_wsMaybeTriggerBuildSignals();
+  };
+
+  _finnhubWS.onerror=()=>{
+    _wsLog('warn','⚠ Error de conexión — Finnhub reintentará');
+  };
+
+  _finnhubWS.onclose=(ev)=>{
+    _wsLog('warn',`🔴 Desconectado (code ${ev.code}) — reintentando`);
+    _scheduleWsReconnect();
+  };
+}
+
+function _wsSubscribeSymbol(sym){
+  if(!_finnhubWS||_finnhubWS.readyState!==WebSocket.OPEN)return;
+  if(_wsSubscribed.has(sym))return;
+  _finnhubWS.send(JSON.stringify({type:'subscribe',symbol:sym}));
+  _wsSubscribed.add(sym);
+}
+function _wsUnsubscribeSymbol(sym){
+  if(!_finnhubWS||_finnhubWS.readyState!==WebSocket.OPEN)return;
+  if(!_wsSubscribed.has(sym))return;
+  _finnhubWS.send(JSON.stringify({type:'unsubscribe',symbol:sym}));
+  _wsSubscribed.delete(sym);
+}
+// Llamar cuando _signalTickers cambia (agregar/quitar/cambiar ticker en Config)
+function syncWsSubscriptions(){
+  if(!_finnhubWS||_finnhubWS.readyState!==WebSocket.OPEN)return;
+  const syms=new Set([..._signalTickers]);
+  // Suscribir nuevos
+  syms.forEach(s=>{if(!_wsSubscribed.has(s))_wsSubscribeSymbol(s);});
+  // Desuscribir los que ya no están
+  [..._wsSubscribed].forEach(s=>{if(!syms.has(s))_wsUnsubscribeSymbol(s);});
+}
+function _scheduleWsReconnect(){
+  if(_wsReconnectTimer)return; // ya hay un reintento programado
+  if(_isWeekendClosed())return; // no reintentar en fin de semana
+  _wsReconnectAttempts++;
+  // Backoff exponencial con tope de 30s (5s, 10s, 20s, 30s, 30s...)
+  const delay=Math.min(30000,5000*Math.pow(2,_wsReconnectAttempts-1));
+  _wsReconnectTimer=setTimeout(()=>{
+    _wsReconnectTimer=null;
+    connectFinnhubWS();
+  },delay);
+}
+// Throttle — evita disparar buildSignals() en cada trade individual (pueden
+// llegar varios por segundo en SPY/QQQ). Como máximo 1 reconstrucción cada
+// 45s activada por el WebSocket, además del ciclo regular del masterTick.
+function _wsMaybeTriggerBuildSignals(){
+  const now=Date.now();
+  if(now-_wsLastBuildTrigger<_WS_BUILD_THROTTLE_MS)return;
+  if(_signalsBusy)return; // ya hay una corriendo, no hace falta encolar otra desde el WS
+  _wsLastBuildTrigger=now;
+  buildSignals();
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -3435,6 +3569,7 @@ function cfgChangeMainTicker(idx, newSym){
     renderMainTickerCards();
     renderNewsTickerButtons();
     renderSignalTickerChips();
+    syncWsSubscriptions();
     updateCardAverages();
     _renderCfgTickers();
     _showCfgTickerMsg(`✅ ${old} → ${newSym}. Reinicia el monitoreo para aplicar.`,'var(--green)');
@@ -3452,7 +3587,7 @@ function cfgChangeExtraTicker(idx, newSym){
   }
   const si=_signalTickers.indexOf(old);
   if(si>=0) _signalTickers[si]=newSym;
-  saveTickerConfig();renderNewsTickerButtons();renderSignalTickerChips();_renderCfgTickers();
+  saveTickerConfig();renderNewsTickerButtons();renderSignalTickerChips();syncWsSubscriptions();_renderCfgTickers();
   _showCfgTickerMsg(`✅ Cambiado a ${newSym}`,'var(--green)');
 }
 
@@ -3462,7 +3597,7 @@ function cfgAddExtraTicker(){
   // Pick first available popular ticker not already in signal list
   const next=POPULAR_TICKERS.find(t=>!_signalTickers.includes(t))||'QQQ';
   _signalTickers.push(next);
-  saveTickerConfig();renderNewsTickerButtons();renderSignalTickerChips();_renderCfgTickers();
+  saveTickerConfig();renderNewsTickerButtons();renderSignalTickerChips();syncWsSubscriptions();_renderCfgTickers();
 }
 
 function cfgRemoveExtraTicker(idx){
@@ -3470,7 +3605,7 @@ function cfgRemoveExtraTicker(idx){
   const sym=extras[idx];
   _signalTickers=_signalTickers.filter(s=>s!==sym);
   if(_activeTickerFilter===sym)_activeTickerFilter=null;
-  saveTickerConfig();renderNewsTickerButtons();renderSignalTickerChips();_renderCfgTickers();
+  saveTickerConfig();renderNewsTickerButtons();renderSignalTickerChips();syncWsSubscriptions();_renderCfgTickers();
   _showCfgTickerMsg(`${sym} eliminado`,'var(--text3)');
 }
 
@@ -7459,6 +7594,9 @@ async function init(){
   updateCardAverages();
   // Restore Finnhub key
   // (dashboard_pin key deprecated — removed)
+  // WebSocket Finnhub — conectar de inmediato al cargar (no esperar al primer
+  // masterTick); idempotente, se reintenta solo si no hay key todavía.
+  connectFinnhubWS();
   // Clean old Telegram notification keys (keep only today's)
   const _todayClean=new Date().toLocaleDateString('es-PR');
   Object.keys(localStorage).filter(k=>k.startsWith('tg_sent_')&&!k.includes(_todayClean))
@@ -7592,7 +7730,17 @@ async function init(){
             addLog('debug','Timer','Tab visible — re-sync timers (3s delay)');
             if(window._priceInterval)clearInterval(window._priceInterval);
             setTimeout(()=>{
-              if(!_isWeekendClosed()) _masterTick(); // no disparar en weekend
+              if(!_isWeekendClosed()){
+                _masterTick(); // no disparar en weekend
+                // FIX (memoria/auditoría 2026-06-30): Chrome suele cerrar o
+                // congelar conexiones WebSocket cuando el tab pasa mucho
+                // tiempo en segundo plano. Al volver a primer plano, forzamos
+                // una reconexión si el socket no está abierto.
+                if(!_finnhubWS||_finnhubWS.readyState!==WebSocket.OPEN){
+                  _wsReconnectAttempts=0;
+                  connectFinnhubWS();
+                }
+              }
               window._priceInterval=setInterval(_masterTick,3*60*1000);
             },3000);
           }

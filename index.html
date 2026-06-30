@@ -242,7 +242,10 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
   <div class="card">
     <div style="text-align:center;margin-bottom:10px;">
       <div style="font-size:18px;font-weight:700;color:#fff;">Señales Activas</div>
-      <div style="font-size:13px;color:var(--text2);margin-top:3px;">BB Entrada Temprana · Rebote MA20 · Cambio Tendencia 1H · Efecto Imán · GOOG · TSLA · SPY · QQQ · AAPL · PLTR</div>
+      <div style="font-size:13px;color:var(--text2);margin-top:3px;">BB Entrada Temprana · Rebote MA20 · Cambio Tendencia 1H · Efecto Imán</div>
+      <div id="signalTickerChips" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-top:8px;">
+        <!-- populated by renderSignalTickerChips() -->
+      </div>
     </div>
     <div id="signalArea">
       <div style="text-align:center;padding:20px;color:var(--text2);font-size:13px;">⟳ Calculando señales…</div>
@@ -410,6 +413,8 @@ function saveTickerConfig(){
 
 let _mainTickers=[...TICKER_DEFAULTS.main];
 let _signalTickers=[...TICKER_DEFAULTS.signal];
+// Filtro de tickers en el panel de Señales Activas — null = mostrar todos
+let _activeTickerFilter=null;
 
 let _strikeTicker='GOOG',_strikeColor='#4285f4';
 let _rulesTimer=null;
@@ -1527,6 +1532,54 @@ function _stratSetEnabled(code,val){
 // H-05: Debounce flag — prevents concurrent buildSignals() runs
 let _signalsBusy=false;
 let _signalsPendingRetry=false;
+
+// ── Chips de filtro por ticker en "Señales Activas" ──────────────────────────
+// Permite hacer clic en un ticker para ver solo sus señales, y clic de nuevo
+// (o en "Todos") para volver a mostrarlas todas.
+function _tickerChipStyle(active){
+  return active
+    ?'background:rgba(0,209,122,.25);color:var(--green);border:1px solid rgba(0,209,122,.6);font-size:11px;font-weight:700;padding:4px 11px;border-radius:12px;cursor:pointer;font-family:var(--mono);'
+    :'background:rgba(255,255,255,.06);color:var(--text2);border:1px solid var(--border);font-size:11px;font-weight:700;padding:4px 11px;border-radius:12px;cursor:pointer;font-family:var(--mono);';
+}
+function renderSignalTickerChips(){
+  const box=document.getElementById('signalTickerChips');
+  if(!box)return;
+  const syms=[..._signalTickers].filter((v,i,a)=>a.indexOf(v)===i);
+  let h=`<button onclick="filterSignalsByTicker(null)" style="${_tickerChipStyle(!_activeTickerFilter)}">Todos</button>`;
+  syms.forEach(sym=>{
+    h+=`<button onclick="filterSignalsByTicker('${sym}')" style="${_tickerChipStyle(_activeTickerFilter===sym)}">${sym}</button>`;
+  });
+  box.innerHTML=h;
+}
+function filterSignalsByTicker(sym){
+  _activeTickerFilter=(sym&&_activeTickerFilter===sym)?null:sym;
+  renderSignalTickerChips();
+  applySignalTickerFilter();
+}
+function applySignalTickerFilter(){
+  const area=document.getElementById('signalArea');
+  if(!area)return;
+  let _visibleCount=0;
+  area.querySelectorAll('[data-sigkey]').forEach(el=>{
+    const sym=(el.dataset.sigkey||'').split('_')[0];
+    const show=!_activeTickerFilter||sym===_activeTickerFilter;
+    el.style.display=show?'':'none';
+    if(show)_visibleCount++;
+  });
+  // Mensaje cuando el filtro no tiene ninguna señal activa para ese ticker
+  let _emptyMsg=area.querySelector('#_tickerFilterEmpty');
+  if(_activeTickerFilter&&_visibleCount===0){
+    if(!_emptyMsg){
+      _emptyMsg=document.createElement('div');
+      _emptyMsg.id='_tickerFilterEmpty';
+      _emptyMsg.style.cssText='text-align:center;padding:20px;color:var(--text3);font-size:12px;';
+      area.appendChild(_emptyMsg);
+    }
+    _emptyMsg.textContent=`Sin señales activas para ${_activeTickerFilter} ahora mismo`;
+  }else if(_emptyMsg){
+    _emptyMsg.remove();
+  }
+}
 
 async function buildSignals(){
   // If already running, mark retry and return
@@ -2656,6 +2709,7 @@ async function _buildSignalsCore(){
   // Primera carga (área vacía o solo tenía el loading spinner) — render completo normal
   if(_existingKeys.size===0){
     area.innerHTML=`<div data-signal-header>${_headerHtml}</div>`+html.join('');
+    applySignalTickerFilter();
     return;
   }
 
@@ -2696,6 +2750,9 @@ async function _buildSignalsCore(){
       }
     }
   });
+
+  // Reaplicar el filtro de ticker activo a las tarjetas (nuevas y existentes)
+  applySignalTickerFilter();
 
   if(!area)return; // Morning Scanner replaced momentum panel
   const results=[];
@@ -3377,6 +3434,7 @@ function cfgChangeMainTicker(idx, newSym){
     saveTickerConfig();
     renderMainTickerCards();
     renderNewsTickerButtons();
+    renderSignalTickerChips();
     updateCardAverages();
     _renderCfgTickers();
     _showCfgTickerMsg(`✅ ${old} → ${newSym}. Reinicia el monitoreo para aplicar.`,'var(--green)');
@@ -3394,7 +3452,7 @@ function cfgChangeExtraTicker(idx, newSym){
   }
   const si=_signalTickers.indexOf(old);
   if(si>=0) _signalTickers[si]=newSym;
-  saveTickerConfig();renderNewsTickerButtons();_renderCfgTickers();
+  saveTickerConfig();renderNewsTickerButtons();renderSignalTickerChips();_renderCfgTickers();
   _showCfgTickerMsg(`✅ Cambiado a ${newSym}`,'var(--green)');
 }
 
@@ -3404,14 +3462,15 @@ function cfgAddExtraTicker(){
   // Pick first available popular ticker not already in signal list
   const next=POPULAR_TICKERS.find(t=>!_signalTickers.includes(t))||'QQQ';
   _signalTickers.push(next);
-  saveTickerConfig();renderNewsTickerButtons();_renderCfgTickers();
+  saveTickerConfig();renderNewsTickerButtons();renderSignalTickerChips();_renderCfgTickers();
 }
 
 function cfgRemoveExtraTicker(idx){
   const extras=_signalTickers.filter(s=>!_mainTickers.includes(s));
   const sym=extras[idx];
   _signalTickers=_signalTickers.filter(s=>s!==sym);
-  saveTickerConfig();renderNewsTickerButtons();_renderCfgTickers();
+  if(_activeTickerFilter===sym)_activeTickerFilter=null;
+  saveTickerConfig();renderNewsTickerButtons();renderSignalTickerChips();_renderCfgTickers();
   _showCfgTickerMsg(`${sym} eliminado`,'var(--text3)');
 }
 
@@ -7395,6 +7454,7 @@ async function init(){
   // Load ticker configuration (must be first — everything else reads from it)
   loadTickerConfig();
   renderMainTickerCards();
+  renderSignalTickerChips();
   renderNewsTickerButtons();
   updateCardAverages();
   // Restore Finnhub key

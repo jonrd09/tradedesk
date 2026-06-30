@@ -1738,24 +1738,28 @@ async function _buildSignalsCore(){
     //
     // _hasRealSessionCandle = false → BB-A, BB-B, BB-C, BB-D, RPM bloqueados
     // _hasRealSessionCandle = true  → todo funciona normal
+    //
+    // BUG CRÍTICO CORREGIDO: ohlc15 es un ARRAY de objetos {datetime,open,high,low,
+    // close,volume,_synthetic}, NO un objeto {t,o,h,l,c} como se asumía antes.
+    // ohlc15.t siempre era undefined → el guard SIEMPRE bloqueaba todas las señales BB.
     const _todayStrET=_etNow15.toDateString();
     const _sessionOpenMs=(()=>{
       const d=new Date(_etNow15);
       d.setHours(9,30,0,0);
       return d.getTime();
     })();
-    const _allCandles15=ohlc15.t||[]; // timestamps de las velas
     const _hasRealSessionCandle=(()=>{
-      if(!ohlc15||!ohlc15.t||!ohlc15.t.length)return false;
-      // Buscar cualquier vela con timestamp ≥ 9:30 AM ET de hoy y sin flag sintético
-      for(let i=ohlc15.t.length-1;i>=Math.max(0,ohlc15.t.length-10);i--){
-        const candleTs=ohlc15.t[i];
-        const candleEt=new Date(new Date(candleTs).toLocaleString('en-US',{timeZone:'America/New_York'}));
+      if(!ohlc15||!Array.isArray(ohlc15)||!ohlc15.length)return false;
+      const lastIdx=ohlc15.length-1;
+      // Buscar entre las últimas 10 velas (o menos si el array es corto)
+      for(let i=lastIdx;i>=Math.max(0,lastIdx-10);i--){
+        const candle=ohlc15[i];
+        if(!candle||!candle.datetime)continue;
+        const candleEt=new Date(new Date(candle.datetime).toLocaleString('en-US',{timeZone:'America/New_York'}));
         // Vela de hoy ET y después de las 9:30 AM
-        if(candleEt.toDateString()===_todayStrET&&candleTs>=_sessionOpenMs){
-          // Verificar que no sea la vela sintética inyectada
-          const isSynthetic=ohlc15._synthetic&&i===ohlc15.t.length-1;
-          if(!isSynthetic)return true;
+        if(candleEt.toDateString()===_todayStrET&&new Date(candle.datetime).getTime()>=_sessionOpenMs){
+          // La vela sintética inyectada tiene el flag _synthetic:true en el objeto individual
+          if(!candle._synthetic)return true;
         }
       }
       return false;

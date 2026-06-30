@@ -4011,14 +4011,16 @@ async function _forceRefreshHLines(){
     if(badgeLH)badgeLH.style.display='none';
     if(badgeLL)badgeLL.style.display='none';
 
-    // Limpiar storage para este ticker
-    const s=JSON.parse(localStorage.getItem('levels_'+sym)||'{}');
+    // Limpiar storage — guardar explícitamente los valores borrados
+    let s=JSON.parse(localStorage.getItem('levels_'+sym)||'{}');
     delete s.hi; delete s.lo;
+    localStorage.setItem('levels_'+sym,JSON.stringify(s)); // ← fix: guardar el borrado
 
     // Función helper para aplicar los valores a la UI y storage
     const _apply=(hi,lo)=>{
-      if(hi>0)s.hi=parseFloat(hi).toFixed(2);
-      if(lo>0)s.lo=parseFloat(lo).toFixed(2);
+      s=JSON.parse(localStorage.getItem('levels_'+sym)||'{}');
+      if(hi&&hi>0)s.hi=parseFloat(hi).toFixed(2);
+      if(lo&&lo>0)s.lo=parseFloat(lo).toFixed(2);
       localStorage.setItem('levels_'+sym,JSON.stringify(s));
       if(hEl&&s.hi)hEl.value=s.hi;
       if(lEl&&s.lo)lEl.value=s.lo;
@@ -4026,23 +4028,12 @@ async function _forceRefreshHLines(){
       if(badgeLL&&s.lo)badgeLL.style.display='inline';
       const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
       _autoHLinesDate[sym]=`${et.getFullYear()}-${et.getMonth()+1}-${et.getDate()}`;
-      addLog('info','HLines',`${sym} → LH swing: $${s.hi||'—'} · LL swing: $${s.lo||'—'} (último pivote 1H)`);
+      addLog('info','HLines',`${sym} → LH: $${s.hi||'—'} · LL: $${s.lo||'—'} (máx/mín últimas 5 sesiones)`);
       if(btn){btn.textContent='✓ Auto';btn.disabled=false;setTimeout(()=>{btn.textContent='↻ Auto';},2000);}
     };
 
-    // 1. Intentar desde cache en memoria (velas diarias)
-    const cached=_candleCache&&(_candleCache[sym+'_D']);
-    if(cached&&cached.data){
-      const rHigh=_findRecentHigh(cached.data,5);
-      const rLow=_findRecentLow(cached.data,5);
-      if(rHigh>0||rLow>0){
-        _apply(rHigh,rLow);
-        return;
-      }
-    }
-
-    // 2. Fetch directo de velas diarias desde Schwab
-    addLog('info','HLines',`${sym} → cache no disponible, fetching velas diarias...`);
+    // Siempre hacer fetch directo — más confiable que el cache para este caso
+    addLog('info','HLines',`${sym} → fetching velas diarias para HLines...`);
     const token=await getSchwabToken();
     if(!token){
       addLog('warn','HLines',`${sym} → sin token Schwab`);
@@ -4050,7 +4041,7 @@ async function _forceRefreshHLines(){
       return;
     }
     const endMs=Date.now();
-    const startMs=endMs-(10*24*60*60*1000);
+    const startMs=endMs-(10*24*60*60*1000); // 10 días — cubre 5+ sesiones
     const url=`${SCHWAB_API_BASE}/pricehistory?symbol=${sym}&periodType=day&period=10&frequencyType=daily&frequency=1&startDate=${startMs}&endDate=${endMs}&needExtendedHoursData=false`;
     const r=await fetch(url,{
       headers:{'Authorization':'Bearer '+token},
@@ -4067,10 +4058,19 @@ async function _forceRefreshHLines(){
       if(btn){btn.textContent='↻ Auto';btn.disabled=false;}
       return;
     }
-    // Máximo high y mínimo low de las últimas 5 sesiones
+
+    addLog('debug','HLines',`${sym} → ${d.candles.length} velas diarias recibidas`);
+
+    // Últimas 5 sesiones completas — el máximo high y mínimo low de ese período
     const slice=d.candles.slice(-5);
-    const rHigh=Math.max(...slice.map(c=>c.high).filter(v=>v>0));
-    const rLow=Math.min(...slice.map(c=>c.low).filter(v=>v>0));
+    const highs5=slice.map(c=>c.high).filter(v=>v>0);
+    const lows5=slice.map(c=>c.low).filter(v=>v>0);
+    const rHigh=highs5.length?Math.max(...highs5):0;
+    const rLow=lows5.length?Math.min(...lows5):0;
+
+    addLog('debug','HLines',`${sym} → highs5: [${highs5.map(v=>v.toFixed(2)).join(', ')}] → max: $${rHigh.toFixed(2)}`);
+    addLog('debug','HLines',`${sym} → lows5:  [${lows5.map(v=>v.toFixed(2)).join(', ')}] → min: $${rLow.toFixed(2)}`);
+
     _apply(rHigh,rLow);
 
   }catch(e){

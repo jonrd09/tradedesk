@@ -3992,9 +3992,11 @@ function loadStrikeLevels(ticker){
 
 // ↻ Auto — calcula Last High y Last Low desde la sesión anterior de Schwab
 // Primero intenta el cache en memoria, si no hace fetch directo
-async function _forceRefreshHLines(){
-  if(!_strikeTicker)return;
-  const sym=_strikeTicker;
+async function _forceRefreshHLines(tickerParam){
+  // Usar el parámetro si se pasa, sino leer _strikeTicker
+  const sym=tickerParam||_strikeTicker;
+  if(!sym){addLog('warn','HLines','_forceRefreshHLines: sin ticker');return;}
+  addLog('info','HLines',`↻ Auto presionado para ${sym}`);
   const btn=document.querySelector('[onclick="_forceRefreshHLines()"]');
 
   // Feedback visual en el botón
@@ -8167,7 +8169,7 @@ async function updateFuturesSemaphore(){
           style="display:none;font-size:9px;font-weight:700;padding:1px 5px;border-radius:6px;background:rgba(255,77,109,.15);color:var(--red);letter-spacing:.04em;">AUTO</span>
       </div>
       <!-- Botón para forzar recálculo desde velas Schwab -->
-      <button onclick="_forceRefreshHLines()"
+      <button onclick="console.log('Auto click, ticker:',_strikeTicker);_forceRefreshHLines(_strikeTicker)"
         title="Calcular Last High y Last Low desde la sesión anterior de Schwab"
         style="margin-left:auto;background:none;border:1px solid var(--border2);border-radius:var(--r);color:var(--text3);font-size:11px;padding:3px 10px;cursor:pointer;">
         ↻ Auto

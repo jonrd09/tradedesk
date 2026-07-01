@@ -3210,7 +3210,7 @@ function openConfigModal(){
   // PIN removido de Configuration — acceso directo
   _loadCfgFields();
   document.getElementById('configModal').style.display='flex';
-  switchCfgTab('apis');
+  switchCfgTab('historial');
 }
 function closeConfigModal(){
   document.getElementById('configModal').style.display='none';
@@ -8916,13 +8916,13 @@ async function updateFuturesSemaphore(){
 
     <!-- Tabs -->
     <div style="display:flex;gap:0;border-bottom:1px solid var(--border);flex-shrink:0;overflow-x:auto;">
-      <button class="cfg-tab active" id="cfgTab-apis"      onclick="switchCfgTab('apis')"     >🔑 APIs</button>
-      <button class="cfg-tab"        id="cfgTab-telegram"  onclick="switchCfgTab('telegram')" >✈️ Telegram</button>
-      <button class="cfg-tab"        id="cfgTab-historial" onclick="switchCfgTab('historial')">📋 Historial</button>
-      <button class="cfg-tab"        id="cfgTab-pin"       onclick="switchCfgTab('pin')"      >🔐 PIN</button>
-      <button class="cfg-tab"        id="cfgTab-tickers"   onclick="switchCfgTab('tickers')"  >🎛️ Tickers</button>
+      <button class="cfg-tab active" id="cfgTab-historial" onclick="switchCfgTab('historial')">📋 Historial</button>
       <button class="cfg-tab"        id="cfgTab-estrategias" onclick="switchCfgTab('estrategias')">📊 Estrategias</button>
+      <button class="cfg-tab"        id="cfgTab-tickers"   onclick="switchCfgTab('tickers')"  >🎛️ Tickers</button>
       <button class="cfg-tab"        id="cfgTab-noticias"  onclick="switchCfgTab('noticias')" >📰 Noticias</button>
+      <button class="cfg-tab"        id="cfgTab-telegram"  onclick="switchCfgTab('telegram')" >✈️ Telegram</button>
+      <button class="cfg-tab"        id="cfgTab-pin"       onclick="switchCfgTab('pin')"      >🔐 PIN</button>
+      <button class="cfg-tab"        id="cfgTab-apis"      onclick="switchCfgTab('apis')"     >🔑 APIs</button>
       <button class="cfg-tab"        id="cfgTab-sync"      onclick="switchCfgTab('sync')"     >🔄 Sync</button>
     </div>
 

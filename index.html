@@ -2087,10 +2087,14 @@ async function _buildSignalsCore(){
     // Para el gráfico miniatura, excluir la última vela si es sintética (evita caída abrupta)
     const _c15chart=c15.length>30?c15.slice(-31,-1):c15.slice(-30);
     // H-06: Flag if price is stale (no live Finnhub price for this ticker)
-    const _priceIsLive=_liveOk; // use the flag already computed from _livePrices
+    const _priceIsLive=_liveOk;
     if(!_priceIsLive&&!_testMode){
       addLog('warn','Señales',`${sym} → precio Finnhub no disponible — señal usa último close 1H de Schwab ($${lP1h.toFixed(2)})`);
     }
+    // _wsIsToday debe calcularse ANTES de meta (se referencia en el objeto)
+    const _wsC=_wsSessionCandle[sym];
+    const _etNow15d=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+    const _wsIsToday=_wsC&&_wsC.date===_etNow15d.toDateString()&&_wsC.close>0;
     const meta={sym,price:realPrice,pct:realPct,_pctReliable,dataLabel:_priceIsLive?'📡 Schwab+Finnhub':'📡 Schwab',
       _priceStale:!_priceIsLive,
       _wsIsToday, // M-4: badge de latencia — true = dato en tiempo real WS, false = última vela cerrada
@@ -2170,9 +2174,7 @@ async function _buildSignalsCore(){
     const distClosToLower=(lP15-lLow15)/lP15*100;
 
     // Datos del HIGH/LOW real de la vela — usar WS si disponible, si no, Schwab
-    const _wsC=_wsSessionCandle[sym];
-    const _etNow15d=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
-    const _wsIsToday=_wsC&&_wsC.date===_etNow15d.toDateString()&&_wsC.close>0;
+    // _wsC, _etNow15d y _wsIsToday ya están declarados antes del objeto meta
     // El high de la vela actual: si el WS tiene datos del día de hoy, usarlo
     // (es el high tick-a-tick desde las 9:30). Si no, usar el high de la última vela cerrada.
     const _candleHigh=(_wsIsToday&&_wsC.high>lH15)?_wsC.high:lH15;

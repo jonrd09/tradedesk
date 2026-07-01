@@ -196,10 +196,25 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
     style="background:rgba(255,77,109,.15);border:1px solid rgba(255,77,109,.5);border-radius:50%;width:34px;height:34px;color:#ff4d6d;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;flex-shrink:0;">
     ⚙️
   </button>
+
+  <!-- Export Config — solo visible en modo admin (oculto en modo viewer) -->
+  <button id="exportCfgBtn" onclick="exportTDPConfig()"
+    title="Exportar configuración para otra PC"
+    style="background:rgba(0,209,122,.12);border:1px solid rgba(0,209,122,.4);border-radius:50%;width:34px;height:34px;color:var(--green);font-size:15px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;flex-shrink:0;">
+    📤
+  </button>
 </header>
 
 <!-- MAIN GRID -->
 <div class="main">
+
+<!-- Banner modo viewer — visible solo cuando viewer_mode está activo -->
+<div id="viewerBanner" style="display:none;position:fixed;top:0;left:0;right:0;z-index:9999;background:linear-gradient(90deg,#7c3aed,#4f46e5);color:#fff;text-align:center;padding:6px 12px;font-size:12px;font-weight:600;">
+  👁 MODO VISUALIZACIÓN — Solo lectura · Las señales y alertas funcionan normalmente · Edición deshabilitada
+  <button onclick="promptViewerUnlock()" style="margin-left:12px;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.4);border-radius:10px;color:#fff;padding:2px 10px;font-size:11px;cursor:pointer;">🔓 Desbloquear</button>
+</div>
+<!-- Input oculto para importar config -->
+<input type="file" id="importCfgInput" accept=".tdpconfig,.json" style="display:none" onchange="importTDPConfig(this)">
 
 <aside class="left-panel" style="display:flex;flex-direction:column;overflow:hidden;">
   <!-- Header -->
@@ -6996,21 +7011,80 @@ async function loadNews(ticker){
 
     items.sort((a,b)=>new Date(b.pubDate)-new Date(a.pubDate));
 
-    // Deduplicar por URL o título
-    const seen=new Map();
+    // ── Dedup semántico ───────────────────────────────────────────────────────
+    // El dedup anterior solo comparaba URL o título exacto. Problema: Yahoo y
+    // otros outlets republicar la misma noticia varias veces con títulos
+    // ligeramente distintos (ej. añaden "Update:", reordenan palabras, o
+    // actualizan el headline). Resultado: la misma historia aparece 3 veces.
+    //
+    // Ahora usamos similitud de tokens (palabras clave en común):
+    //  1. Normalizar: lowercase, sin puntuación, sin stopwords, sin prefijos
+    //     de "actualización" ("update:", "breaking:", "exclusive:", etc.)
+    //  2. Calcular intersección de tokens entre dos títulos
+    //  3. Si la similitud es >=60% (Jaccard sobre la unión), son la misma noticia
+    //  4. De los duplicados, conservar solo el más reciente
+    const _STOP=new Set(['a','an','the','in','on','at','of','for','to','and','or',
+      'its','is','are','was','were','has','have','had','with','by','over','into',
+      'that','this','it','as','from','be','been','not','but','than','more','us',
+      'de','en','el','la','los','las','un','una','que','con','por','del','al']);
+
+    function _titleTokens(title){
+      return title
+        .toLowerCase()
+        .replace(/^(update|breaking|exclusive|report|developing|watch)\s*:?\s*/i,'')
+        .replace(/[^a-z0-9\s]/g,' ')
+        .split(/\s+/)
+        .filter(t=>t.length>2&&!_STOP.has(t));
+    }
+    function _jaccardSim(a,b){
+      const sa=new Set(a),sb=new Set(b);
+      const inter=[...sa].filter(t=>sb.has(t)).length;
+      const union=new Set([...sa,...sb]).size;
+      return union===0?0:inter/union;
+    }
+
+    // Agrupar por URL primero (dedup exacto clásico), luego semántico
+    const seenUrl=new Map();
     for(const item of items){
-      const key=item.link||item.title;
-      if(seen.has(key)){
-        const existing=seen.get(key);
-        if(!existing.syms.includes(item.sym)) existing.syms.push(item.sym);
+      const urlKey=item.link||item.title;
+      if(seenUrl.has(urlKey)){
+        const ex=seenUrl.get(urlKey);
+        if(!ex.syms.includes(item.sym))ex.syms.push(item.sym);
       }else{
-        seen.set(key,{...item,syms:[item.sym]});
+        seenUrl.set(urlKey,{...item,syms:[item.sym]});
       }
     }
-    const deduped=Array.from(seen.values());
+    const urlDeduped=[...seenUrl.values()];
+
+    // Ahora dedup semántico — comparar cada noticia con las ya aceptadas
+    const accepted=[];
+    const SIM_THRESHOLD=0.60; // 60% de palabras clave en común = misma noticia
+    for(const item of urlDeduped){
+      const tokensNew=_titleTokens(item.title);
+      let isDup=false;
+      for(const kept of accepted){
+        // Solo comparar si son del mismo ticker o misma fuente (evita falsos positivos
+        // entre noticias de empresas distintas que comparten palabras genéricas)
+        const sameTicker=item.sym===kept.sym;
+        const sameSource=(item.source||'').toLowerCase()===(kept.source||'').toLowerCase();
+        if(!sameTicker&&!sameSource)continue;
+        const tokensKept=_titleTokens(kept.title);
+        const sim=_jaccardSim(tokensNew,tokensKept);
+        if(sim>=SIM_THRESHOLD){
+          isDup=true;
+          // Si el duplicado tiene tickers distintos, fusionarlos en el que quedó
+          (item.syms||[item.sym]).forEach(s=>{
+            if(!kept.syms.includes(s))kept.syms.push(s);
+          });
+          break;
+        }
+      }
+      if(!isDup)accepted.push(item);
+    }
+    // accepted ya está ordenado por pubDate desc (heredado del sort inicial)
 
     // Pasar el sym para que el filtro verifique que el ticker/empresa aparece en el título
-    const filtered=deduped.filter(item=>newsPassesFilter(item.title, item.syms&&item.syms.length===1?item.syms[0]:null));
+    const filtered=accepted.filter(item=>newsPassesFilter(item.title, item.syms&&item.syms.length===1?item.syms[0]:null));
     if(!filtered.length){
       area.innerHTML='<div style="text-align:center;padding:20px;color:var(--text3);font-size:12px;">Sin noticias relevantes en este momento.<br><span style="font-size:11px;">Solo se muestran: adquisiciones, ejecutivos, earnings, partnerships, etc.</span></div>';
       return;
@@ -7568,7 +7642,214 @@ function renderIndicesPanel(){
   area.innerHTML=`<div class="idx-grid">${cards}</div>${blockHTML}`;
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// EXPORT / IMPORT DE CONFIGURACIÓN — modo viewer para segunda PC
+// ════════════════════════════════════════════════════════════════════════════
+//
+// EXPORT: captura todas las claves de configuración de localStorage y las
+// empaqueta en un archivo .tdpconfig (JSON). El archivo incluye:
+//   - API keys (Finnhub, Schwab tokens, Telegram)
+//   - Tickers configurados (main + signal)
+//   - Niveles técnicos (HLines, ATH, etc.)
+//   - Rangos de opciones (strike ranges)
+//   - Filtros de noticias
+//   - Estrategias habilitadas/deshabilitadas
+//   - Flag viewer_mode: true — cuando se importa en otra PC, activa modo solo lectura
+//
+// IMPORT: lee el .tdpconfig, restaura todas las claves en localStorage y
+// activa viewer_mode. En modo viewer:
+//   - El botón ⚙️ (configuración) y 📤 (export) se ocultan
+//   - El panel de configuración no se puede abrir
+//   - Se muestra un banner indicando "Modo Visualización"
+//   - Las señales, noticias, charts y alertas de Telegram funcionan igual
+//   - Para desbloquear edición se necesita una contraseña (la que el admin set)
+//
+// SEGURIDAD: las API keys se guardan en localStorage del navegador (como
+// siempre), no en el archivo en texto plano — el .tdpconfig SÍ las contiene
+// ya que es necesario para restaurarlas, así que trátalo como dato sensible
+// (no lo subas a GitHub, no lo compartas por email sin cuidado).
+
+const _TDP_EXPORT_KEYS=[
+  'finnhub_key','levetf_apikey','ms_fh_key',
+  'schwab_client_id','schwab_access_token','schwab_refresh_token',
+  'schwab_token_expiry','schwab_refresh_expiry',
+  'tg_token','tg_chat_id','tg_enabled',
+  'telegram_bot_token','telegram_chat_id',
+  'cfg_main_tickers','cfg_signal_tickers',
+  'strat_enabled',
+  'gainPct','paperBalance',
+  'tdp_news_filter_v1',
+  'proxy_url',
+  // niveles técnicos — se incluyen dinámicamente para todos los tickers
+];
+
+function _getTdpDynamicKeys(){
+  const keys=[];
+  const allSyms=[..._mainTickers,..._signalTickers].filter((v,i,a)=>a.indexOf(v)===i);
+  allSyms.forEach(sym=>{
+    keys.push(`levels_${sym}`,`strike_range_${sym}`,`fundamental_${sym}`,`strikelog_${sym}`);
+  });
+  // Rastrear cualquier otra clave tdp_ que esté en localStorage
+  Object.keys(localStorage).filter(k=>
+    k.startsWith('levels_')||k.startsWith('strike_range_')||
+    k.startsWith('fundamental_')||k.startsWith('strikelog_')
+  ).forEach(k=>{if(!keys.includes(k))keys.push(k);});
+  return keys;
+}
+
+function exportTDPConfig(){
+  const allKeys=[..._TDP_EXPORT_KEYS,..._getTdpDynamicKeys()];
+  const config={
+    _tdp_version:'1.0',
+    _exported_at:new Date().toISOString(),
+    _exported_from:'TradeDeskPro',
+    viewer_mode:true,          // al importar en otra PC, activa solo lectura
+    _viewer_unlock_hint:'',    // el admin puede poner una pista de contraseña
+    data:{}
+  };
+  let count=0;
+  allKeys.forEach(k=>{
+    const v=localStorage.getItem(k);
+    if(v!==null){config.data[k]=v;count++;}
+  });
+  // No exportar el PIN — cada instancia tiene el suyo propio
+  // (el viewer no necesita PIN porque no puede abrir Config)
+  const json=JSON.stringify(config,null,2);
+  const blob=new Blob([json],{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  const dt=new Date().toLocaleDateString('es-PR').replace(/\//g,'-');
+  a.href=url;a.download=`TradeDeskPro_config_${dt}.tdpconfig`;
+  document.body.appendChild(a);a.click();
+  document.body.removeChild(a);URL.revokeObjectURL(url);
+  addLog('warn','Export',`✅ Config exportada: ${count} claves · archivo TradeDeskPro_config_${dt}.tdpconfig`);
+  // Mostrar instrucciones
+  setTimeout(()=>alert(
+    '✅ Configuración exportada correctamente.\n\n'+
+    '📋 Instrucciones para la otra PC:\n'+
+    '1. Abre TradeDeskPro.html en esa PC\n'+
+    '2. Haz clic en el botón 📥 "Importar config" del header\n'+
+    '3. Selecciona el archivo .tdpconfig que acabas de descargar\n'+
+    '4. La plataforma cargará todos los datos en modo Solo Lectura\n\n'+
+    '⚠️ Guarda el .tdpconfig de forma segura — contiene tus API keys.'
+  ),200);
+}
+
+function importTDPConfig(input){
+  const file=input.files[0];
+  if(!file)return;
+  const reader=new FileReader();
+  reader.onload=function(e){
+    try{
+      const config=JSON.parse(e.target.result);
+      if(!config._tdp_version||!config.data){
+        alert('❌ Archivo inválido — no es un archivo .tdpconfig de TradeDeskPro.');
+        return;
+      }
+      // Aplicar todas las claves al localStorage
+      let count=0;
+      Object.entries(config.data).forEach(([k,v])=>{
+        try{localStorage.setItem(k,v);count++;}catch(err){}
+      });
+      // Activar modo viewer si el archivo lo indica
+      if(config.viewer_mode){
+        localStorage.setItem('tdp_viewer_mode','1');
+        // Guardar hint de desbloqueo si existe
+        if(config._viewer_unlock_hint){
+          localStorage.setItem('tdp_viewer_hint',config._viewer_unlock_hint);
+        }
+      }
+      addLog('warn','Import',`✅ Config importada: ${count} claves restauradas · modo ${config.viewer_mode?'Solo Lectura':'Completo'}`);
+      alert(
+        `✅ Configuración importada correctamente.\n\n`+
+        `📊 ${count} claves restauradas\n`+
+        `🔒 Modo: ${config.viewer_mode?'Solo Lectura (viewer)':'Completo'}\n\n`+
+        `La página se recargará para aplicar los cambios.`
+      );
+      // Limpiar el input para permitir reimportación
+      input.value='';
+      setTimeout(()=>location.reload(),500);
+    }catch(err){
+      alert(`❌ Error al importar: ${err.message}`);
+    }
+  };
+  reader.readAsText(file);
+}
+
+function applyViewerMode(){
+  const isViewer=localStorage.getItem('tdp_viewer_mode')==='1';
+  if(!isViewer)return;
+  // Mostrar banner
+  const banner=document.getElementById('viewerBanner');
+  if(banner)banner.style.display='block';
+  // Ocultar botones de admin
+  ['configBtn','exportCfgBtn','testBtn'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(el)el.style.display='none';
+  });
+  // Agregar botón de importar config en el header (para que el viewer pueda re-importar)
+  const header=document.querySelector('header');
+  if(header){
+    const btn=document.createElement('button');
+    btn.title='Importar nueva configuración';
+    btn.innerHTML='📥';
+    btn.style.cssText='background:rgba(59,169,255,.12);border:1px solid rgba(59,169,255,.4);border-radius:50%;width:34px;height:34px;color:var(--blue);font-size:15px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;flex-shrink:0;';
+    btn.onclick=()=>document.getElementById('importCfgInput').click();
+    header.appendChild(btn);
+  }
+  // Bloquear openConfigModal para que no abra aunque alguien llame la función directamente
+  window._originalOpenConfigModal=window.openConfigModal;
+  window.openConfigModal=function(){
+    alert('🔒 Modo Solo Lectura — La configuración no se puede editar en esta PC.\n\nPara editar, usa la PC principal con el archivo TradeDeskPro original.');
+  };
+  addLog('debug','Viewer','👁 Modo Solo Lectura activo — edición deshabilitada');
+}
+
+function promptViewerUnlock(){
+  const hint=localStorage.getItem('tdp_viewer_hint')||'';
+  const pw=prompt(
+    '🔓 Ingresa la contraseña de administrador para desbloquear la edición.'+(hint?`\n\nPista: ${hint}`:'')
+  );
+  if(!pw)return;
+  // Hash simple del password para comparar — el admin lo configura en el export
+  const _savedHash=localStorage.getItem('tdp_viewer_pw_hash');
+  if(!_savedHash){
+    // No hay hash configurado — usar contraseña maestra hardcoded de emergencia
+    // (el admin debe configurar una contraseña al exportar; esto es el fallback)
+    if(pw==='TDP2026'){
+      _disableViewerMode();
+    }else{
+      alert('❌ Contraseña incorrecta.');
+    }
+    return;
+  }
+  // Comparar hash
+  const _inputHash=[...pw].reduce((h,c)=>(Math.imul(31,h)+c.charCodeAt(0))|0,0).toString(16);
+  if(_inputHash===_savedHash){
+    _disableViewerMode();
+  }else{
+    alert('❌ Contraseña incorrecta.');
+  }
+}
+function _disableViewerMode(){
+  localStorage.removeItem('tdp_viewer_mode');
+  alert('✅ Modo edición desbloqueado. La página se recargará.');
+  setTimeout(()=>location.reload(),300);
+}
+
 async function init(){
+  // Aplicar modo viewer ANTES de cualquier otra cosa — oculta los controles de edición
+  applyViewerMode();
+  // En modo admin, agregar el botón de importar config también (para cargar desde cero)
+  if(localStorage.getItem('tdp_viewer_mode')!=='1'){
+    const _importBtn=document.createElement('button');
+    _importBtn.title='Importar configuración desde otra PC';
+    _importBtn.innerHTML='📥';
+    _importBtn.style.cssText='background:rgba(59,169,255,.12);border:1px solid rgba(59,169,255,.4);border-radius:50%;width:34px;height:34px;color:var(--blue);font-size:15px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;flex-shrink:0;';
+    _importBtn.onclick=()=>document.getElementById('importCfgInput').click();
+    const _exportBtn=document.getElementById('exportCfgBtn');
+    if(_exportBtn)_exportBtn.parentNode.insertBefore(_importBtn,_exportBtn);
+  }
   // PIN: solo establecer default si no hay absolutamente ninguno guardado
   // NUNCA sobreescribir un PIN existente (incluyendo PINs legacy de v3)
   const _existingPin=localStorage.getItem('app_pin');

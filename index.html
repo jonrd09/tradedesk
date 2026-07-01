@@ -2260,14 +2260,18 @@ async function _buildSignalsCore(){
     // stochA/stochB — usados por otras estrategias (Rebote MA20, Cambio Tendencia 1H)
     const stochA=lK15>lD15&&lK15>30&&lK15<85;
     const stochB=lK15<lD15&&lK15<70&&lK15>15;
-    // Precio acercándose a la banda DESDE ADENTRO (cerca pero aún dentro)
-    const distToUpperPct=(lUp15-lH15)/lP15*100; // qué tan cerca está el high de la banda sup
-    const distToLowerPct=(lL15-lLow15)/lP15*100; // qué tan cerca está el low de la banda inf
-    const approachingUpper=lH15<=lUp15&&distToUpperPct>=0&&distToUpperPct<0.3; // cerca, aún adentro
-    const approachingLower=lL15>=lLow15&&distToLowerPct>=0&&distToLowerPct<0.3; // cerca, aún adentro
-    // Precio PERFORANDO la banda — vela ya salió por afuera (el trade clave que queremos capturar)
-    const piercingUpper=lH15>lUp15&&lP15>lUp15*0.998; // high y close sobre la banda superior
-    const piercingLower=lL15<lLow15&&lP15<lLow15*1.002; // low y close bajo la banda inferior
+    // Precio acercándose a la banda DESDE ADENTRO — usa WS para high/low en tiempo real
+    // _candleHigh/_candleLow ya calculados en el bloque SETUP (usan WS si disponible)
+    const distToUpperPct=(lUp15-_candleHigh)/lP15*100; // distancia del HIGH (WS) a la banda sup
+    const distToLowerPct=(_candleLow-lLow15)/lP15*100;  // distancia del LOW (WS) a la banda inf
+    // approachingUpper: el HIGH de la vela está dentro del 0.3% de la banda superior
+    // pero NO la ha cruzado todavía (el close sigue adentro)
+    const approachingUpper=_candleHigh<=lUp15&&distToUpperPct>=0&&distToUpperPct<0.3&&_candleClose<lUp15;
+    const approachingLower=_candleLow>=lLow15&&distToLowerPct>=0&&distToLowerPct<0.3&&_candleClose>lLow15;
+    // Precio PERFORANDO la banda — el HIGH ya cruzó Y el close está cerca (0.2% tolerancia)
+    // Nota: lP15 es el close de la última vela cerrada; _candleClose incluye precio WS en tiempo real
+    const piercingUpper=_candleHigh>lUp15&&_candleClose>lUp15*0.998;
+    const piercingLower=_candleLow<lLow15&&_candleClose<lLow15*1.002;
     // BB-A/BB-B disparan en AMBOS casos: acercándose O perforando
     const bbCallTrigger=approachingUpper||piercingUpper;
     const bbPutTrigger=approachingLower||piercingLower;
@@ -2392,7 +2396,7 @@ async function _buildSignalsCore(){
         weighted:true,score,threshold:60,reqs:[
         // ── GATE: las 4 condiciones duras ──
         {ok:lBBW15>=1.5,    tf:'15m',weight:'BB',text:`Expansión BB: bandas abiertas (BBW ${lBBW15.toFixed(1)}%)`},
-        {ok:piercingUpper,  tf:'15m',weight:'BB',text:`Precio cerrando FUERA de banda superior: $${lP15.toFixed(2)} > $${lUp15.toFixed(2)}`},
+        {ok:piercingUpper,  tf:'15m',weight:'BB',text:(()=>{const _d=(lP15-lUp15)/lP15*100;return _d>=0?`✅ Close FUERA de banda superior: $${lP15.toFixed(2)} > $${lUp15.toFixed(2)} (+${_d.toFixed(2)}%)`:`⚡ Close rozando banda superior: $${lP15.toFixed(2)} vs $${lUp15.toFixed(2)} (${Math.abs(_d).toFixed(2)}% adentro — high cruzó)`;})()},
         {ok:bigBodyCall,    tf:'15m',weight:'BB',text:`Vela verde con cuerpo ${candleBody15.toFixed(2)}% — momentum real`},
         {ok:volOverLine,    tf:'15m',weight:'BB',text:`Volumen institucional${volLabel}`},
         // ── CONTEXTO: suman al score pero no bloquean ──
@@ -2417,7 +2421,7 @@ async function _buildSignalsCore(){
         weighted:true,score,threshold:60,reqs:[
         // ── GATE ──
         {ok:lBBW15>=1.5,    tf:'15m',weight:'BB',text:`Expansión BB: bandas abiertas (BBW ${lBBW15.toFixed(1)}%)`},
-        {ok:piercingLower,  tf:'15m',weight:'BB',text:`Precio cerrando FUERA de banda inferior: $${lP15.toFixed(2)} < $${lLow15.toFixed(2)}`},
+        {ok:piercingLower,  tf:'15m',weight:'BB',text:(()=>{const _d=(lLow15-lP15)/lP15*100;return _d>=0?`✅ Close FUERA de banda inferior: $${lP15.toFixed(2)} < $${lLow15.toFixed(2)} (-${_d.toFixed(2)}%)`:`⚡ Close rozando banda inferior: $${lP15.toFixed(2)} vs $${lLow15.toFixed(2)} (${Math.abs(_d).toFixed(2)}% adentro — low cruzó)`;})()},
         {ok:bigBodyPut,     tf:'15m',weight:'BB',text:`Vela roja con cuerpo ${candleBody15.toFixed(2)}% — momentum real`},
         {ok:volOverLine,    tf:'15m',weight:'BB',text:`Volumen institucional${volLabel}`},
         // ── CONTEXTO ──

@@ -490,7 +490,10 @@ function getKey(){
   }
   return window._fk||'';
 }
-function showKeyModal(){} // Finnhub removed
+// B-3: showKeyModal() — cascarón conservado porque algunos botones del HTML llaman
+// esta función por nombre. Eliminar la función rompería la UI con ReferenceError.
+// Si se quiere limpiar: busca todos los onclick="showKeyModal()" y elimínalos primero.
+function showKeyModal(){}
 function saveKeyModal(){
   const k=(document.getElementById('modalKeyInput').value||'').trim();
   const err=document.getElementById('modalKeyError');
@@ -975,6 +978,18 @@ try{_logs = JSON.parse(localStorage.getItem('tdp_logs')||'[]');}catch(e){_logs=[
 function _saveLogs(){try{localStorage.setItem('tdp_logs',JSON.stringify(_logs.slice(0,MAX_LOGS)));}catch(e){}}
 let _logFilter = 'all';
 
+// ── esc() — sanitizador XSS para datos externos ──────────────────────────────
+// USAR en todo `innerHTML` que interpole texto libre de APIs externas:
+// titulares de noticias, nombres de insiders, cualquier campo que no genere
+// el propio código. Los valores numéricos calculados (precios, %, scores)
+// no necesitan escape — son seguros por construcción.
+function esc(s){
+  if(s==null)return '';
+  return String(s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
 function addLog(level, category, message, detail='') {
   // Filtrar niveles muy verbosos — info se descarta, debug se guarda solo en debugMode
   if(level === 'info') return;
@@ -1134,8 +1149,11 @@ async function _verifySHA256Pin(pin, stored){
 function getStoredPin(){return localStorage.getItem('app_pin')||'';}
 
 function requirePin(cb,label='Ingresa tu PIN'){
-  // PIN deshabilitado — acceso directo sin verificación
-  // Para reactivar: restaurar lógica de pinModal aquí
+  // A-3: PIN deshabilitado intencionalmente para uso LOCAL de un solo usuario.
+  // ADVERTENCIA HONESTA: este bypass hace que requirePin() no proteja nada.
+  // Si compartes esta herramienta o la hosteas, reactiva la verificación PBKDF2
+  // (la lógica existe en pinPress/pinSubmit) y elimina este bypass directo.
+  // Para uso personal en tu propia PC, esta simplificación es aceptable.
   if(cb)cb();
 }
 function showPinSetup(cb,label){
@@ -1264,6 +1282,9 @@ function _renderPinDiag(){
 // ═══════════════════════════════════════════════════════════════
 // Feriados de mercado de EE.UU. (NYSE/NASDAQ cerrados todo el día) — fuente: NYSE oficial.
 // Formato 'YYYY-MM-DD' en hora del Este. Cierres tempranos (1pm) NO se listan aquí.
+// TODO B-1: actualizar MARKET_HOLIDAYS en enero de cada año.
+// Fuente oficial: https://www.nyse.com/markets/hours-calendars
+// Lista actual cubre 2026-2027. Caduca en enero 2028.
 const MARKET_HOLIDAYS=new Set([
   // 2026
   '2026-01-01','2026-01-19','2026-02-16','2026-04-03','2026-05-25',
@@ -1315,6 +1336,7 @@ function tick(){
     else{ms.textContent='● CERRADO';ms.className='mkt-closed';}
   }
 }
+if(window._tickInterval)clearInterval(window._tickInterval);
 window._tickInterval=setInterval(tick,1000);tick();
 
 // ═══════════════════════════════════════════════════════════════
@@ -1584,6 +1606,10 @@ function rsi(a,n=14){
   for(let i=1;i<a.length;i++){const d=a[i]-a[i-1];if(i<=n){g+=d>0?d:0;l+=d<0?-d:0;}else{g=(g*(n-1)+(d>0?d:0))/n;l=(l*(n-1)+(d<0?-d:0))/n;}if(i>=n)r.push(l===0?100:100-100/(1+g/l));}
   return r;
 }
+// M-2: genCandles — función de test para generar velas aleatorias.
+// Verificación (auditoría): grep confirma que esta función NUNCA se llama
+// en el path de producción — solo existe como utilidad de debug.
+// Se conserva para facilitar tests manuales futuros.
 function genCandles(base,n,vol){
   const a=[base];
   for(let i=1;i<n;i++)a.push(Math.max(1,a[i-1]*(1+(Math.random()-.5)*2*vol)));
@@ -2067,6 +2093,7 @@ async function _buildSignalsCore(){
     }
     const meta={sym,price:realPrice,pct:realPct,_pctReliable,dataLabel:_priceIsLive?'📡 Schwab+Finnhub':'📡 Schwab',
       _priceStale:!_priceIsLive,
+      _wsIsToday, // M-4: badge de latencia — true = dato en tiempo real WS, false = última vela cerrada
       name:(DEFAULTS[sym]&&DEFAULTS[sym].name)||sym,
       _c15:_c15chart,_bb15_up:bb15.upper.filter(v=>v!=null).slice(-30),
       _bb15_lo:bb15.lower.filter(v=>v!=null).slice(-30)
@@ -2257,7 +2284,7 @@ async function _buildSignalsCore(){
     const _ranges10=h15.slice(-10).map((h,i)=>h-l15[l15.length-10+i]).filter(v=>v>0);
     const _avgRange=_ranges10.length?_ranges10.reduce((a,b)=>a+b,0)/_ranges10.length:0;
     const _avgRangePct=lP15>0?_avgRange/lP15*100:0;
-    const _bodyThresh=Math.max(0.1, _avgRangePct*0.25); // 25% del rango típico, mín 0.1%
+    const _bodyThresh=Math.max(0.15, _avgRangePct*0.25); // M-1 FIX: mín 0.15% (antes 0.1% — demasiado permisivo para SPY/QQQ en baja vol)
     const bigBodyCall=lP15>lO15&&candleBody15>=_bodyThresh;
     const bigBodyPut =lP15<lO15&&candleBody15>=_bodyThresh;
     // Pendiente de la media de Bollinger — dos lecturas:
@@ -2292,17 +2319,28 @@ async function _buildSignalsCore(){
     // pero NO la ha cruzado todavía (el close sigue adentro)
     const approachingUpper=_candleHigh<=lUp15&&distToUpperPct>=0&&distToUpperPct<0.3&&_candleClose<lUp15;
     const approachingLower=_candleLow>=lLow15&&distToLowerPct>=0&&distToLowerPct<0.3&&_candleClose>lLow15;
-    // Precio PERFORANDO la banda — el HIGH ya cruzó Y el close está cerca (0.2% tolerancia)
-    // Nota: lP15 es el close de la última vela cerrada; _candleClose incluye precio WS en tiempo real
-    const piercingUpper=_candleHigh>lUp15&&_candleClose>lUp15*0.998;
-    const piercingLower=_candleLow<lLow15&&_candleClose<lLow15*1.002;
+    // A-2 FIX: piercing ahora exige el close FUERA de la banda (sin tolerancia).
+    // Antes: `_candleClose > lUp15*0.998` aceptaba el close hasta 0.2% ADENTRO
+    // de la banda — lo que es un falso breakout y además solapa con el estado INTENTO.
+    // Ahora: si el close no cerró afuera, no es BB-A/BB-B. Si solo el high tocó
+    // la banda con close adentro, eso es INTENTO (Nivel 2) — que ya existe.
+    const piercingUpper=_candleHigh>lUp15&&_candleClose>lUp15;   // close estrictamente fuera
+    const piercingLower=_candleLow<lLow15&&_candleClose<lLow15;  // close estrictamente fuera
     // BB-A/BB-B disparan en AMBOS casos: acercándose O perforando
     const bbCallTrigger=approachingUpper||piercingUpper;
     const bbPutTrigger=approachingLower||piercingLower;
 
     // Pesos del modelo ponderado
     const W={bollinger:60,medias:25,volumen:5,estocastico:5,hlines:5};
-    const SCORE_THRESHOLD=70;
+    // A-1 FIX: umbrales reales de calidad para BB-A/BB-B.
+    // SCORE_THRESHOLD=70 era código muerto — declarado pero nunca usado.
+    // Ahora los umbrales se usan en el render de tarjetas para comunicar calidad real:
+    //   score ≥ 70 → señal fuerte (color pleno, badge "BREAKOUT")
+    //   score 50–69 → señal moderada (color atenuado, badge "VIGILAR")
+    //   score < 50 → breakout detectado pero contexto débil (badge "DÉBIL")
+    // El gate ya garantiza que el evento ocurrió — el score dice cuánto respaldo tiene.
+    const BB_SCORE_STRONG=70;   // señal fuerte — contexto confirma la ruptura
+    const BB_SCORE_MODERATE=50; // señal moderada — ruptura real, contexto mixto
 
     // ── M-04: HLINES GUARD — niveles técnicos del día anterior como filtro activo ──
     // getLevels() lee los valores manuales ingresados en el panel de strikes.
@@ -2406,18 +2444,22 @@ async function _buildSignalsCore(){
 
     // M-05: BB comprimido — percentil dinámico de las últimas 20 velas de BBW
     // Se declara aquí porque lo usan tanto BB-A/BB-B (mediana) como BB-C/BB-D (pct25)
-    const _bbwHistory=c15.slice(-22).map((_,i)=>{
-      if(i<3)return null;
-      const _sl=c15.slice(i-2,i+1);
-      const _bb=bollinger(_sl,Math.min(14,_sl.length));
-      const _up=_bb.upper.filter(v=>v!=null).slice(-1)[0];
-      const _lo=_bb.lower.filter(v=>v!=null).slice(-1)[0];
-      const _mid=_bb.mid.filter(v=>v!=null).slice(-1)[0];
-      return _mid>0?(_up-_lo)/_mid*100:null;
-    }).filter(v=>v!=null).sort((a,b)=>a-b);
+    // M-05 FIX (C-1 auditoría): BBW histórico correcto.
+    // Antes: calculaba BBW con ventanas de solo 3 velas (std sobre 3 puntos = ruido puro).
+    // Ahora: usa bollinger(20,2) estándar sobre toda la serie y toma las últimas 22 lecturas.
+    // Esto hace que _bbwMedian sea estadísticamente representativo de la volatilidad
+    // histórica real del ticker — el filtro "expansión real vs ruido lateral" funciona de verdad.
+    const _bbFullHist=bollinger(c15,20,2);
+    const _bbwHistory=c15.map((_,i)=>{
+      const up=_bbFullHist.upper[i],lo=_bbFullHist.lower[i],mid=_bbFullHist.mid[i];
+      return (mid&&up!=null&&lo!=null)?(up-lo)/mid*100:null;
+    }).filter(v=>v!=null).slice(-22).sort((a,b)=>a-b);
     // Mediana (percentil 50): expansión real vs lateral ruidoso — usada por BB-A/BB-B
     const _bbwMedian=_bbwHistory.length?_bbwHistory[Math.floor(_bbwHistory.length*0.5)]||lBBW15:lBBW15;
     const bbwAboveMedian=lBBW15>=_bbwMedian;
+    // Percentil 25 — usado por BB-C/BB-D para detectar BBW comprimido (bands apretadas)
+    // Con el fix, este valor ahora es estadísticamente correcto también
+    const _bbwPct25=_bbwHistory.length?_bbwHistory[Math.floor(_bbwHistory.length*0.25)]||lBBW15:lBBW15;
 
     if(_stratEnabled('BB-A')&&bbPureGateCall){
       // Score base: las 3 condiciones BB siempre pasan cuando llegamos aquí
@@ -2431,7 +2473,9 @@ async function _buildSignalsCore(){
       if(_hlCallOk)       score+=_WBB.ctx_hlines;  // +7
 
       all.push({...meta,code:'BB-A',name:'BB Breakout — CALL',type:'call',
-        weighted:true,score,threshold:35,reqs:[
+        weighted:true,score,threshold:35,
+        _scoreQuality:score>=BB_SCORE_STRONG?'strong':score>=BB_SCORE_MODERATE?'moderate':'weak',
+        reqs:[
         // ── GATE PURO BB (siempre ✅ cuando llegamos aquí) ──
         {ok:lBBW15>=1.0,    tf:'15m',weight:'BB',text:`Expansión BB: bandas abiertas (BBW ${lBBW15.toFixed(1)}%)`},
         {ok:piercingUpper,  tf:'15m',weight:'BB',text:(()=>{const _d=(_candleClose-lUp15)/lP15*100;return _d>=0?`✅ Precio FUERA de banda superior: $${_candleClose.toFixed(2)} > $${lUp15.toFixed(2)} (+${_d.toFixed(2)}%)`:`⚡ High cruzó banda superior — close a ${Math.abs(_d).toFixed(2)}% adentro`;})()},
@@ -2458,7 +2502,9 @@ async function _buildSignalsCore(){
       if(_hlPutOk)        score+=_WBB.ctx_hlines;
 
       all.push({...meta,code:'BB-B',name:'BB Breakout — PUT',type:'put',
-        weighted:true,score,threshold:35,reqs:[
+        weighted:true,score,threshold:35,
+        _scoreQuality:score>=BB_SCORE_STRONG?'strong':score>=BB_SCORE_MODERATE?'moderate':'weak',
+        reqs:[
         {ok:lBBW15>=1.0,    tf:'15m',weight:'BB',text:`Expansión BB: bandas abiertas (BBW ${lBBW15.toFixed(1)}%)`},
         {ok:piercingLower,  tf:'15m',weight:'BB',text:(()=>{const _d=(lLow15-_candleClose)/lP15*100;return _d>=0?`✅ Precio FUERA de banda inferior: $${_candleClose.toFixed(2)} < $${lLow15.toFixed(2)} (-${_d.toFixed(2)}%)`:`⚡ Low cruzó banda inferior — close a ${Math.abs(_d).toFixed(2)}% adentro`;})()},
         {ok:bbwAboveMedian, tf:'15m',weight:'BB+',text:`BBW sobre mediana histórica — expansión real (${lBBW15.toFixed(2)}% vs med. ${_bbwMedian.toFixed(2)}%)`},
@@ -2481,7 +2527,6 @@ async function _buildSignalsCore(){
     // Los primeros 10-15min pueden ser "gap fill" antes de que el imán se active
     const _imanWindowExt=_mNow>=570&&_mNow<600; // 9:30–10:00 AM ET (IMAN strategy)
     // bbCompressed15 uses _bbwHistory declared above (before BB-A/BB-B)
-    const _bbwPct25=_bbwHistory.length?_bbwHistory[Math.floor(_bbwHistory.length*0.25)]||lBBW15:lBBW15;
     const bbCompressed15=lBBW15<_bbwPct25*1.3; // within 30% of historical low = compressed
     // Worden en el GATILLO: la sobrecompra valida que el precio regrese (efecto imán)
     const pC_above=lL15>lUp15&&bbCompressed15&&lK15>75, pC_ret=lP15<lO15;
@@ -2935,10 +2980,17 @@ async function _buildSignalsCore(){
     }
 
     // ── Badge percent steps ──────────────────────────────────────────
+    const _sq=s._scoreQuality;
     const pctBadge=s.isSetup
       ?`<span style="background:rgba(255,194,52,.35);color:#ffc234;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;">⚡ SETUP — Ruptura inminente</span>`
       :fullSignal
       ?`<span style="background:rgba(0,209,122,.35);color:#00d17a;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;">✅ COMPLETA</span>`
+      :_sq==='strong'
+      ?`<span style="background:rgba(0,209,122,.35);color:#00d17a;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;">🔥 BREAKOUT FUERTE</span>`
+      :_sq==='moderate'
+      ?`<span style="background:rgba(255,194,52,.25);color:#ffc234;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;">⚠️ BREAKOUT — VIGILAR</span>`
+      :_sq==='weak'
+      ?`<span style="background:rgba(255,77,109,.2);color:#ff4d6d;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;">📉 BREAKOUT DÉBIL</span>`
       :`<span style="background:rgba(255,194,52,.25);color:#ffc234;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;">★ ${pctLabel}% — EN FORMACIÓN</span>`;
 
     html.push(`<div class="sig-card" data-sigkey="${s.sym}_${s.code}_${s.type}" style="margin-bottom:12px;${fullSignal?`box-shadow:0 0 0 2px ${accentCol};`:''}">
@@ -2956,7 +3008,7 @@ async function _buildSignalsCore(){
           </div>
           <div style="font-size:12px;color:rgba(255,255,255,.8);font-weight:600;">${s.name}</div>
           <div data-card-price style="font-size:11px;color:rgba(255,255,255,.55);margin-top:2px;">
-            $${s.price.toFixed(2)} ${s._pctReliable!==false?`<span style="color:${s.pct>=0?'rgba(0,209,122,.9)':'rgba(255,77,109,.9)'}">(${s.pct>=0?'+':''}${s.pct.toFixed(2)}%)</span>`:`<span style="color:var(--yellow);font-size:10px;" title="% diario no confiable — Finnhub devolvió referencia incorrecta (after-hours)">⚠ % n/d</span>`} · ${s.dataLabel}${s._priceStale?` <span style="color:var(--yellow);font-size:10px;" title="Precio de Finnhub no disponible — usando último close de Schwab">⚠ precio est.</span>`:''}
+            $${s.price.toFixed(2)} ${s._pctReliable!==false?`<span style="color:${s.pct>=0?'rgba(0,209,122,.9)':'rgba(255,77,109,.9)'}">(${s.pct>=0?'+':''}${s.pct.toFixed(2)}%)</span>`:`<span style="color:var(--yellow);font-size:10px;" title="% diario no confiable — Finnhub devolvió referencia incorrecta (after-hours)">⚠ % n/d</span>`} · ${s.dataLabel}${s._wsIsToday===true?` <span style="color:var(--green);font-size:10px;" title="Precio en tiempo real — WebSocket Finnhub activo">🟢 RT</span>`:s._wsIsToday===false?` <span style="color:var(--yellow);font-size:10px;" title="Dato retrasado — WebSocket sin datos de hoy, usando última vela cerrada">🟡 delay</span>`:''}${s._priceStale?` <span style="color:var(--yellow);font-size:10px;" title="Precio de Finnhub no disponible — usando último close de Schwab">⚠ precio est.</span>`:''}
             ${s._timeET?`<span style="color:rgba(255,194,52,.8);margin-left:4px;">· ${s._timeET} ET</span>`:''}
           </div>
         </div>
@@ -4079,15 +4131,15 @@ function renderInsiderCards(){
       :`${shares} acc.`;
     return`<div style="background:rgba(255,182,193,.08);border:1px solid rgba(255,182,193,.25);border-left:3px solid ${borderColor};border-radius:var(--r);padding:10px 12px;margin-bottom:8px;">
       <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;flex-wrap:wrap;">
-        <span style="font-size:12px;font-weight:700;color:${getTickerColor(d.sym)||'var(--blue)'};">${d.sym}</span>
+        <span style="font-size:12px;font-weight:700;color:${getTickerColor(d.sym)||'var(--blue)'};">${esc(d.sym)}</span>
         <span style="font-size:11px;font-weight:700;color:${labelColor};background:${accentColor};padding:1px 7px;border-radius:10px;">${label}</span>
         <span style="font-size:11px;color:var(--text2);margin-left:auto;">
-          ${(()=>{const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));const td=`${et.getFullYear()}-${String(et.getMonth()+1).padStart(2,'0')}-${String(et.getDate()).padStart(2,'0')}`;return d.date===td?'<span style="background:rgba(255,194,52,.2);color:var(--yellow);font-weight:700;padding:1px 6px;border-radius:8px;font-size:10px;">HOY</span> ':''})()}${d.date}
+          ${(()=>{const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));const td=`${et.getFullYear()}-${String(et.getMonth()+1).padStart(2,'0')}-${String(et.getDate()).padStart(2,'0')}`;return d.date===td?'<span style="background:rgba(255,194,52,.2);color:var(--yellow);font-weight:700;padding:1px 6px;border-radius:8px;font-size:10px;">HOY</span> ':''})()}${esc(d.date)}
         </span>
       </div>
-      <div style="font-size:13px;color:var(--text);font-weight:600;margin-bottom:2px;">${d.name}</div>
+      <div style="font-size:13px;color:var(--text);font-weight:600;margin-bottom:2px;">${esc(d.name)}</div>
       <div style="font-size:11px;color:var(--text3);">
-          ${d.title}
+          ${esc(d.title)}
           ${d.txValue>0?` · <strong>$${Math.abs(d.txValue).toLocaleString('en-US',{maximumFractionDigits:0})}</strong>`
             :` · ${Math.abs(d.shares||0).toLocaleString()} acc.`}
           ${d.txPrice>0?` @ $${d.txPrice.toFixed(2)}`:''}
@@ -4776,15 +4828,15 @@ function renderInsiderTable(data){
   const txMap={P:{label:'Compra',col:'var(--green)'},S:{label:'Venta',col:'var(--red)'},A:{label:'Award',col:'var(--blue)'},M:{label:'Ejercicio',col:'var(--purple)'},F:{label:'Tax',col:'var(--text3)'},G:{label:'Gift',col:'var(--text3)'}};
   const colors={TSLA:'#cc0000',AAPL:'#888',MSFT:'#00a4ef',NVDA:'#76b900',GOOG:'#4285f4',AMD:'#ed1c24',COIN:'#0052ff',AMZN:'#ff9900',NFLX:'#e50914',META:'#1877f2',AVGO:'#cc0000',MU:'#e60012',QCOM:'#3253dc',PLTR:'#7e6bff',UBER:'#555',PYPL:'#003087',CRM:'#00a1e0',HOOD:'#00c805',UNH:'#002677',OKLO:'#00d17a',URA:'#ffc234',ORCL:'#c74634'};
   tbody.innerHTML=data.map(r=>{
-    const tx=txMap[r.type]||{label:r.type||'—',col:'var(--text2)'};
+    const tx=txMap[r.type]||{label:esc(r.type)||'—',col:'var(--text2)'};
     const c=colors[r.sym]||'var(--text3)';
     const ss=r.shares?(r.shares>0?'+':'')+r.shares.toLocaleString():'—';
     const ts=r.total?r.total.toLocaleString():'—';
     return`<tr style="border-bottom:1px solid var(--border);" onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background=''">
-      <td style="padding:7px 8px;font-family:var(--mono);font-weight:700;color:${c}">${r.sym}</td>
-      <td style="padding:7px 8px;color:var(--text)">${r.name}</td>
-      <td style="padding:7px 8px;color:var(--text2);font-size:11px">${r.title}</td>
-      <td style="padding:7px 8px;color:var(--text3);font-family:var(--mono);font-size:11px">${r.date}</td>
+      <td style="padding:7px 8px;font-family:var(--mono);font-weight:700;color:${c}">${esc(r.sym)}</td>
+      <td style="padding:7px 8px;color:var(--text)">${esc(r.name)}</td>
+      <td style="padding:7px 8px;color:var(--text2);font-size:11px">${esc(r.title)}</td>
+      <td style="padding:7px 8px;color:var(--text3);font-family:var(--mono);font-size:11px">${esc(r.date)}</td>
       <td style="padding:7px 8px;text-align:center"><span style="background:${tx.col}22;color:${tx.col};border-radius:8px;padding:2px 8px;font-size:11px;font-weight:700">${tx.label}</span></td>
       <td style="padding:7px 8px;text-align:right;font-family:var(--mono);font-weight:700;color:${r.shares>0?'var(--green)':r.shares<0?'var(--red)':'var(--text2)'}">${ss}</td>
       <td style="padding:7px 8px;text-align:right;font-family:var(--mono);color:var(--text2)">${ts}</td>
@@ -6891,7 +6943,8 @@ function _clearHistorialCfg(){
 // ── Auto-cleanup historial a las 9:00 PM ET ─────────────────────────────────
 const HIST_CLEANUP_KEY='tdp_hist_last_cleanup';
 function _scheduleHistorialCleanup(){
-  setInterval(()=>{
+  if(window._histCleanupInterval)clearInterval(window._histCleanupInterval); // B-2: guard
+  window._histCleanupInterval=setInterval(()=>{
     try{
       const etNow=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
       const hh=etNow.getHours(),mm=etNow.getMinutes();
@@ -6906,7 +6959,7 @@ function _scheduleHistorialCleanup(){
       if(modal&&modal.style.display==='flex')renderHistorialList('all');
       addLog('info','Historial','🧹 Auto-cleanup 9:00 PM ET — historial del día borrado');
     }catch(e){}
-  },60000); // chequea cada 60 segundos
+  },60000); // chequea cada 60 segundos — B-2: guardado en window._histCleanupInterval
 }
 _scheduleHistorialCleanup();
 
@@ -7116,7 +7169,7 @@ async function loadNews(ticker){
       const timeStr=dt?dt.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true,timeZone:'America/New_York'})+' ET':'';
       const dateStr=dt?dt.toLocaleDateString('es-PR',{month:'short',day:'numeric'}):'';
       const relStr=dt?_relTime(item.pubDate):'';
-      return `<div class="news-card" onclick="window.open('${item.link}','_blank')">
+      return `<div class="news-card" onclick="window.open('${esc(item.link)}','_blank')">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;">
           <div style="display:flex;gap:4px;flex-wrap:wrap;">${tickerBadges}</div>
           <div style="text-align:right;white-space:nowrap;">
@@ -7124,9 +7177,9 @@ async function loadNews(ticker){
             ${relStr?`<span style="font-size:9px;color:var(--yellow);margin-left:4px;">${relStr}</span>`:''}
           </div>
         </div>
-        <div class="news-card-title">${item.title}</div>
+        <div class="news-card-title">${esc(item.title)}</div>
         <div class="news-card-source" style="${item._fromFinnhub?'color:var(--blue,#60a5fa);':''}">
-          ${item._fromFinnhub?'':'📰 '}${item.source}
+          ${item._fromFinnhub?'':'📰 '}${esc(item.source)}
         </div>
       </div>`;
     }).join('');
@@ -7223,14 +7276,13 @@ async function _scanNewsForAlerts(){
 // Auto-load ALL news on init
 function initNews(){
   setTimeout(()=>loadNews('ALL'),2000);
-  // Después de cargar noticias, escanear para alertas de Telegram
   setTimeout(()=>_scanNewsForAlerts(),4000);
   // Refresh independiente del masterTick — funciona en fin de semana también
-  setInterval(()=>{
+  if(window._newsRefreshInterval)clearInterval(window._newsRefreshInterval); // B-2: guard
+  window._newsRefreshInterval=setInterval(()=>{
     if(!_newsActive)return;
     _newsCache={};
     loadNews(_newsActive);
-    // Escanear para nuevas alertas después del refresh
     setTimeout(()=>_scanNewsForAlerts(),3000);
   },15*60*1000);
 }
@@ -7720,8 +7772,15 @@ function exportTDPConfig(unlockHint=''){
     _viewer_unlock_hint:unlockHint,
     data:{}
   };
+  // A-4 FIX: nunca exportar secretos de API en el .tdpconfig.
+  // El archivo puede terminar en un PC compartido (modo viewer) o guardado en la nube.
+  // Cada PC configura sus propias API keys localmente desde ⚙️ → APIs.
+  const _SENSITIVE=['schwab_client_id','schwab_client_secret','schwab_access_token',
+    'schwab_refresh_token','finnhub_key','levetf_apikey','ms_fh_key',
+    'anthropic_key','tg_token','telegram_bot_token','app_pin'];
   let count=0;
   allKeys.forEach(k=>{
+    if(_SENSITIVE.some(s=>k.toLowerCase().includes(s.toLowerCase())))return;
     const v=localStorage.getItem(k);
     if(v!==null){config.data[k]=v;count++;}
   });
@@ -7744,7 +7803,8 @@ function exportTDPConfig(unlockHint=''){
     '2. Haz clic en el botón 📥 "Importar config" del header\n'+
     '3. Selecciona el archivo .tdpconfig que acabas de descargar\n'+
     '4. La plataforma cargará todos los datos en modo Solo Lectura\n\n'+
-    '⚠️ Guarda el .tdpconfig de forma segura — contiene tus API keys.'
+    '🔒 Este archivo NO contiene tus API keys (Schwab, Finnhub, Telegram).\n'+
+    'Configúralas aparte en cada PC desde ⚙️ → APIs y ⚙️ → Telegram.'
   ),200);
 }
 
@@ -7819,11 +7879,10 @@ function promptViewerUnlock(){
   if(!_savedHash){
     // No hay hash configurado — usar contraseña maestra hardcoded de emergencia
     // (el admin debe configurar una contraseña al exportar; esto es el fallback)
-    if(pw==='TDP2026'){
-      _disableViewerMode();
-    }else{
-      alert('❌ Contraseña incorrecta.');
-    }
+    // A-3: contraseña de emergencia hardcodeada eliminada (era visible en el HTML).
+    // Para desbloquear, configura un PIN real desde ⚙️ → PIN en la PC principal
+    // y expórtalo con el .tdpconfig. Sin PIN configurado, no hay desbloqueo remoto.
+    alert('❌ No hay contraseña de desbloqueo configurada.\n\nConfigura un PIN desde ⚙️ → PIN en la PC principal y exporta el .tdpconfig nuevamente.');
     return;
   }
   // Comparar hash

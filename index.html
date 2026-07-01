@@ -196,13 +196,6 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
     style="background:rgba(255,77,109,.15);border:1px solid rgba(255,77,109,.5);border-radius:50%;width:34px;height:34px;color:#ff4d6d;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;flex-shrink:0;">
     ⚙️
   </button>
-
-  <!-- Export Config — solo visible en modo admin (oculto en modo viewer) -->
-  <button id="exportCfgBtn" onclick="exportTDPConfig()"
-    title="Exportar configuración para otra PC"
-    style="background:rgba(0,209,122,.12);border:1px solid rgba(0,209,122,.4);border-radius:50%;width:34px;height:34px;color:var(--green);font-size:15px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;flex-shrink:0;">
-    📤
-  </button>
 </header>
 
 <!-- MAIN GRID -->
@@ -3203,7 +3196,7 @@ function closeConfigModal(){
   document.getElementById('configModal').style.display='none';
 }
 function switchCfgTab(tab){
-  ['apis','telegram','historial','pin','tickers','estrategias','noticias'].forEach(t=>{
+  ['apis','telegram','historial','pin','tickers','estrategias','noticias','sync'].forEach(t=>{
     document.getElementById('cfgTab-'+t).classList.toggle('active',t===tab);
     document.getElementById('cfgPanel-'+t).style.display=t===tab?'block':'none';
   });
@@ -7697,14 +7690,20 @@ function _getTdpDynamicKeys(){
   return keys;
 }
 
-function exportTDPConfig(){
+function exportTDPConfigFromModal(){
+  // Leer la pista de contraseña del input del modal antes de exportar
+  const hint=(document.getElementById('syncUnlockHint')||{}).value||'';
+  exportTDPConfig(hint);
+}
+
+function exportTDPConfig(unlockHint=''){
   const allKeys=[..._TDP_EXPORT_KEYS,..._getTdpDynamicKeys()];
   const config={
     _tdp_version:'1.0',
     _exported_at:new Date().toISOString(),
     _exported_from:'TradeDeskPro',
-    viewer_mode:true,          // al importar en otra PC, activa solo lectura
-    _viewer_unlock_hint:'',    // el admin puede poner una pista de contraseña
+    viewer_mode:true,
+    _viewer_unlock_hint:unlockHint,
     data:{}
   };
   let count=0;
@@ -7779,24 +7778,14 @@ function importTDPConfig(input){
 function applyViewerMode(){
   const isViewer=localStorage.getItem('tdp_viewer_mode')==='1';
   if(!isViewer)return;
-  // Mostrar banner
+  // Mostrar banner con botón de importar nueva config
   const banner=document.getElementById('viewerBanner');
   if(banner)banner.style.display='block';
   // Ocultar botones de admin
-  ['configBtn','exportCfgBtn','testBtn'].forEach(id=>{
+  ['configBtn','testBtn'].forEach(id=>{
     const el=document.getElementById(id);
     if(el)el.style.display='none';
   });
-  // Agregar botón de importar config en el header (para que el viewer pueda re-importar)
-  const header=document.querySelector('header');
-  if(header){
-    const btn=document.createElement('button');
-    btn.title='Importar nueva configuración';
-    btn.innerHTML='📥';
-    btn.style.cssText='background:rgba(59,169,255,.12);border:1px solid rgba(59,169,255,.4);border-radius:50%;width:34px;height:34px;color:var(--blue);font-size:15px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;flex-shrink:0;';
-    btn.onclick=()=>document.getElementById('importCfgInput').click();
-    header.appendChild(btn);
-  }
   // Bloquear openConfigModal para que no abra aunque alguien llame la función directamente
   window._originalOpenConfigModal=window.openConfigModal;
   window.openConfigModal=function(){
@@ -7840,16 +7829,6 @@ function _disableViewerMode(){
 async function init(){
   // Aplicar modo viewer ANTES de cualquier otra cosa — oculta los controles de edición
   applyViewerMode();
-  // En modo admin, agregar el botón de importar config también (para cargar desde cero)
-  if(localStorage.getItem('tdp_viewer_mode')!=='1'){
-    const _importBtn=document.createElement('button');
-    _importBtn.title='Importar configuración desde otra PC';
-    _importBtn.innerHTML='📥';
-    _importBtn.style.cssText='background:rgba(59,169,255,.12);border:1px solid rgba(59,169,255,.4);border-radius:50%;width:34px;height:34px;color:var(--blue);font-size:15px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;flex-shrink:0;';
-    _importBtn.onclick=()=>document.getElementById('importCfgInput').click();
-    const _exportBtn=document.getElementById('exportCfgBtn');
-    if(_exportBtn)_exportBtn.parentNode.insertBefore(_importBtn,_exportBtn);
-  }
   // PIN: solo establecer default si no hay absolutamente ninguno guardado
   // NUNCA sobreescribir un PIN existente (incluyendo PINs legacy de v3)
   const _existingPin=localStorage.getItem('app_pin');
@@ -8930,6 +8909,7 @@ async function updateFuturesSemaphore(){
       <button class="cfg-tab"        id="cfgTab-tickers"   onclick="switchCfgTab('tickers')"  >🎛️ Tickers</button>
       <button class="cfg-tab"        id="cfgTab-estrategias" onclick="switchCfgTab('estrategias')">📊 Estrategias</button>
       <button class="cfg-tab"        id="cfgTab-noticias"  onclick="switchCfgTab('noticias')" >📰 Noticias</button>
+      <button class="cfg-tab"        id="cfgTab-sync"      onclick="switchCfgTab('sync')"     >🔄 Sync</button>
     </div>
 
     <!-- Body (scrollable) -->
@@ -9216,6 +9196,58 @@ async function updateFuturesSemaphore(){
           <div id="newsFilterResult" style="font-size:11px;color:var(--green);min-height:16px;"></div>
         </div>
       </div><!-- /cfgPanel-noticias -->
+
+      <!-- ── TAB: SYNC ─────────────────────────────────────────── -->
+      <div id="cfgPanel-sync" style="display:none;">
+        <div class="cfg-section-title">Exportar / Importar Configuración</div>
+        <div style="font-size:12px;color:var(--text3);margin-bottom:20px;line-height:1.6;">
+          Exporta toda tu configuración (APIs, tickers, niveles, Telegram) a un archivo <strong style="color:#fff;">.tdpconfig</strong>
+          que puedes cargar en otra PC para verla en <strong style="color:var(--blue);">modo Solo Lectura</strong>.
+          Las señales y alertas de Telegram funcionan igual en la segunda PC — solo la edición está bloqueada.
+        </div>
+
+        <!-- EXPORT -->
+        <div style="background:var(--bg4);border:1px solid var(--border);border-radius:var(--r);padding:16px;margin-bottom:16px;">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+            <span style="font-size:22px;">📤</span>
+            <div>
+              <div style="font-size:13px;font-weight:700;color:#fff;">Exportar configuración</div>
+              <div style="font-size:11px;color:var(--text3);">Genera un archivo .tdpconfig con todos tus ajustes actuales</div>
+            </div>
+          </div>
+          <div style="margin-bottom:10px;">
+            <label style="font-size:11px;color:var(--text3);display:block;margin-bottom:4px;">Pista de contraseña (opcional — aparece al desbloquear en la segunda PC)</label>
+            <input id="syncUnlockHint" type="text" placeholder="Ej: mi contraseña favorita..."
+              style="width:100%;box-sizing:border-box;background:var(--bg3);border:1px solid var(--border2);
+              border-radius:var(--r);color:var(--text);padding:7px 10px;font-size:12px;outline:none;">
+          </div>
+          <button onclick="exportTDPConfigFromModal()"
+            style="background:var(--green);color:#001a0e;border:none;border-radius:var(--r);
+            padding:9px 20px;font-size:13px;font-weight:700;cursor:pointer;width:100%;">
+            📤 Descargar .tdpconfig
+          </button>
+        </div>
+
+        <!-- IMPORT -->
+        <div style="background:var(--bg4);border:1px solid var(--border);border-radius:var(--r);padding:16px;">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+            <span style="font-size:22px;">📥</span>
+            <div>
+              <div style="font-size:13px;font-weight:700;color:#fff;">Importar configuración</div>
+              <div style="font-size:11px;color:var(--text3);">Restaura un .tdpconfig guardado (reemplaza la config actual)</div>
+            </div>
+          </div>
+          <button onclick="document.getElementById('importCfgInput').click()"
+            style="background:var(--blue);color:#fff;border:none;border-radius:var(--r);
+            padding:9px 20px;font-size:13px;font-weight:700;cursor:pointer;width:100%;">
+            📥 Seleccionar archivo .tdpconfig
+          </button>
+          <div style="margin-top:10px;font-size:11px;color:var(--yellow);line-height:1.5;">
+            ⚠️ Importar en esta misma PC reemplazará tu configuración actual y recargará la página.
+            Para la <strong>segunda PC</strong>: copia el mismo <code>TradeDeskPro.html</code> y abre este mismo panel para importar.
+          </div>
+        </div>
+      </div><!-- /cfgPanel-sync -->
 
     </div><!-- /body -->
   </div>

@@ -7515,8 +7515,19 @@ async function loadIndicesPanel(force=false){
   if(allFresh&&!force){renderIndicesPanel();return;}
 
   _idxLoading=true;
+  // Timeout de seguridad: si algo falla silenciosamente, liberar el lock en 30s
+  const _safetyTimer=setTimeout(()=>{
+    if(_idxLoading){
+      _idxLoading=false;
+      addLog('warn','Índices','Timeout de seguridad — lock liberado tras 30s');
+      renderIndicesPanel();
+    }
+  },30000);
+
   const btn=document.getElementById('idxRefreshBtn');
   if(btn){btn.textContent='⟳…';btn.style.opacity='.6';}
+
+  try{
 
   // ── FASE 1: Finnhub primero (precios reales) ─────────────────────────────
   // Independiente de Schwab — siempre corre aunque Schwab no esté disponible
@@ -7590,8 +7601,17 @@ async function loadIndicesPanel(force=false){
   }
 
   _idxLoading=false;
+  clearTimeout(_safetyTimer);
   if(btn){btn.textContent='⟳ Actualizar';btn.style.opacity='1';}
   renderIndicesPanel();
+  }catch(e){
+    addLog('error','Índices',`Error cargando índices: ${e.message}`);
+    if(area)area.innerHTML='<div class="idx-loading" style="color:var(--red);">Error cargando índices — haz clic en ⟳ para reintentar</div>';
+  }finally{
+    _idxLoading=false;
+    clearTimeout(_safetyTimer);
+    if(btn){btn.textContent='⟳ Actualizar';btn.style.opacity='1';}
+  }
 }
 
 function renderIndicesPanel(){
@@ -7758,36 +7778,100 @@ function _getTdpDynamicKeys(){
   return keys;
 }
 
-function exportTDPConfigFromModal(){
-  // Leer la pista de contraseña del input del modal antes de exportar
-  const hint=(document.getElementById('syncUnlockHint')||{}).value||'';
-  exportTDPConfig(hint);
+// ── Cifrado AES-GCM + PBKDF2 para keys sensibles en el .tdpconfig ────────────
+// El usuario elige una contraseña al exportar. Las keys sensibles se cifran con
+// AES-256-GCM derivando la llave con PBKDF2 (100k iteraciones, SHA-256).
+// En la segunda PC, al importar se pide la contraseña para descifrar.
+// Las claves NO sensibles (tickers, niveles, etc.) viajan en texto plano como antes.
+
+const _SENSITIVE_KEYS=['schwab_client_id','schwab_client_secret','schwab_access_token',
+  'schwab_refresh_token','schwab_token_expiry','schwab_refresh_expiry',
+  'finnhub_key','levetf_apikey','ms_fh_key',
+  'tg_token','tg_chat_id','tg_enabled','telegram_bot_token','telegram_chat_id',
+  'anthropic_key','app_pin'];
+
+function _isSensitive(key){
+  return _SENSITIVE_KEYS.some(s=>key.toLowerCase()===s.toLowerCase());
 }
 
-function exportTDPConfig(unlockHint=''){
+async function _deriveKey(password, salt){
+  const enc=new TextEncoder();
+  const keyMaterial=await crypto.subtle.importKey('raw',enc.encode(password),
+    {name:'PBKDF2'},false,['deriveKey']);
+  return crypto.subtle.deriveKey(
+    {name:'PBKDF2',salt,iterations:100000,hash:'SHA-256'},
+    keyMaterial,{name:'AES-GCM',length:256},false,['encrypt','decrypt']
+  );
+}
+
+async function _encryptData(data, password){
+  const salt=crypto.getRandomValues(new Uint8Array(16));
+  const iv=crypto.getRandomValues(new Uint8Array(12));
+  const key=await _deriveKey(password, salt);
+  const enc=new TextEncoder();
+  const ct=await crypto.subtle.encrypt({name:'AES-GCM',iv},key,enc.encode(JSON.stringify(data)));
+  // Serializar salt + iv + ciphertext como base64
+  const buf=new Uint8Array(salt.length+iv.length+ct.byteLength);
+  buf.set(salt,0);buf.set(iv,16);buf.set(new Uint8Array(ct),28);
+  return btoa(String.fromCharCode(...buf));
+}
+
+async function _decryptData(b64, password){
+  const buf=new Uint8Array(atob(b64).split('').map(c=>c.charCodeAt(0)));
+  const salt=buf.slice(0,16),iv=buf.slice(16,28),ct=buf.slice(28);
+  const key=await _deriveKey(password,salt);
+  const dec=await crypto.subtle.decrypt({name:'AES-GCM',iv},key,ct);
+  return JSON.parse(new TextDecoder().decode(dec));
+}
+
+function exportTDPConfigFromModal(){
+  const hint=(document.getElementById('syncUnlockHint')||{}).value||'';
+  // Pedir contraseña para cifrar las API keys
+  const pw=prompt(
+    '🔐 Elige una contraseña para proteger tus API keys en el archivo de exportación.\n\n'+
+    'La segunda PC necesitará esta contraseña para descifrarlas al importar.\n\n'+
+    '⚠️ No la pierdas — sin ella las keys no se pueden recuperar del archivo.'
+  );
+  if(!pw){alert('Export cancelado — se necesita una contraseña para cifrar las API keys.');return;}
+  const pw2=prompt('🔐 Confirma la contraseña:');
+  if(pw!==pw2){alert('❌ Las contraseñas no coinciden. Intenta de nuevo.');return;}
+  exportTDPConfig(hint, pw);
+}
+
+async function exportTDPConfig(unlockHint='', encPassword=''){
   const allKeys=[..._TDP_EXPORT_KEYS,..._getTdpDynamicKeys()];
+  const plainData={};   // claves no sensibles — texto plano
+  const secretData={};  // claves sensibles — se cifran
+  let plainCount=0, secretCount=0;
+
+  allKeys.forEach(k=>{
+    const v=localStorage.getItem(k);
+    if(v===null)return;
+    if(_isSensitive(k)){secretData[k]=v;secretCount++;}
+    else{plainData[k]=v;plainCount++;}
+  });
+
   const config={
-    _tdp_version:'1.0',
+    _tdp_version:'2.0',
     _exported_at:new Date().toISOString(),
     _exported_from:'TradeDeskPro',
     viewer_mode:true,
     _viewer_unlock_hint:unlockHint,
-    data:{}
+    data:plainData,
+    secrets_encrypted:null,  // se llena abajo si hay contraseña
+    secrets_count:secretCount
   };
-  // A-4 FIX: nunca exportar secretos de API en el .tdpconfig.
-  // El archivo puede terminar en un PC compartido (modo viewer) o guardado en la nube.
-  // Cada PC configura sus propias API keys localmente desde ⚙️ → APIs.
-  const _SENSITIVE=['schwab_client_id','schwab_client_secret','schwab_access_token',
-    'schwab_refresh_token','finnhub_key','levetf_apikey','ms_fh_key',
-    'anthropic_key','tg_token','telegram_bot_token','app_pin'];
-  let count=0;
-  allKeys.forEach(k=>{
-    if(_SENSITIVE.some(s=>k.toLowerCase().includes(s.toLowerCase())))return;
-    const v=localStorage.getItem(k);
-    if(v!==null){config.data[k]=v;count++;}
-  });
-  // No exportar el PIN — cada instancia tiene el suyo propio
-  // (el viewer no necesita PIN porque no puede abrir Config)
+
+  // Cifrar las keys sensibles con AES-GCM
+  if(encPassword&&secretCount>0){
+    try{
+      config.secrets_encrypted=await _encryptData(secretData, encPassword);
+      addLog('warn','Export',`🔐 ${secretCount} API keys cifradas con AES-256-GCM`);
+    }catch(e){
+      alert('❌ Error al cifrar las API keys: '+e.message);return;
+    }
+  }
+
   const json=JSON.stringify(config,null,2);
   const blob=new Blob([json],{type:'application/json'});
   const url=URL.createObjectURL(blob);
@@ -7796,17 +7880,18 @@ function exportTDPConfig(unlockHint=''){
   a.href=url;a.download=`TradeDeskPro_config_${dt}.tdpconfig`;
   document.body.appendChild(a);a.click();
   document.body.removeChild(a);URL.revokeObjectURL(url);
-  addLog('warn','Export',`✅ Config exportada: ${count} claves · archivo TradeDeskPro_config_${dt}.tdpconfig`);
-  // Mostrar instrucciones
+
+  addLog('warn','Export',`✅ Config exportada: ${plainCount} claves + ${secretCount} keys cifradas`);
   setTimeout(()=>alert(
     '✅ Configuración exportada correctamente.\n\n'+
+    `📊 ${plainCount} ajustes + ${secretCount} API keys cifradas con AES-256\n\n`+
     '📋 Instrucciones para la otra PC:\n'+
-    '1. Abre TradeDeskPro.html en esa PC\n'+
-    '2. Haz clic en el botón 📥 "Importar config" del header\n'+
-    '3. Selecciona el archivo .tdpconfig que acabas de descargar\n'+
-    '4. La plataforma cargará todos los datos en modo Solo Lectura\n\n'+
-    '🔒 Este archivo NO contiene tus API keys (Schwab, Finnhub, Telegram).\n'+
-    'Configúralas aparte en cada PC desde ⚙️ → APIs y ⚙️ → Telegram.'
+    '1. Copia el mismo TradeDeskPro.html a esa PC\n'+
+    '2. Abre ⚙️ → Sync → Importar\n'+
+    '3. Selecciona el archivo .tdpconfig\n'+
+    '4. Ingresa la contraseña que acabas de crear\n'+
+    '5. Todo se configura automáticamente en modo Solo Lectura\n\n'+
+    '🔐 Guarda la contraseña — sin ella las API keys no se pueden recuperar.'
   ),200);
 }
 
@@ -7814,34 +7899,57 @@ function importTDPConfig(input){
   const file=input.files[0];
   if(!file)return;
   const reader=new FileReader();
-  reader.onload=function(e){
+  reader.onload=async function(e){
     try{
       const config=JSON.parse(e.target.result);
       if(!config._tdp_version||!config.data){
         alert('❌ Archivo inválido — no es un archivo .tdpconfig de TradeDeskPro.');
         return;
       }
-      // Aplicar todas las claves al localStorage
+
+      // Aplicar claves no sensibles
       let count=0;
       Object.entries(config.data).forEach(([k,v])=>{
         try{localStorage.setItem(k,v);count++;}catch(err){}
       });
-      // Activar modo viewer si el archivo lo indica
-      if(config.viewer_mode){
-        localStorage.setItem('tdp_viewer_mode','1');
-        // Guardar hint de desbloqueo si existe
-        if(config._viewer_unlock_hint){
-          localStorage.setItem('tdp_viewer_hint',config._viewer_unlock_hint);
+
+      // Descifrar y aplicar API keys si existen
+      let secretCount=0;
+      if(config.secrets_encrypted){
+        const pw=prompt(
+          `🔐 Este archivo contiene ${config.secrets_count||'?'} API keys cifradas.\n\n`+
+          'Ingresa la contraseña con la que se exportó para descifrarlas:'
+        );
+        if(pw){
+          try{
+            const secrets=await _decryptData(config.secrets_encrypted, pw);
+            Object.entries(secrets).forEach(([k,v])=>{
+              try{localStorage.setItem(k,v);secretCount++;}catch(err){}
+            });
+            addLog('warn','Import',`🔐 ${secretCount} API keys descifradas e importadas correctamente`);
+          }catch(err){
+            alert('❌ Contraseña incorrecta o archivo corrupto — las API keys NO se importaron.\n\nLos demás ajustes sí se aplicaron. Puedes configurar las keys manualmente desde ⚙️ → APIs.');
+          }
+        }else{
+          alert('⚠️ Sin contraseña — las API keys NO se importaron.\nConfigúralas manualmente desde ⚙️ → APIs y ⚙️ → Telegram.');
         }
       }
-      addLog('warn','Import',`✅ Config importada: ${count} claves restauradas · modo ${config.viewer_mode?'Solo Lectura':'Completo'}`);
+
+      // Activar modo viewer
+      if(config.viewer_mode){
+        localStorage.setItem('tdp_viewer_mode','1');
+        if(config._viewer_unlock_hint)
+          localStorage.setItem('tdp_viewer_hint',config._viewer_unlock_hint);
+      }
+
+      addLog('warn','Import',`✅ Config importada: ${count} ajustes + ${secretCount} API keys`);
       alert(
         `✅ Configuración importada correctamente.\n\n`+
-        `📊 ${count} claves restauradas\n`+
-        `🔒 Modo: ${config.viewer_mode?'Solo Lectura (viewer)':'Completo'}\n\n`+
+        `📊 ${count} ajustes de configuración\n`+
+        `🔐 ${secretCount} API keys descifradas\n`+
+        `🔒 Modo: ${config.viewer_mode?'Solo Lectura':'Completo'}\n\n`+
         `La página se recargará para aplicar los cambios.`
       );
-      // Limpiar el input para permitir reimportación
       input.value='';
       setTimeout(()=>location.reload(),500);
     }catch(err){
@@ -9299,8 +9407,11 @@ async function updateFuturesSemaphore(){
           <button onclick="exportTDPConfigFromModal()"
             style="background:var(--green);color:#001a0e;border:none;border-radius:var(--r);
             padding:9px 20px;font-size:13px;font-weight:700;cursor:pointer;width:100%;">
-            📤 Descargar .tdpconfig
+            🔐 Exportar con contraseña → .tdpconfig
           </button>
+          <div style="margin-top:8px;font-size:11px;color:var(--text3);line-height:1.5;">
+            Se te pedirá una contraseña. Las API keys (Finnhub, Schwab, Telegram) se cifran con <strong style="color:#fff;">AES-256</strong> antes de guardarse en el archivo. La segunda PC necesita esa contraseña para descifrarlas al importar.
+          </div>
         </div>
 
         <!-- IMPORT -->

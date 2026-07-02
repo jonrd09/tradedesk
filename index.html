@@ -2053,14 +2053,16 @@ async function _buildSignalsCore(){
       }
       return false;
     })();
+    // _wsIsToday: precio en tiempo real del WS disponible para hoy — debe declararse
+    // AQUÍ, antes de _bbSessionOk y antes de meta (ambos la usan)
+    const _wsC=_wsSessionCandle[sym];
+    const _etNow15d=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+    const _wsIsToday=_wsC&&_wsC.date===_etNow15d.toDateString()&&_wsC.close>0;
     // En premarket (antes de 9:30) o si no hay vela real → bloquear BB
     // EXCEPCIÓN CRÍTICA: si el WebSocket de Finnhub tiene precio confirmado de hoy
     // (_wsIsToday=true), la vela en formación ES una vela real aunque todavía no
     // haya cerrado. Sin esto, BB-A/BB-B/BB-C/BB-D se bloquean entre 9:30–9:44 AM
-    // — exactamente la ventana donde ocurren los breakouts más grandes del día
-    // (como PLTR +5% o META -3% en la primera vela de apertura).
-    // _wsIsToday garantiza que el precio viene del WebSocket en tiempo real, no
-    // de un dato viejo de Schwab. Es la combinación correcta para la apertura.
+    // — exactamente la ventana donde ocurren los breakouts más grandes del día.
     const _bbSessionOk=_hasRealSessionCandle||_wsIsToday||_testMode||_debugMode;
     const stoch15=stochastic(h15,l15,c15,12,3);
     const lK15=stoch15.k.slice(-1)[0]||50;
@@ -2092,15 +2094,8 @@ async function _buildSignalsCore(){
 
     // Para el gráfico miniatura, excluir la última vela si es sintética (evita caída abrupta)
     const _c15chart=c15.length>30?c15.slice(-31,-1):c15.slice(-30);
-    // H-06: Flag if price is stale (no live Finnhub price for this ticker)
+    // _wsC, _etNow15d y _wsIsToday ya declaradas antes de _bbSessionOk
     const _priceIsLive=_liveOk;
-    if(!_priceIsLive&&!_testMode){
-      addLog('warn','Señales',`${sym} → precio Finnhub no disponible — señal usa último close 1H de Schwab ($${lP1h.toFixed(2)})`);
-    }
-    // _wsIsToday debe calcularse ANTES de meta (se referencia en el objeto)
-    const _wsC=_wsSessionCandle[sym];
-    const _etNow15d=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
-    const _wsIsToday=_wsC&&_wsC.date===_etNow15d.toDateString()&&_wsC.close>0;
     const meta={sym,price:realPrice,pct:realPct,_pctReliable,dataLabel:_priceIsLive?'📡 Schwab+Finnhub':'📡 Schwab',
       _priceStale:!_priceIsLive,
       _wsIsToday, // M-4: badge de latencia — true = dato en tiempo real WS, false = última vela cerrada

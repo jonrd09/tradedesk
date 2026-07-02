@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- TradeDeskPro v5 | build:20260629_152427 | _bbwHistory fix -->
+<!-- TradeDeskPro v5 | build:20260702_fixes | B1:_hasRealSessionCandle B2:Worden_stoch B3:bbwAccel B4:SETUP_prox B5:stochCallOk B6:volOverLine -->
 <html lang="es">
 <head>
 <meta charset="UTF-8">
@@ -1640,7 +1640,9 @@ function closes(d){return d&&d.c?d.c:(Array.isArray(d)?d:[]);}
 function highs(d){return d&&d.h?d.h:closes(d);}
 function lows(d){return d&&d.l?d.l:closes(d);}
 function opens(d){return d&&d.o?d.o:closes(d);}
-// Stochastic %K (Worden Stochastics style: 12,%K 3)
+// FIX B2 (2026-07-02): Worden Stochastics usa %K RÁPIDO (sin suavizar) y %D = SMA(%K,3).
+// El código anterior aplicaba SMA doble (a %K y luego a %D), produciendo un estocástico
+// lento que no refleja los cruces reales que TC2000/Worden muestra. Corregido.
 function stochastic(highs,lows,closes,kPeriod=12,dPeriod=3){
   const rawK=[];
   for(let i=kPeriod-1;i<closes.length;i++){
@@ -1648,11 +1650,9 @@ function stochastic(highs,lows,closes,kPeriod=12,dPeriod=3){
     const ll=Math.min(...lows.slice(i-kPeriod+1,i+1));
     rawK.push(hh===ll?50:(closes[i]-ll)/(hh-ll)*100);
   }
-  // Smooth %K with dPeriod SMA
-  const kSmooth=sma(rawK,dPeriod).filter(v=>v!=null);
-  // %D = SMA of %K
-  const d=sma(kSmooth,dPeriod).filter(v=>v!=null);
-  return{k:kSmooth,d};
+  // Worden: %K = rawK (fast, sin suavizar), %D = SMA(rawK, dPeriod)
+  const d=sma(rawK,dPeriod).filter(v=>v!=null);
+  return{k:rawK,d};
 }
 // Trendline: linear regression over pivot highs (for bearish) or pivot lows (for bullish)
 // Returns {slope, intercept, pivotCount} using last N bars
@@ -2037,21 +2037,15 @@ async function _buildSignalsCore(){
       d.setHours(9,30,0,0);
       return d.getTime();
     })();
+    // FIX B1 (2026-07-02): ohlc15 es formato columnar {c,h,l,o,v,_lastDatetime}
+    // — NO es un array de objetos. Array.isArray(ohlc15) siempre devolvía false,
+    // bloqueando TODAS las señales BB incluso con datos frescos de hoy.
+    // Corrección: usar _lastDatetime adjuntado por fetchSchwabCandles.
     const _hasRealSessionCandle=(()=>{
-      if(!ohlc15||!Array.isArray(ohlc15)||!ohlc15.length)return false;
-      const lastIdx=ohlc15.length-1;
-      // Buscar entre las últimas 10 velas (o menos si el array es corto)
-      for(let i=lastIdx;i>=Math.max(0,lastIdx-10);i--){
-        const candle=ohlc15[i];
-        if(!candle||!candle.datetime)continue;
-        const candleEt=new Date(new Date(candle.datetime).toLocaleString('en-US',{timeZone:'America/New_York'}));
-        // Vela de hoy ET y después de las 9:30 AM
-        if(candleEt.toDateString()===_todayStrET&&new Date(candle.datetime).getTime()>=_sessionOpenMs){
-          // La vela sintética inyectada tiene el flag _synthetic:true en el objeto individual
-          if(!candle._synthetic)return true;
-        }
-      }
-      return false;
+      if(!ohlc15||!ohlc15._lastDatetime)return false;
+      const lastDt=new Date(ohlc15._lastDatetime);
+      const lastEt=new Date(lastDt.toLocaleString('en-US',{timeZone:'America/New_York'}));
+      return lastEt.toDateString()===_todayStrET&&lastEt.getTime()>=_sessionOpenMs;
     })();
     // _wsIsToday: precio en tiempo real del WS disponible para hoy — debe declararse
     // AQUÍ, antes de _bbSessionOk y antes de meta (ambos la usan)
@@ -2129,7 +2123,8 @@ async function _buildSignalsCore(){
     const bbwRising=lBBW15>lBBW15_1+0.05; // meaningful BBW rise
     const lVol15=vol15[vol15.length-1]||0;
     const avgVol15_10=vol15.length>=10?vol15.slice(-10).reduce((a,b)=>a+b,0)/10:0;
-    const volActive15=avgVol15_10>0?lVol15>avgVol15_10*1.1:true;
+    // FIX B6b: volActive15 para SETUP/AVISO — subido de 1.1x a 1.2x
+    const volActive15=avgVol15_10>0?lVol15>avgVol15_10*1.2:true;
 
     // ── FILTROS COMUNES — sin estos es movimiento falso ──────────────────────
     // F1: BB expandiéndose en 15min — volatilidad real activa (OBLIGATORIO)
@@ -2137,9 +2132,13 @@ async function _buildSignalsCore(){
     // F2: Confirmación dirección en 1H
     const align1hBull=lP1h>lMA20_1h&&upSlope1h;
     const align1hBear=lP1h<lMA20_1h&&loSlope1h;
-    // F3: Stochastics 15min
-    const stochCallOk=lK15>lD15&&lK15>30&&lK15<85;
-    const stochPutOk=lK15<lD15&&lK15>15&&lK15<70;
+    // FIX B5 (2026-07-02): el cap <85 bloqueaba breakouts de momentum fuerte
+    // (stoch >85 = aceleración, no techo). Eliminado. Añadido cruce de 30 desde abajo
+    // (pK15 < 30 && lK15 >= 30) como señal de entrada adicional para rebotes.
+    const stochCallOk=lK15>lD15&&lK15>25; // sin cap superior
+    const stochCallCross=pK15<30&&lK15>=30; // cruce alcista desde sobreventa
+    const stochPutOk=lK15<lD15&&lK15<75&&lK15>10; // cap superior sube a 75
+    const stochPutCross=pK15>70&&lK15<=70; // cruce bajista desde sobrecompra
     // F4: Volumen activo
     const volLabel=avgVol15_10>0?` (${(lVol15/avgVol15_10*100).toFixed(0)}% del promedio)`:'';
 
@@ -2196,9 +2195,10 @@ async function _buildSignalsCore(){
     const wickTestingUpper=distHighToUpper<=0.05&&_candleClose<lUp15;
     const wickTestingLower=distLowToLower<=0.05&&_candleClose>lLow15;
 
-    // Nivel 3: Pre-ruptura — close dentro del 0.3% (el SETUP original mejorado)
-    const nearUpper=distClosToUpper>=0&&distClosToUpper<0.3;
-    const nearLower=distClosToLower>=0&&distClosToLower<0.3;
+    // FIX B4 (2026-07-02): 0.3% era tan estrecho que la alerta llegaba demasiado tarde.
+    // Ampliado a 0.5% — llega con tiempo suficiente para entrar antes de la ruptura.
+    const nearUpper=distClosToUpper>=0&&distClosToUpper<0.5;
+    const nearLower=distClosToLower>=0&&distClosToLower<0.5;
 
     // Condiciones base de los 3 niveles de alerta pre-ruptura.
     // SIMPLIFICADO: solo BBW expandiendo + precio del lado correcto de MA20.
@@ -2211,7 +2211,9 @@ async function _buildSignalsCore(){
 
     // Aceleración del BBW — qué tan rápido se está expandiendo
     // Si lBBW15 creció >0.15% en las últimas 2 velas, la expansión está acelerando
-    const bbwAccelerating=(lBBW15-lBBW15_2)>0.15;
+    // FIX B3 (2026-07-02): 0.15% era demasiado estricto — GOOG/META/PLTR
+    // expanden normalmente 0.05-0.10% por vela. Bajado a 0.05%.
+    const bbwAccelerating=(lBBW15-lBBW15_2)>0.05;
 
     // ── Nivel 2: INTENTO DE RUPTURA ──────────────────────────────────────────
     // Tiene prioridad sobre los otros niveles — si hay intento, no mostrar nivel 1
@@ -2228,24 +2230,24 @@ async function _buildSignalsCore(){
         {ok:bbwRising,        tf:'15m',text:`BBW expandiéndose: ${lBBW15.toFixed(2)}% ${bbwAccelerating?'⚡ ACELERANDO':'> '+lBBW15_1.toFixed(2)+'%'}`},
         {ok:intentoBull?lP15>lMA20_15:lP15<lMA20_15, tf:'15m',text:`MA20 alineada: $${lMA20_15.toFixed(2)}`},
         {ok:intentoBull?align1hBull:align1hBear, tf:'1H',text:`1H confirma dirección`},
-        {ok:stochCallOk||stochPutOk, tf:'15m',text:`Stochastics apoyando (%K ${lK15.toFixed(0)})`},
+        {ok:stochCallOk||stochPutOk||stochCallCross||stochPutCross, tf:'15m',text:`Stochastics${(stochCallCross||stochPutCross)?` 🔔 CRUCE`:''} apoyando (%K ${lK15.toFixed(0)})`},
       ]});
     }
 
     // ── Nivel 3: PRE-RUPTURA (solo si no hubo intento ya detectado) ──────────
     // Sin límite de BBW < 2.0: si el precio está a 0.3% de la banda con BBW
     // en expansión, eso ES una pre-ruptura sin importar el BBW absoluto.
-    const setupBull=!intentoBull&&nearUpper&&_baseCallConds&&stochCallOk;
-    const setupBear=!intentoBear&&nearLower&&_basePutConds&&stochPutOk;
+    const setupBull=!intentoBull&&nearUpper&&_baseCallConds&&(stochCallOk||stochCallCross);
+    const setupBear=!intentoBear&&nearLower&&_basePutConds&&(stochPutOk||stochPutCross);
     if((setupBull||setupBear)&&_bbSessionOk){
       const setupType=setupBull?'call':'put';
       const setupDir=setupBull?'Superior':'Inferior';
       const setupDist=(setupBull?distClosToUpper:distClosToLower).toFixed(2);
       all.push({...meta,code:'SETUP',name:`Setup BB — Precio cerca de banda ${setupDir}`,type:setupType,isSetup:true,_setupLevel:3,reqs:[
         {ok:lBBW15<2.0,              tf:'15m',text:`BB comprimido (BBW ${lBBW15.toFixed(1)}% < 2%)`},
-        {ok:setupBull||setupBear,    tf:'15m',text:`Close a ${setupDist}% de banda ${setupDir} ($${(setupBull?lUp15:lLow15).toFixed(2)})`},
+        {ok:setupBull||setupBear,    tf:'15m',text:`Close a ${setupDist}% de banda ${setupDir} ($${(setupBull?lUp15:lLow15).toFixed(2)}) — umbral 0.5%`},
         {ok:setupBull?lP15>lMA20_15:lP15<lMA20_15,tf:'15m',text:`MA20 alineada: $${lMA20_15.toFixed(2)}`},
-        {ok:stochCallOk||stochPutOk, tf:'15m',text:`Stochastics apoyando (%K ${lK15.toFixed(0)})`},
+        {ok:setupBull?(stochCallOk||stochCallCross):(stochPutOk||stochPutCross), tf:'15m',text:`Stochastics${(setupBull?stochCallCross:stochPutCross)?` 🔔 CRUCE `:' '}apoyando (%K ${lK15.toFixed(0)} ${lK15>lD15?'>':'<'} %D ${lD15.toFixed(0)})`},
         {ok:bbwRising,               tf:'15m',text:`BBW expandiéndose: ${lBBW15.toFixed(2)}% > ${lBBW15_1.toFixed(2)}%`},
         {ok:setupBull?align1hBull:align1hBear, tf:'1H', text:`1H confirma dirección: precio ${setupBull?'sobre':'bajo'} MA20 1H`},
       ]});
@@ -2306,8 +2308,9 @@ async function _buildSignalsCore(){
     // Cruce de medias — CONTEXTO en Hora y Día (no en 15min).
     const maCallCross=lMA20_1h>lMA40_1h&&lMA20D>lMA40D; // alcista: MA20 sobre MA40 en 1H y Día
     const maPutCross =lMA40_1h>lMA20_1h&&lMA40D>lMA20D; // bajista: MA40 sobre MA20 en 1H y Día
-    // Volumen sobre la línea (promedio de últimas 10)
-    const volOverLine=avgVol15_10>0?lVol15>avgVol15_10:true; // > 100% del promedio
+    // FIX B6 (2026-07-02): 100% del promedio era tan bajo que casi cualquier vela
+    // lo pasaba. Cambiado a 130% — confirma participación institucional real.
+    const volOverLine=avgVol15_10>0?lVol15>avgVol15_10*1.3:true; // >130% del promedio
     // Estocástico — SOLO dirección (peso pequeño, no bloquea). Sin pisos/techos.
     const stochCallDir=lK15>lD15; // %K sobre %D (subiendo)
     const stochPutDir =lK15<lD15; // %K bajo %D (bajando)

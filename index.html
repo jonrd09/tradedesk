@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- TradeDeskPro v5 | build:20260702_fixes | B1:_hasRealSessionCandle B2:Worden_stoch B3:bbwAccel B4:SETUP_prox B5:stochCallOk B6:volOverLine -->
+<!-- TradeDeskPro v5 | build:20260702_bugfixes_bb | B1:_wsSessionCandle_per15min B2:BB-REGRESO_strategy B3:intentoBull_loose B4:bbCallTrigger_connected B5:dedup_distVars B6:setup_gate_bbw B7:stochPutOk_noFloor -->
 <html lang="es">
 <head>
 <meta charset="UTF-8">
@@ -1485,9 +1485,14 @@ const _WS_BUILD_THROTTLE_MS=45000; // no relanzar buildSignals() más de 1x/45s 
 // Esto permite construir la "vela de hoy" con datos en tiempo real del WS
 // en vez de esperar a la llamada REST de Schwab /quotes (que tarda 2-4s).
 // Se resetea cada mañana al detectar que la fecha ET cambió.
-const _wsSessionCandle={}; // { SYM: {open,high,low,close,ts,date} }
+const _wsSessionCandle={}; // { SYM: {open,high,low,close,ts,date,_barStart} }
 let _wsSessionDate=''; // fecha ET del día actual (para detectar cambio de día)
 
+// FIX B1-v2 (2026-07-02): _wsSessionCandle ahora rastrea la VELA DE 15 MIN EN FORMACIÓN,
+// no el OHLC de toda la sesión. El bug original: high/low se acumulaban desde las 9:30 AM
+// hasta ahora, haciendo que _candleHigh pudiera ser el máximo de hace 2 horas.
+// Corrección: _barStart identifica la barra de 15 min activa (floor(mins/15)*15).
+// Cuando mins cambia de barra, se resetea el OHLC usando el último close como nuevo open.
 function _wsUpdateSessionCandle(sym, price){
   const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
   const dateStr=et.toDateString();
@@ -1495,20 +1500,30 @@ function _wsUpdateSessionCandle(sym, price){
   // Resetear todos los trackers si cambió el día
   if(_wsSessionDate&&_wsSessionDate!==dateStr){
     Object.keys(_wsSessionCandle).forEach(k=>delete _wsSessionCandle[k]);
-    addLog('debug','WS Candle','Nuevo día ET — trackers de vela de apertura reseteados');
+    addLog('debug','WS Candle','Nuevo día ET — trackers de vela 15min reseteados');
   }
   _wsSessionDate=dateStr;
   // Solo trackear en horario de mercado regular (9:30 AM – 4:00 PM ET)
   if(mins<570||mins>=960)return;
+  // Identificar el inicio de la barra de 15 min activa
+  const barStart=Math.floor(mins/15)*15;
   if(!_wsSessionCandle[sym]){
-    // Primera vez que vemos precio hoy → es el open de la sesión
-    _wsSessionCandle[sym]={open:price,high:price,low:price,close:price,ts:Date.now(),date:dateStr};
+    // Primera vez que vemos precio hoy → open de la primera barra
+    _wsSessionCandle[sym]={open:price,high:price,low:price,close:price,ts:Date.now(),date:dateStr,_barStart:barStart};
   }else{
     const c=_wsSessionCandle[sym];
-    c.high=Math.max(c.high,price);
-    c.low=Math.min(c.low,price);
-    c.close=price;
-    c.ts=Date.now();
+    // Si cambió la barra de 15 min → resetear OHLC con el último close como nuevo open
+    if(c._barStart!==barStart){
+      const prevClose=c.close;
+      _wsSessionCandle[sym]={open:prevClose,high:Math.max(prevClose,price),low:Math.min(prevClose,price),close:price,ts:Date.now(),date:dateStr,_barStart:barStart};
+      addLog('debug','WS Candle',`${sym} nueva barra 15min @ ${barStart}min — OHLC reseteado`);
+    }else{
+      // Misma barra → acumular high/low/close normalmente
+      c.high=Math.max(c.high,price);
+      c.low=Math.min(c.low,price);
+      c.close=price;
+      c.ts=Date.now();
+    }
   }
 }
 
@@ -1770,10 +1785,11 @@ function bbLowerSlope(closes){
 // ═══════════════════════════════════════════════════════════════
 const STRAT_DEFAULTS={
   // ── Estrategias de Bollinger Puro — ACTIVAS por defecto ──────────────────
-  'BB-A':true,   // BB Breakout CALL (precio saliendo banda superior)
-  'BB-B':true,   // BB Breakout PUT  (precio saliendo banda inferior)
-  'BB-C':true,   // Efecto Imán PUT  (vela completa sobre BB → regresa)
-  'BB-D':true,   // Efecto Imán CALL (vela completa bajo BB → regresa)
+  'BB-A':true,       // BB Breakout CALL (precio saliendo banda superior)
+  'BB-B':true,       // BB Breakout PUT  (precio saliendo banda inferior)
+  'BB-C':true,       // Efecto Imán PUT  (vela completa sobre BB → regresa, apertura)
+  'BB-D':true,       // Efecto Imán CALL (vela completa bajo BB → regresa, apertura)
+  'BB-REGRESO':true, // FIX B2: Precio fuera de banda regresando — todo el horario
   // ── Estrategias de Medias Móviles — INACTIVAS por defecto ────────────────
   // Desactivadas porque las MAs no siempre están alineadas incluso cuando hay
   // un breakout real de BB. El usuario puede re-activarlas desde Configuración.
@@ -2175,7 +2191,10 @@ async function _buildSignalsCore(){
     // (pK15 < 30 && lK15 >= 30) como señal de entrada adicional para rebotes.
     const stochCallOk=lK15>lD15&&lK15>25; // sin cap superior
     const stochCallCross=pK15<30&&lK15>=30; // cruce alcista desde sobreventa
-    const stochPutOk=lK15<lD15&&lK15<75&&lK15>10; // cap superior sube a 75
+    // FIX B7 (2026-07-02): eliminado floor lK15>10 de stochPutOk.
+    // %K < 10 es sobreventa extrema — la condición MÁS confirmatoria para acercamiento
+    // a banda inferior, no un motivo de bloqueo. Era asimétrico vs stochCallOk (sin cap).
+    const stochPutOk=lK15<lD15&&lK15<75; // eliminado floor 10 — sobreventa extrema es válida
     const stochPutCross=pK15>70&&lK15<=70; // cruce bajista desde sobrecompra
     // F4: Volumen activo
     const volLabel=avgVol15_10>0?` (${(lVol15/avgVol15_10*100).toFixed(0)}% del promedio)`:'';
@@ -2239,24 +2258,28 @@ async function _buildSignalsCore(){
     const nearLower=distClosToLower>=0&&distClosToLower<0.5;
 
     // Condiciones base de los 3 niveles de alerta pre-ruptura.
-    // SIMPLIFICADO: solo BBW expandiendo + precio del lado correcto de MA20.
-    // La alineación 1H se muestra como info en la tarjeta pero NO bloquea el aviso.
-    // Razón: el BBW expandiéndose ya indica que algo se está moviendo — si la 1H
-    // no está alineada lo vemos en la tarjeta y decidimos, pero no queremos
-    // perder el aviso de que la banda se está rompiendo ahora mismo.
-    const _baseCallConds=lP15>lMA20_15&&bbwRising;
+    // FIX B3 (2026-07-02): se separan dos versiones de _baseConds:
+    //   STRICT (bbwRising requerido) → para AVISO y SETUP — el BBW debe estar creciendo
+    //   LOOSE  (solo bandas abiertas) → para INTENTO — si el precio toca la banda AHORA
+    //     es el evento más urgente; bloquearlo por bbwRising plano causa fallos críticos.
+    // Antes: ambos usaban la misma condición con bbwRising, que bloqueaba INTENTO cuando
+    // las bandas estaban expandidas pero estabilizadas (tendencias fuertes con BBW flat).
+    const _baseCallConds=lP15>lMA20_15&&bbwRising;        // para AVISO + SETUP
     const _basePutConds=lP15<lMA20_15&&bbwRising;
+    const _baseCallCondsLoose=lP15>lMA20_15&&lBBW15>=0.8; // para INTENTO — sin exigir expansión activa
+    const _basePutCondsLoose=lP15<lMA20_15&&lBBW15>=0.8;
 
     // Aceleración del BBW — qué tan rápido se está expandiendo
-    // Si lBBW15 creció >0.15% en las últimas 2 velas, la expansión está acelerando
     // FIX B3 (2026-07-02): 0.15% era demasiado estricto — GOOG/META/PLTR
     // expanden normalmente 0.05-0.10% por vela. Bajado a 0.05%.
     const bbwAccelerating=(lBBW15-lBBW15_2)>0.05;
 
     // ── Nivel 2: INTENTO DE RUPTURA ──────────────────────────────────────────
     // Tiene prioridad sobre los otros niveles — si hay intento, no mostrar nivel 1
-    const intentoBull=wickTestingUpper&&_baseCallConds;
-    const intentoBear=wickTestingLower&&_basePutConds;
+    // FIX B3: usa _baseCallCondsLoose — no exige bbwRising para no perder wick tests
+    // en tendencias establecidas donde las bandas están abiertas pero no creciendo.
+    const intentoBull=wickTestingUpper&&_baseCallCondsLoose;
+    const intentoBear=wickTestingLower&&_basePutCondsLoose;
     if((intentoBull||intentoBear)&&_bbSessionOk){
       const iType=intentoBull?'call':'put';
       const iDir=intentoBull?'Superior':'Inferior';
@@ -2265,7 +2288,7 @@ async function _buildSignalsCore(){
       all.push({...meta,code:'INTENTO',name:`⚡ Intento de ruptura — Banda ${iDir}`,type:iType,isSetup:true,_setupLevel:2,reqs:[
         {ok:true,             tf:'15m',text:`🔥 VELA TOCANDO banda ${iDir} (${iWick})`},
         {ok:_wsIsToday,       tf:'WS', text:_wsIsToday?`Dato en tiempo real (WebSocket Finnhub activo)`:`Dato de última vela cerrada (WS sin datos de hoy)`},
-        {ok:bbwRising,        tf:'15m',text:`BBW expandiéndose: ${lBBW15.toFixed(2)}% ${bbwAccelerating?'⚡ ACELERANDO':'> '+lBBW15_1.toFixed(2)+'%'}`},
+        {ok:lBBW15>=0.8,      tf:'15m',text:`Bandas abiertas (BBW ${lBBW15.toFixed(2)}% ≥ 0.8%)${bbwRising?' ⚡ expandiéndose':''}`},
         {ok:intentoBull?lP15>lMA20_15:lP15<lMA20_15, tf:'15m',text:`MA20 alineada: $${lMA20_15.toFixed(2)}`},
         {ok:intentoBull?align1hBull:align1hBear, tf:'1H',text:`1H confirma dirección`},
         {ok:stochCallOk||stochPutOk||stochCallCross||stochPutCross, tf:'15m',text:`Stochastics${(stochCallCross||stochPutCross)?` 🔔 CRUCE`:''} apoyando (%K ${lK15.toFixed(0)})`},
@@ -2273,10 +2296,11 @@ async function _buildSignalsCore(){
     }
 
     // ── Nivel 3: PRE-RUPTURA (solo si no hubo intento ya detectado) ──────────
-    // Sin límite de BBW < 2.0: si el precio está a 0.3% de la banda con BBW
-    // en expansión, eso ES una pre-ruptura sin importar el BBW absoluto.
-    const setupBull=!intentoBull&&nearUpper&&_baseCallConds&&(stochCallOk||stochCallCross);
-    const setupBear=!intentoBear&&nearLower&&_basePutConds&&(stochPutOk||stochPutCross);
+    // FIX B6 (2026-07-02): setupBull/setupBear ahora incluyen lBBW15<2.0 como gate real
+    // — antes la condición aparecía en el req de la tarjeta (ok:lBBW15<2.0) pero NO
+    // bloqueaba el signal, causando señales SETUP con BBW>2% que mostraban ❌ engañoso.
+    const setupBull=!intentoBull&&nearUpper&&lBBW15<2.0&&_baseCallConds&&(stochCallOk||stochCallCross);
+    const setupBear=!intentoBear&&nearLower&&lBBW15<2.0&&_basePutConds&&(stochPutOk||stochPutCross);
     if((setupBull||setupBear)&&_bbSessionOk){
       const setupType=setupBull?'call':'put';
       const setupDir=setupBull?'Superior':'Inferior';
@@ -2355,14 +2379,14 @@ async function _buildSignalsCore(){
     // stochA/stochB — usados por otras estrategias (Rebote MA20, Cambio Tendencia 1H)
     const stochA=lK15>lD15&&lK15>30&&lK15<85;
     const stochB=lK15<lD15&&lK15<70&&lK15>15;
-    // Precio acercándose a la banda DESDE ADENTRO — usa WS para high/low en tiempo real
-    // _candleHigh/_candleLow ya calculados en el bloque SETUP (usan WS si disponible)
-    const distToUpperPct=(lUp15-_candleHigh)/lP15*100; // distancia del HIGH (WS) a la banda sup
-    const distToLowerPct=(_candleLow-lLow15)/lP15*100;  // distancia del LOW (WS) a la banda inf
+    // FIX B5 (2026-07-02): eliminadas declaraciones duplicadas de distToUpperPct y
+    // distToLowerPct — tenían fórmula idéntica a distHighToUpper/distLowToLower del bloque
+    // SETUP (L.2237–2238). Se usan directamente los nombres del bloque SETUP.
+    // approachingUpper/Lower ya usa distHighToUpper/distLowToLower — sin cambios de lógica.
     // approachingUpper: el HIGH de la vela está dentro del 0.3% de la banda superior
     // pero NO la ha cruzado todavía (el close sigue adentro)
-    const approachingUpper=_candleHigh<=lUp15&&distToUpperPct>=0&&distToUpperPct<0.3&&_candleClose<lUp15;
-    const approachingLower=_candleLow>=lLow15&&distToLowerPct>=0&&distToLowerPct<0.3&&_candleClose>lLow15;
+    const approachingUpper=_candleHigh<=lUp15&&distHighToUpper>=0&&distHighToUpper<0.3&&_candleClose<lUp15;
+    const approachingLower=_candleLow>=lLow15&&distLowToLower>=0&&distLowToLower<0.3&&_candleClose>lLow15;
     // A-2 FIX: piercing ahora exige el close FUERA de la banda (sin tolerancia).
     // Antes: `_candleClose > lUp15*0.998` aceptaba el close hasta 0.2% ADENTRO
     // de la banda — lo que es un falso breakout y además solapa con el estado INTENTO.
@@ -2370,7 +2394,11 @@ async function _buildSignalsCore(){
     // la banda con close adentro, eso es INTENTO (Nivel 2) — que ya existe.
     const piercingUpper=_candleHigh>lUp15&&_candleClose>lUp15;   // close estrictamente fuera
     const piercingLower=_candleLow<lLow15&&_candleClose<lLow15;  // close estrictamente fuera
-    // BB-A/BB-B disparan en AMBOS casos: acercándose O perforando
+    // FIX B4 (2026-07-02): bbCallTrigger/bbPutTrigger eran código muerto — declarados pero
+    // BB-A/BB-B usaban solo piercingUpper/Lower. Se conectan ahora al gate bbPureGateCall/Put.
+    // "BB-A/BB-B disparan en AMBOS casos: acercándose O perforando" — como decía el comentario
+    // pero no se cumplía. approachingUpper (HIGH a <0.3% de la banda, close adentro) activa BB-A
+    // en modo "entrada temprana" antes de que el close salga de la banda.
     const bbCallTrigger=approachingUpper||piercingUpper;
     const bbPutTrigger=approachingLower||piercingLower;
 
@@ -2462,15 +2490,17 @@ async function _buildSignalsCore(){
     // ════════════════════════════════════════════════════════════════════════
     // Gate puro: SOLO condiciones de Bollinger.
     // - BBW >= 1.0% (bajado de 1.5% — PLTR/QQQ tienen bandas más estrechas)
-    // - Precio saliendo de la banda (piercingUpper/Lower, usa WS en tiempo real)
+    // - FIX B4: bbCallTrigger (approachingUpper OR piercingUpper) — ahora conectado.
+    //   approachingUpper = HIGH a <0.3% de la banda, close aún adentro (entrada temprana)
+    //   piercingUpper    = close ya fuera de la banda (ruptura confirmada)
     // - Sesión regular abierta (_bbSessionOk)
     //
     // TODO lo demás (cuerpo, volumen, MAs, estocástico) son BONUS que suben el
     // score pero NO bloquean la señal. Si el precio sale de la banda con BBW
     // expandiendo, eso ES el evento — el resto da contexto de confianza.
     // ════════════════════════════════════════════════════════════════════════
-    const bbPureGateCall = lBBW15>=1.0 && piercingUpper && _bbSessionOk;
-    const bbPureGatePut  = lBBW15>=1.0 && piercingLower && _bbSessionOk;
+    const bbPureGateCall = lBBW15>=1.0 && bbCallTrigger && _bbSessionOk;
+    const bbPureGatePut  = lBBW15>=1.0 && bbPutTrigger  && _bbSessionOk;
 
     // Pesos — Bollinger ocupa 50 puntos base (siempre se suman si el gate pasó)
     // El resto son bonificaciones de contexto
@@ -2596,6 +2626,69 @@ async function _buildSignalsCore(){
         {ok:_imanWindow,  tf:'15m',text:`Ventana apertura 9:30–10:00 AM ET`},
         {ok:_hlCallOk,    tf:'H/D',text:_hlCallText(),_hlBanner:_hlCallWarnBanner},
       ]});
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // ESTRATEGIA BB-REGRESO — PRECIO FUERA DE BANDA REGRESANDO (FIX B2)
+    // BB-C/BB-D solo cubrían el regreso en el primeros 15 min y con bbCompressed.
+    // Esta estrategia cubre TODO el horario regular: cuando el precio está fuera de
+    // la banda (encima o debajo) y la vela actual comienza a regresar hacia ella,
+    // sin restricción de bbCompressed ni ventana horaria.
+    //
+    // Tesis (efecto imán): precio extendido fuera de la banda ≥ 0.3% genera una
+    // fuerza de reversión estadística hacia la media de BB. La primera vela que
+    // cierra en dirección contraria (put si estaba arriba, call si estaba abajo)
+    // es el gatillo de entrada.
+    //
+    // Gates de calidad:
+    //   1. Precio fuera de la banda (lP15 > lUp15 ó lP15 < lLow15)
+    //   2. Extensión mínima 0.3% — evitar falsos positivos por spread/microestructura
+    //   3. Primera vela de retorno (close en dirección contraria a la extensión)
+    //   4. Estocástico en zona extrema (>65 para put, <35 para call)
+    //   5. BBW ≥ 0.8% — bandas mínimamente abiertas (sin señales en squeeze total)
+    //   6. No solapar con BB-C/BB-D (que ya manejan el caso bbCompressed+ventana apertura)
+    // ════════════════════════════════════════════════════════════════════════
+    if(_stratEnabled('BB-REGRESO')&&_bbSessionOk){
+      // Extensión: cuánto % está el precio fuera de la banda
+      const _extAboveUpper=lP15>lUp15?(lP15-lUp15)/lP15*100:0;
+      const _extBelowLower=lP15<lLow15?(lLow15-lP15)/lP15*100:0;
+
+      // Condiciones de retorno: vela actual cierra en la dirección opuesta a la extensión
+      const _regresoFromAbove=_extAboveUpper>=0.3&&lP15<lO15; // sobre banda → vela bajista (put)
+      const _regresoFromBelow=_extBelowLower>=0.3&&lP15>lO15; // bajo banda → vela alcista (call)
+
+      // No solapar con BB-C (ya cubre el caso bbCompressed+apertura para PUT desde arriba)
+      // ni con BB-D (cubre el caso bbCompressed+apertura para CALL desde abajo)
+      const _noSolapaBBC=!pC_above;
+      const _noSolapaBBD=!pD_below;
+
+      // PUT de regreso: precio sobre banda superior, retornando hacia la media
+      if(_regresoFromAbove&&_noSolapaBBC&&lBBW15>=0.8&&lK15>65){
+        const _extPct=_extAboveUpper.toFixed(2);
+        all.push({...meta,code:'BB-REGRESO',name:'BB Regreso desde afuera — PUT',type:'put',isSetup:false,reqs:[
+          {ok:lP15>lUp15,         tf:'15m',text:`Precio FUERA de banda superior: $${lP15.toFixed(2)} > $${lUp15.toFixed(2)} (+${_extPct}%)`},
+          {ok:_extAboveUpper>=0.3,tf:'15m',text:`Extensión ≥ 0.3% sobre banda — fuerza imán activa`},
+          {ok:lP15<lO15,          tf:'15m',text:`Vela bajista de retorno: $${lP15.toFixed(2)} < $${lO15.toFixed(2)}`},
+          {ok:lK15>65,            tf:'15m',text:`Worden sobrecomprado: %K ${lK15.toFixed(0)} > 65`},
+          {ok:lBBW15>=0.8,        tf:'15m',text:`Bandas abiertas (BBW ${lBBW15.toFixed(1)}% ≥ 0.8%)`},
+          {ok:volActive15,        tf:'15m',text:`Volumen activo${volLabel}`},
+          {ok:_hlPutOk,           tf:'H/D',text:_hlPutText(),_hlBanner:_hlPutWarnBanner},
+        ]});
+      }
+
+      // CALL de regreso: precio bajo banda inferior, retornando hacia la media
+      if(_regresoFromBelow&&_noSolapaBBD&&lBBW15>=0.8&&lK15<35){
+        const _extPct=_extBelowLower.toFixed(2);
+        all.push({...meta,code:'BB-REGRESO',name:'BB Regreso desde afuera — CALL',type:'call',isSetup:false,reqs:[
+          {ok:lP15<lLow15,        tf:'15m',text:`Precio FUERA de banda inferior: $${lP15.toFixed(2)} < $${lLow15.toFixed(2)} (-${_extPct}%)`},
+          {ok:_extBelowLower>=0.3,tf:'15m',text:`Extensión ≥ 0.3% bajo banda — fuerza imán activa`},
+          {ok:lP15>lO15,          tf:'15m',text:`Vela alcista de retorno: $${lP15.toFixed(2)} > $${lO15.toFixed(2)}`},
+          {ok:lK15<35,            tf:'15m',text:`Worden sobrevendido: %K ${lK15.toFixed(0)} < 35`},
+          {ok:lBBW15>=0.8,        tf:'15m',text:`Bandas abiertas (BBW ${lBBW15.toFixed(1)}% ≥ 0.8%)`},
+          {ok:volActive15,        tf:'15m',text:`Volumen activo${volLabel}`},
+          {ok:_hlCallOk,          tf:'H/D',text:_hlCallText(),_hlBanner:_hlCallWarnBanner},
+        ]});
+      }
     }
 
     // ════════════════════════════════════════════════════════════════════════

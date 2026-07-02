@@ -2054,8 +2054,14 @@ async function _buildSignalsCore(){
       return false;
     })();
     // En premarket (antes de 9:30) o si no hay vela real → bloquear BB
-    // Excepción: _testMode y _debugMode ignoran este guard para testing
-    const _bbSessionOk=_hasRealSessionCandle||_testMode||_debugMode;
+    // EXCEPCIÓN CRÍTICA: si el WebSocket de Finnhub tiene precio confirmado de hoy
+    // (_wsIsToday=true), la vela en formación ES una vela real aunque todavía no
+    // haya cerrado. Sin esto, BB-A/BB-B/BB-C/BB-D se bloquean entre 9:30–9:44 AM
+    // — exactamente la ventana donde ocurren los breakouts más grandes del día
+    // (como PLTR +5% o META -3% en la primera vela de apertura).
+    // _wsIsToday garantiza que el precio viene del WebSocket en tiempo real, no
+    // de un dato viejo de Schwab. Es la combinación correcta para la apertura.
+    const _bbSessionOk=_hasRealSessionCandle||_wsIsToday||_testMode||_debugMode;
     const stoch15=stochastic(h15,l15,c15,12,3);
     const lK15=stoch15.k.slice(-1)[0]||50;
     const pK15=stoch15.k.slice(-2)[0]||lK15;

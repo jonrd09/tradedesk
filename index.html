@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- TradeDeskPro v5 | build:20260702_momentum_gate | B1:_wsSessionCandle_per15min B2:BB-REGRESO_strategy B3:intentoBull_loose B4:bbCallTrigger_connected B5:dedup_distVars B6:setup_gate_bbw B7:stochPutOk_noFloor A1:bbSessionOk_isMarketHours A2:schwabToken_firstTicker M1:momentumToLower_gate M2:bbwExpandActive M3:aviso_stricter M4:intento_volOk M5:unified_setup_card -->
+<!-- TradeDeskPro v5 | build:20260702_momentum_gate | B1:_wsSessionCandle_per15min B2:BB-REGRESO_strategy B3:intentoBull_loose B4:bbCallTrigger_connected B5:dedup_distVars B6:setup_gate_bbw B7:stochPutOk_noFloor A1:bbSessionOk_isMarketHours A2:schwabToken_firstTicker M1:momentumToLower_gate M2:bbwExpandActive M3:aviso_stricter M4:intento_volOk M5:unified_setup_card M6:bbwSqueezeBreakout M7:multiTF_regreso -->
 <html lang="es">
 <head>
 <meta charset="UTF-8">
@@ -2601,16 +2601,32 @@ async function _buildSignalsCore(){
     // Con el fix, este valor ahora es estadísticamente correcto también
     const _bbwPct25=_bbwHistory.length?_bbwHistory[Math.floor(_bbwHistory.length*0.25)]||lBBW15:lBBW15;
 
+    // ── VOLATILIDAD CÍCLICA (tus notas: "baja vol → alta vol → baja vol") ───
+    // _bbwSqueezeBreakout detecta la TRANSICIÓN: el BBW estaba en zona comprimida
+    // (≤ percentil 25 histórico hace 2 velas = 30min) Y ahora se está expandiendo
+    // activamente (_bbwExpandActive = Δ ≥ 0.12% en 30min).
+    //
+    // Por qué es el setup de mayor potencial:
+    //   • BBW en percentil bajo = mercado lateral, energía acumulándose
+    //   • Expansión repentina = esa energía se libera → movimiento fuerte o extremo
+    //   • El precio que sale de la banda EN ESTE MOMENTO tiene mucho más follow-through
+    //     que un breakout en medio de expansión ya avanzada
+    //
+    // Aparece como bonus +12 puntos en BB-A y BB-B (señales de breakout real).
+    const _bbwWasSqueezed=lBBW15_2<=_bbwPct25*1.15; // hace 2 velas estaba en zona baja
+    const _bbwSqueezeBreakout=_bbwWasSqueezed&&_bbwExpandActive; // squeeze → expansión
+
     if(_stratEnabled('BB-A')&&bbPureGateCall){
       // Score base: las 3 condiciones BB siempre pasan cuando llegamos aquí
       let score=_WBB.bb_expansion+_WBB.bb_pierce; // 35 base
-      if(bbwAboveMedian)  score+=_WBB.bb_bbwAboveMedian; // +15 expansión real vs lateral
-      if(bigBodyCall)     score+=_WBB.bb_body;     // +10 cuerpo confirmando
-      if(volOverLine)     score+=_WBB.bb_volume;   // +10 volumen
-      if(mediaUp)         score+=_WBB.ctx_media;   // +8
-      if(maCallCross)     score+=_WBB.ctx_ma_cross;// +8
-      if(stochCallDir)    score+=_WBB.ctx_stoch;   // +7
-      if(_hlCallOk)       score+=_WBB.ctx_hlines;  // +7
+      if(bbwAboveMedian)       score+=_WBB.bb_bbwAboveMedian; // +15 expansión real vs lateral
+      if(_bbwSqueezeBreakout)  score+=12; // +12 🔥 volatilidad cíclica — rompe squeeze
+      if(bigBodyCall)          score+=_WBB.bb_body;     // +10 cuerpo confirmando
+      if(volOverLine)          score+=_WBB.bb_volume;   // +10 volumen
+      if(mediaUp)              score+=_WBB.ctx_media;   // +8
+      if(maCallCross)          score+=_WBB.ctx_ma_cross;// +8
+      if(stochCallDir)         score+=_WBB.ctx_stoch;   // +7
+      if(_hlCallOk)            score+=_WBB.ctx_hlines;  // +7
 
       all.push({...meta,code:'BB-A',name:'BB Breakout — CALL',type:'call',
         weighted:true,score,threshold:35,
@@ -2621,6 +2637,7 @@ async function _buildSignalsCore(){
         {ok:piercingUpper,  tf:'15m',weight:'BB',text:(()=>{const _d=(_candleClose-lUp15)/lP15*100;return _d>=0?`✅ Precio FUERA de banda superior: $${_candleClose.toFixed(2)} > $${lUp15.toFixed(2)} (+${_d.toFixed(2)}%)`:`⚡ High cruzó banda superior — close a ${Math.abs(_d).toFixed(2)}% adentro`;})()},
         // ── BONUS BB (suman confianza) ──
         {ok:bbwAboveMedian, tf:'15m',weight:'BB+',text:`BBW sobre mediana histórica — expansión real, no ruido (${lBBW15.toFixed(2)}% vs med. ${_bbwMedian.toFixed(2)}%)`},
+        {ok:_bbwSqueezeBreakout,tf:'15m',weight:'+12%',text:_bbwSqueezeBreakout?`🔥 RUPTURA DE SQUEEZE — baja vol (${lBBW15_2.toFixed(2)}% ≤ pct25 ${_bbwPct25.toFixed(2)}%) → expansión ahora. Movimiento fuerte probable`:`Sin squeeze previo (${lBBW15_2.toFixed(2)}% vs pct25 ${_bbwPct25.toFixed(2)}%)`},
         {ok:bigBodyCall,    tf:'15m',weight:'+10%',text:`Cuerpo vela ${bigBodyCall?'✅':'⚠️'} ${candleBody15.toFixed(2)}% — ${bigBodyCall?'momentum confirmado':'breakout de wick (válido, menos confianza)'}`},
         {ok:volOverLine,    tf:'15m',weight:'+10%',text:`Volumen ${volOverLine?'institucional':'normal'}${volLabel}`},
         // ── CONTEXTO (MAs, Stoch, HLines) ──
@@ -2633,13 +2650,14 @@ async function _buildSignalsCore(){
 
     if(_stratEnabled('BB-B')&&bbPureGatePut){
       let score=_WBB.bb_expansion+_WBB.bb_pierce;
-      if(bbwAboveMedian)  score+=_WBB.bb_bbwAboveMedian;
-      if(bigBodyPut)      score+=_WBB.bb_body;
-      if(volOverLine)     score+=_WBB.bb_volume;
-      if(mediaDn)         score+=_WBB.ctx_media;
-      if(maPutCross)      score+=_WBB.ctx_ma_cross;
-      if(stochPutDir)     score+=_WBB.ctx_stoch;
-      if(_hlPutOk)        score+=_WBB.ctx_hlines;
+      if(bbwAboveMedian)      score+=_WBB.bb_bbwAboveMedian;
+      if(_bbwSqueezeBreakout) score+=12; // +12 🔥 volatilidad cíclica — rompe squeeze
+      if(bigBodyPut)          score+=_WBB.bb_body;
+      if(volOverLine)         score+=_WBB.bb_volume;
+      if(mediaDn)             score+=_WBB.ctx_media;
+      if(maPutCross)          score+=_WBB.ctx_ma_cross;
+      if(stochPutDir)         score+=_WBB.ctx_stoch;
+      if(_hlPutOk)            score+=_WBB.ctx_hlines;
 
       all.push({...meta,code:'BB-B',name:'BB Breakout — PUT',type:'put',
         weighted:true,score,threshold:35,
@@ -2648,6 +2666,7 @@ async function _buildSignalsCore(){
         {ok:lBBW15>=1.0,    tf:'15m',weight:'BB',text:`Expansión BB: bandas abiertas (BBW ${lBBW15.toFixed(1)}%)`},
         {ok:piercingLower,  tf:'15m',weight:'BB',text:(()=>{const _d=(lLow15-_candleClose)/lP15*100;return _d>=0?`✅ Precio FUERA de banda inferior: $${_candleClose.toFixed(2)} < $${lLow15.toFixed(2)} (-${_d.toFixed(2)}%)`:`⚡ Low cruzó banda inferior — close a ${Math.abs(_d).toFixed(2)}% adentro`;})()},
         {ok:bbwAboveMedian, tf:'15m',weight:'BB+',text:`BBW sobre mediana histórica — expansión real (${lBBW15.toFixed(2)}% vs med. ${_bbwMedian.toFixed(2)}%)`},
+        {ok:_bbwSqueezeBreakout,tf:'15m',weight:'+12%',text:_bbwSqueezeBreakout?`🔥 RUPTURA DE SQUEEZE — baja vol (${lBBW15_2.toFixed(2)}% ≤ pct25 ${_bbwPct25.toFixed(2)}%) → expansión ahora. Movimiento fuerte probable`:`Sin squeeze previo (${lBBW15_2.toFixed(2)}% vs pct25 ${_bbwPct25.toFixed(2)}%)`},
         {ok:bigBodyPut,     tf:'15m',weight:'+10%',text:`Cuerpo vela ${bigBodyPut?'✅':'⚠️'} ${candleBody15.toFixed(2)}% — ${bigBodyPut?'momentum confirmado':'breakout de wick (válido, menos confianza)'}`},
         {ok:volOverLine,    tf:'15m',weight:'+10%',text:`Volumen ${volOverLine?'institucional':'normal'}${volLabel}`},
         {ok:mediaDn,        tf:'15m',weight:'+8%', text:`Media BB apuntando abajo: $${lMA20_15.toFixed(2)}`},
@@ -2728,6 +2747,16 @@ async function _buildSignalsCore(){
       const _noSolapaBBC=!pC_above;
       const _noSolapaBBD=!pD_below;
 
+      // ── EXPOSICIÓN MULTI-TEMPORALIDAD (tus notas: "expuesto en 3TFs = regreso más potente") ──
+      // Cuando el precio está fuera de la banda en 15min Y TAMBIÉN fuera en 1H,
+      // el efecto imán hacia el disipador (MA20) es mucho más potente.
+      // lUp1h/lLow1h ya están calculados al inicio del loop del ticker.
+      const _exposed1hAbove=lP1h>lUp1h; // precio también fuera de banda superior en 1H
+      const _exposed1hBelow=lP1h<lLow1h; // precio también fuera de banda inferior en 1H
+      // El disipador diario como destino final (más potente aún si el precio lo está viendo)
+      const _distToDailyMA=lMA20D>0?Math.abs(lP1h-lMA20D)/lMA20D*100:99;
+      const _dailyMagnet=_distToDailyMA>1.5&&_distToDailyMA<8; // lejos del diario pero no extremo
+
       // PUT de regreso: precio sobre banda superior, retornando hacia la media
       if(_regresoFromAbove&&_noSolapaBBC&&lBBW15>=0.8&&lK15>65){
         const _extPct=_extAboveUpper.toFixed(2);
@@ -2738,6 +2767,8 @@ async function _buildSignalsCore(){
           {ok:lK15>65,            tf:'15m',text:`Worden sobrecomprado: %K ${lK15.toFixed(0)} > 65`},
           {ok:lBBW15>=0.8,        tf:'15m',text:`Bandas abiertas (BBW ${lBBW15.toFixed(1)}% ≥ 0.8%)`},
           {ok:volActive15,        tf:'15m',text:`Volumen activo${volLabel}`},
+          {ok:_exposed1hAbove,    tf:'1H', text:_exposed1hAbove?`🔥 También fuera de banda en 1H ($${lP1h.toFixed(2)} > $${lUp1h.toFixed(2)}) — imán multi-TF más fuerte`:`Solo expuesto en 15min — imán moderado`},
+          {ok:_dailyMagnet,       tf:'D',  text:_dailyMagnet?`Disipador diario a ${_distToDailyMA.toFixed(1)}% ($${lMA20D.toFixed(2)}) — destino del regreso`:`Disipador diario $${lMA20D.toFixed(2)} (dist. ${_distToDailyMA.toFixed(1)}%)`},
           {ok:_hlPutOk,           tf:'H/D',text:_hlPutText(),_hlBanner:_hlPutWarnBanner},
         ]});
       }
@@ -2752,6 +2783,8 @@ async function _buildSignalsCore(){
           {ok:lK15<35,            tf:'15m',text:`Worden sobrevendido: %K ${lK15.toFixed(0)} < 35`},
           {ok:lBBW15>=0.8,        tf:'15m',text:`Bandas abiertas (BBW ${lBBW15.toFixed(1)}% ≥ 0.8%)`},
           {ok:volActive15,        tf:'15m',text:`Volumen activo${volLabel}`},
+          {ok:_exposed1hBelow,    tf:'1H', text:_exposed1hBelow?`🔥 También fuera de banda en 1H ($${lP1h.toFixed(2)} < $${lLow1h.toFixed(2)}) — imán multi-TF más fuerte`:`Solo expuesto en 15min — imán moderado`},
+          {ok:_dailyMagnet,       tf:'D',  text:_dailyMagnet?`Disipador diario a ${_distToDailyMA.toFixed(1)}% ($${lMA20D.toFixed(2)}) — destino del regreso`:`Disipador diario $${lMA20D.toFixed(2)} (dist. ${_distToDailyMA.toFixed(1)}%)`},
           {ok:_hlCallOk,          tf:'H/D',text:_hlCallText(),_hlBanner:_hlCallWarnBanner},
         ]});
       }

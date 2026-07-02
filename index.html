@@ -313,13 +313,12 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
     <div id="limitResult"></div>
   </div>
 
-  <!-- ── SESGO DE MERCADO ─────────────────────────────────── -->
-  <div class="rsec">
-    <div id="rotSignal" style="margin-bottom:4px;"></div>
-    <!-- IDs ocultos: el JS de loadRotation() los sigue actualizando para calcular el sesgo -->
-    <div id="rotIndices"  style="display:none;"></div>
-    <div id="rotSectores" style="display:none;"></div>
-    <div id="rotRefugios" style="display:none;"></div>
+  <!-- IDs fantasma: loadRotation() los necesita para calcular el sesgo interno -->
+  <div style="display:none;">
+    <div id="rotSignal"></div>
+    <div id="rotIndices"></div>
+    <div id="rotSectores"></div>
+    <div id="rotRefugios"></div>
   </div>
 
   <!-- ── ÍNDICES DEL DÍA ──────────────────────────────────── -->

@@ -331,10 +331,13 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
         ⟳ Actualizar
       </button>
     </div>
-    <!-- Semáforo SPY/QQQ — movido aquí desde topbar -->
-    <span id="futuresSemaphore"
-      style="display:none;font-family:var(--mono);font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap;cursor:default;border:1px solid transparent;margin-bottom:8px;">
-    </span>
+    <!-- Semáforo SPY/QQQ + aviso de movimiento en la misma barra -->
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;min-height:28px;">
+      <span id="futuresSemaphore"
+        style="display:none;font-family:var(--mono);font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap;cursor:default;border:1px solid transparent;">
+      </span>
+      <span id="idxBlockInline" style="font-size:10px;font-weight:700;white-space:nowrap;"></span>
+    </div>
     <div id="idxArea">
       <div class="idx-loading">⟳ Cargando índices…</div>
     </div>
@@ -7948,7 +7951,20 @@ function renderIndicesPanel(){
     </div>`;
   }).join('');
 
-  area.innerHTML=`<div class="idx-grid">${cards}</div>${blockHTML}`;
+  area.innerHTML=`<div class="idx-grid">${cards}</div>`;
+
+  // Aviso de movimiento → esquina derecha de la barra SPY/QQQ
+  const _blkEl=document.getElementById('idxBlockInline');
+  if(_blkEl){
+    // Extraer solo el texto del blockHTML (sin el div wrapper con estilos de bloque)
+    const _tmp=document.createElement('div');
+    _tmp.innerHTML=blockHTML;
+    const _txt=_tmp.firstChild?.textContent||'';
+    const _cls=_tmp.firstChild?.className||'';
+    const _isBull=_cls.includes('bull'),_isBear=_cls.includes('bear'),_isMix=_cls.includes('mix');
+    _blkEl.textContent=_txt;
+    _blkEl.style.color=_isBull?'var(--green)':_isBear?'var(--red)':_isMix?'var(--yellow)':'var(--text3)';
+  }
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -9610,6 +9626,26 @@ async function updateFuturesSemaphore(){
 
       <!-- ── TAB: SYNC ─────────────────────────────────────────── -->
       <div id="cfgPanel-sync" style="display:none;">
+
+        <!-- ── PAPER TRADING — Backup ──────────────────────────── -->
+        <div class="cfg-section-title">Paper Trading — Backup</div>
+        <div style="font-size:12px;color:var(--text3);margin-bottom:12px;line-height:1.6;">
+          Guarda o restaura tu balance, historial de strikes y niveles fundamentales.
+          Usa esto antes de cambiar de PC o como respaldo periódico.
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:24px;">
+          <button onclick="exportData();closeConfigModal()"
+            style="background:var(--green-bg);border:1px solid rgba(0,209,122,.4);border-radius:var(--r);
+            color:var(--green);padding:9px 14px;font-size:12px;font-weight:700;cursor:pointer;">
+            ⬇ Exportar Paper Trading
+          </button>
+          <label style="background:var(--blue-bg);border:1px solid rgba(61,139,255,.4);border-radius:var(--r);
+            color:var(--blue);padding:9px 14px;font-size:12px;font-weight:700;cursor:pointer;text-align:center;display:block;">
+            ⬆ Importar Paper Trading
+            <input type="file" accept=".json" onchange="importData(event);closeConfigModal()" style="display:none;">
+          </label>
+        </div>
+
         <div class="cfg-section-title">Exportar / Importar Configuración</div>
         <div style="font-size:12px;color:var(--text3);margin-bottom:20px;line-height:1.6;">
           Exporta toda tu configuración (APIs, tickers, niveles, Telegram) a un archivo <strong style="color:#fff;">.tdpconfig</strong>

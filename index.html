@@ -166,11 +166,6 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
     ⟳ —:——
   </button>
 
-  <!-- Semáforo SPY/QQQ — sesgo de mercado via Schwab quotes (solo topbar) -->
-  <span id="futuresSemaphore"
-    style="display:none;font-family:var(--mono);font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap;cursor:default;border:1px solid transparent;">
-  </span>
-
   <!-- Market status + clock -->
   <span id="mktStatus" class="mkt-closed">● —</span>
   <span class="clock" id="clockEl">—</span>
@@ -318,25 +313,13 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
     <div id="limitResult"></div>
   </div>
 
-  <!-- ── MIS ACTIVOS HOY ───────────────────────────────────── -->
+  <!-- ── SESGO DE MERCADO ─────────────────────────────────── -->
   <div class="rsec">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-      <div style="font-size:13px;font-weight:700;color:#fff;">📊 Mis activos hoy</div>
-      <button onclick="loadRotation()" id="rotRefreshBtn"
-        style="background:var(--bg4);border:1px solid var(--border2);border-radius:20px;color:var(--text3);padding:2px 10px;font-size:10px;font-weight:700;cursor:pointer;font-family:var(--mono);">
-        ⟳ Actualizar
-      </button>
-    </div>
-    <!-- Sesgo de mercado -->
-    <div id="rotSignal" style="margin-bottom:8px;"></div>
-    <!-- Índices -->
-    <div id="rotIndices" style="display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:8px;"></div>
-    <!-- Activos en señales -->
-    <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:5px;">Tus activos</div>
-    <div id="rotSectores"></div>
-    <!-- Refugios -->
-    <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;margin:8px 0 5px;">Refugios</div>
-    <div id="rotRefugios" style="display:grid;grid-template-columns:1fr 1fr;gap:5px;"></div>
+    <div id="rotSignal" style="margin-bottom:4px;"></div>
+    <!-- IDs ocultos: el JS de loadRotation() los sigue actualizando para calcular el sesgo -->
+    <div id="rotIndices"  style="display:none;"></div>
+    <div id="rotSectores" style="display:none;"></div>
+    <div id="rotRefugios" style="display:none;"></div>
   </div>
 
   <!-- ── ÍNDICES DEL DÍA ──────────────────────────────────── -->
@@ -349,6 +332,10 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
         ⟳ Actualizar
       </button>
     </div>
+    <!-- Semáforo SPY/QQQ — movido aquí desde topbar -->
+    <span id="futuresSemaphore"
+      style="display:none;font-family:var(--mono);font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap;cursor:default;border:1px solid transparent;margin-bottom:8px;">
+    </span>
     <div id="idxArea">
       <div class="idx-loading">⟳ Cargando índices…</div>
     </div>
@@ -1362,7 +1349,6 @@ function tick(){
     if(isHoliday){ms.textContent='● CERRADO (feriado)';ms.className='mkt-closed';}
     else if(isOpen){ms.textContent='● ABIERTO';ms.className='mkt-open';}
     else if(isPre){ms.textContent='● PRE-MARKET';ms.className='mkt-pre';}
-    else if(isAfter){ms.textContent='● AFTER-HOURS';ms.className='mkt-pre';}
     else{ms.textContent='● CERRADO';ms.className='mkt-closed';}
   }
 }
@@ -9055,7 +9041,7 @@ function _renderFuturesSemaphore(data){
   else{bg='rgba(255,194,52,.1)';border='rgba(255,194,52,.3)';color='var(--yellow)';dot='◆';}
   const spyPct=(spy.pct>=0?'+':'')+spy.pct.toFixed(2)+'%';
   const qqqPct=(qqq.pct>=0?'+':'')+qqq.pct.toFixed(2)+'%';
-  el.style.cssText=`display:inline-flex;align-items:center;gap:5px;background:${bg};border:1px solid ${border};color:${color};font-family:var(--mono);font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap;cursor:default;`;
+  el.style.cssText=`display:flex;align-items:center;gap:5px;background:${bg};border:1px solid ${border};color:${color};font-family:var(--mono);font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap;cursor:default;margin-bottom:8px;`;
   el.title=`Sesgo de mercado (vs cierre anterior)\nSPY $${spy.price.toFixed(2)} → ${spyPct}\nQQQ $${qqq.price.toFixed(2)} → ${qqqPct}\nFuente: Schwab /quotes (tiempo real)`;
   el.textContent=`${dot} SPY ${spyPct}  QQQ ${qqqPct}`;
 }
@@ -9064,7 +9050,7 @@ async function updateFuturesSemaphore(){
   const el=document.getElementById('futuresSemaphore');
   if(!el)return;
   const _showOffline=(reason)=>{
-    el.style.cssText='display:inline-flex;align-items:center;gap:4px;background:rgba(176,191,212,.07);border:1px solid rgba(176,191,212,.18);color:var(--text3,#6b7a8d);font-family:var(--mono);font-size:11px;font-weight:600;padding:3px 10px;border-radius:20px;white-space:nowrap;cursor:default;opacity:.7;';
+    el.style.cssText='display:flex;align-items:center;gap:4px;background:rgba(176,191,212,.07);border:1px solid rgba(176,191,212,.18);color:var(--text3,#6b7a8d);font-family:var(--mono);font-size:11px;font-weight:600;padding:3px 10px;border-radius:20px;white-space:nowrap;cursor:default;opacity:.7;margin-bottom:8px;';
     el.title=reason;
     el.textContent='\u25cc SPY —  QQQ —';
   };

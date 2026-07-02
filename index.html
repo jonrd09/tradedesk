@@ -318,6 +318,27 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
     <div id="limitResult"></div>
   </div>
 
+  <!-- ── MIS ACTIVOS HOY ───────────────────────────────────── -->
+  <div class="rsec">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+      <div style="font-size:13px;font-weight:700;color:#fff;">📊 Mis activos hoy</div>
+      <button onclick="loadRotation()" id="rotRefreshBtn"
+        style="background:var(--bg4);border:1px solid var(--border2);border-radius:20px;color:var(--text3);padding:2px 10px;font-size:10px;font-weight:700;cursor:pointer;font-family:var(--mono);">
+        ⟳ Actualizar
+      </button>
+    </div>
+    <!-- Sesgo de mercado -->
+    <div id="rotSignal" style="margin-bottom:8px;"></div>
+    <!-- Índices -->
+    <div id="rotIndices" style="display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:8px;"></div>
+    <!-- Activos en señales -->
+    <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:5px;">Tus activos</div>
+    <div id="rotSectores"></div>
+    <!-- Refugios -->
+    <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;margin:8px 0 5px;">Refugios</div>
+    <div id="rotRefugios" style="display:grid;grid-template-columns:1fr 1fr;gap:5px;"></div>
+  </div>
+
   <!-- ── ÍNDICES DEL DÍA ──────────────────────────────────── -->
   <div class="rsec" style="flex:1;min-height:0;">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
@@ -460,7 +481,16 @@ const MOM_STOCKS={
 };
 const ROT_DATA={
   indices:[{sym:'QQQ',name:'Nasdaq 100',color:'#3d8bff'},{sym:'SPY',name:'S&P 500',color:'#00d17a'},{sym:'IWM',name:'Russell 2K',color:'#ffc234'},{sym:'DIA',name:'Dow Jones',color:'#a78bfa'}],
-  sectores:[{sym:'XLK',name:'Tecnología'},{sym:'XLF',name:'Financiero'},{sym:'XLV',name:'Salud'},{sym:'XLE',name:'Energía'},{sym:'XLU',name:'Utilities'},{sym:'XLI',name:'Industrial'},{sym:'XLC',name:'Comunicación'},{sym:'XLP',name:'Consumo Básico'},{sym:'XLY',name:'Consumo Discr.'},{sym:'XLB',name:'Materiales'},{sym:'SOXX',name:'Semiconductores'},{sym:'XBI',name:'Biotech'}],
+  sectores:[
+    {sym:'META', name:'Meta'},
+    {sym:'GOOG', name:'Alphabet'},
+    {sym:'PLTR', name:'Palantir'},
+    {sym:'COIN', name:'Coinbase'},
+    {sym:'NVDA', name:'Nvidia'},
+    {sym:'TSLA', name:'Tesla'},
+    {sym:'XLK',  name:'Tech ETF'},
+    {sym:'SOXX', name:'Semis ETF'},
+  ],
   refugios:[{sym:'GLD',name:'Oro',color:'#ffc234'},{sym:'TLT',name:'Bonos T',color:'#a78bfa'},{sym:'VIXY',name:'VIX ETF',color:'#ff4d6d'},{sym:'UUP',name:'Dólar',color:'#3d8bff'}]
 };
 // ROT_FALLBACK/ROT_PREV eliminados — rotación usa solo datos live de Finnhub.
@@ -1886,6 +1916,14 @@ async function _buildSignalsCore(){
   try{
 
   for(const sym of _signalTickers){
+    // FIX TDZ (2026-07-02): _wsIsToday declarado al inicio del bloque — evita
+    // "Cannot access '_wsIsToday' before initialization" que ocurría cuando
+    // algún cómputo de indicadores (bb1h, stoch, etc.) lo referenciaba antes
+    // de que el const de la línea ~2054 fuera ejecutado.
+    // Con let al inicio del bloque, la variable existe (como false) desde el primer tick.
+    const _wsC_early=_wsSessionCandle[sym];
+    const _etNow_early=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+    let _wsIsToday=!!(_wsC_early&&_wsC_early.date===_etNow_early.toDateString()&&_wsC_early.close>0);
     let ohlc1h=null,ohlc15=null,ohlcD=null;
     let dataLabel='📡 Sin fuente';
 
@@ -2047,11 +2085,11 @@ async function _buildSignalsCore(){
       const lastEt=new Date(lastDt.toLocaleString('en-US',{timeZone:'America/New_York'}));
       return lastEt.toDateString()===_todayStrET&&lastEt.getTime()>=_sessionOpenMs;
     })();
-    // _wsIsToday: precio en tiempo real del WS disponible para hoy — debe declararse
-    // AQUÍ, antes de _bbSessionOk y antes de meta (ambos la usan)
+    // _wsIsToday ya declarado al inicio del bloque (ver FIX TDZ arriba)
+    // Re-evaluamos aquí con datos frescos por si llegó un tick del WS durante el fetch
     const _wsC=_wsSessionCandle[sym];
     const _etNow15d=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
-    const _wsIsToday=_wsC&&_wsC.date===_etNow15d.toDateString()&&_wsC.close>0;
+    _wsIsToday=!!(_wsC&&_wsC.date===_etNow15d.toDateString()&&_wsC.close>0);
     // En premarket (antes de 9:30) o si no hay vela real → bloquear BB
     // EXCEPCIÓN CRÍTICA: si el WebSocket de Finnhub tiene precio confirmado de hoy
     // (_wsIsToday=true), la vela en formación ES una vela real aunque todavía no
@@ -3192,7 +3230,12 @@ function rotCell(sym,name,pct,color){
   const up=pct>=0;const col=up?'var(--green)':'var(--red)';const bdr=color?`border-left:2px solid ${color}`:`border-left:2px solid ${col}`;
   return`<div style="background:var(--bg3);border-radius:var(--r);padding:7px 9px;${bdr};"><div style="display:flex;justify-content:space-between;align-items:center;"><div><div style="font-family:var(--mono);font-size:12px;font-weight:700;color:var(--text)">${sym}</div><div style="font-size:10px;color:var(--text3)">${name}</div></div><div style="font-family:var(--mono);font-size:13px;font-weight:700;color:${col}">${up?'+':''}${pct.toFixed(2)}%</div></div></div>`;
 }
+// FIX RATE-LIMIT (2026-07-02): _rotationBusy evita dos loadRotation() simultáneas
+// que duplicaban las llamadas a Finnhub y generaban pares de errores 429.
+let _rotationBusy=false;
 async function loadRotation(){
+  if(_rotationBusy)return; // ya corriendo — ignorar llamada duplicada
+  _rotationBusy=true;
   const allSyms=[...ROT_DATA.indices.map(x=>x.sym),...ROT_DATA.sectores.map(x=>x.sym),...ROT_DATA.refugios.map(x=>x.sym)];
   const quotes={};
   // No hardcoded fallback prices — show "sin datos" if Finnhub doesn't respond
@@ -3205,13 +3248,12 @@ async function loadRotation(){
         const res=await fetchRotationQuote(allSyms[i]).catch(()=>null);
         if(res)quotes[allSyms[i]]=res;
       }catch(e){}
-      if(i<allSyms.length-1)await new Promise(r=>setTimeout(r,2000));
+    if(i<allSyms.length-1)await new Promise(r=>setTimeout(r,2500)); // 2.5s entre llamadas — reduce 429
     }
   }
   const indEl=document.getElementById('rotIndices');
   if(indEl)indEl.innerHTML=ROT_DATA.indices.map(x=>quotes[x.sym]?rotCell(x.sym,x.name,quotes[x.sym].pct,x.color):'').join('');
-  const secEl=document.getElementById('rotSectores');
-  if(secEl){
+  const secEl=document.getElementById('rotSectores');  if(secEl){
     const wp=ROT_DATA.sectores.filter(x=>quotes[x.sym]).map(x=>({...x,pct:quotes[x.sym].pct})).sort((a,b)=>b.pct-a.pct);
     secEl.innerHTML=wp.map(x=>{
       const up=x.pct>=0;const col=up?'var(--green)':'var(--red)';const bw=Math.min(Math.abs(x.pct)*20,100);
@@ -3222,16 +3264,21 @@ async function loadRotation(){
   if(refEl)refEl.innerHTML=ROT_DATA.refugios.map(x=>quotes[x.sym]?rotCell(x.sym,x.name,quotes[x.sym].pct,x.color):'').join('');
   const sigEl=document.getElementById('rotSignal');
   if(sigEl){
-    const techPct=quotes['XLK']?.pct||0,utilPct=quotes['XLU']?.pct||0;
+    const techPct=quotes['XLK']?.pct||0,semiPct=quotes['SOXX']?.pct||0;
     const goldPct=quotes['GLD']?.pct||0,bondPct=quotes['TLT']?.pct||0;
-    const vixPct=quotes['VIXY']?.pct||0,semiPct=quotes['SOXX']?.pct||0;
+    const vixPct=quotes['VIXY']?.pct||0;
+    const metaPct=quotes['META']?.pct||0,googPct=quotes['GOOG']?.pct||0;
+    const pltrPct=quotes['PLTR']?.pct||0,coinPct=quotes['COIN']?.pct||0;
+    const avgSignalTickers=(metaPct+googPct+pltrPct+coinPct)/4;
     let sig='〰️ MIXTO — Sin señal clara. Opera con confirmación técnica.',col='var(--text2)',bg='var(--bg3)',bdr='var(--border)';
     if(vixPct>5&&goldPct>0&&bondPct>0&&techPct<0){sig='🚨 FUGA AL REFUGIO — VIXY↑ Oro↑ Bonos↑ Tech↓';col='var(--red)';bg='var(--red-bg)';bdr='rgba(255,77,109,.3)';}
-    else if(techPct>1&&semiPct>1&&vixPct<0){sig='🚀 RISK ON — Tech↑ Semis↑ VIXY↓. Favorable para CALLS.';col='var(--green)';bg='var(--green-bg)';bdr='rgba(0,209,122,.3)';}
-    else if(utilPct>techPct+1&&goldPct>0){sig='🛡️ ROTACIÓN DEFENSIVA — Utilities y Oro lideran.';col='var(--yellow)';bg='var(--yellow-bg)';bdr='rgba(255,194,52,.3)';}
+    else if(avgSignalTickers>1.5&&techPct>0&&vixPct<0){sig=`🚀 RISK ON — META/GOOG/PLTR/COIN promedio +${avgSignalTickers.toFixed(1)}%. Favorable para CALLS.`;col='var(--green)';bg='var(--green-bg)';bdr='rgba(0,209,122,.3)';}
+    else if(avgSignalTickers<-1.5&&vixPct>0){sig=`🔻 PRESIÓN EN TUS ACTIVOS — promedio ${avgSignalTickers.toFixed(1)}%. Cuidado con CALLS.`;col='var(--red)';bg='var(--red-bg)';bdr='rgba(255,77,109,.3)';}
     else if(semiPct<-2&&techPct<-1){sig='⚠️ PRESIÓN TECH/SEMIS — Cuidado con CALLS en tech.';col='var(--yellow)';bg='var(--yellow-bg)';bdr='rgba(255,194,52,.3)';}
+    else if(goldPct>0.5&&bondPct>0.5){sig='🛡️ ROTACIÓN DEFENSIVA — Oro y Bonos lideran.';col='var(--yellow)';bg='var(--yellow-bg)';bdr='rgba(255,194,52,.3)';}
     sigEl.innerHTML=`<div style="background:${bg};border:1px solid ${bdr};border-radius:var(--r);padding:9px 12px;font-size:12px;color:${col};font-weight:600;line-height:1.5;margin-top:8px;">${sig}</div>`;
   }
+  _rotationBusy=false; // FIX: liberar flag para permitir próxima actualización
 }
 
 // ═══════════════════════════════════════════════════════════════

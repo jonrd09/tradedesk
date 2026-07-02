@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- TradeDeskPro v5 | build:20260702_audit_fixes | B1:_wsSessionCandle_per15min B2:BB-REGRESO_strategy B3:intentoBull_loose B4:bbCallTrigger_connected B5:dedup_distVars B6:setup_gate_bbw B7:stochPutOk_noFloor A1:bbSessionOk_isMarketHours A2:schwabToken_firstTicker -->
+<!-- TradeDeskPro v5 | build:20260702_momentum_gate | B1:_wsSessionCandle_per15min B2:BB-REGRESO_strategy B3:intentoBull_loose B4:bbCallTrigger_connected B5:dedup_distVars B6:setup_gate_bbw B7:stochPutOk_noFloor A1:bbSessionOk_isMarketHours A2:schwabToken_firstTicker M1:momentumToLower_gate M2:bbwExpandActive M3:aviso_stricter M4:intento_volOk M5:unified_setup_card -->
 <html lang="es">
 <head>
 <meta charset="UTF-8">
@@ -2281,59 +2281,118 @@ async function _buildSignalsCore(){
     // expanden normalmente 0.05-0.10% por vela. Bajado a 0.05%.
     const bbwAccelerating=(lBBW15-lBBW15_2)>0.05;
 
-    // ── Nivel 2: INTENTO DE RUPTURA ──────────────────────────────────────────
-    // Tiene prioridad sobre los otros niveles — si hay intento, no mostrar nivel 1
-    // FIX B3: usa _baseCallCondsLoose — no exige bbwRising para no perder wick tests
-    // en tendencias establecidas donde las bandas están abiertas pero no creciendo.
-    const intentoBull=wickTestingUpper&&_baseCallCondsLoose;
-    const intentoBear=wickTestingLower&&_basePutCondsLoose;
-    if((intentoBull||intentoBear)&&_bbSessionOk){
-      const iType=intentoBull?'call':'put';
-      const iDir=intentoBull?'Superior':'Inferior';
-      const iDist=intentoBull?distHighToUpper:distLowToLower;
-      const iWick=intentoBull?`H: $${_candleHigh.toFixed(2)} vs Banda: $${lUp15.toFixed(2)}`:`L: $${_candleLow.toFixed(2)} vs Banda: $${lLow15.toFixed(2)}`;
-      all.push({...meta,code:'INTENTO',name:`⚡ Intento de ruptura — Banda ${iDir}`,type:iType,isSetup:true,_setupLevel:2,reqs:[
-        {ok:true,             tf:'15m',text:`🔥 VELA TOCANDO banda ${iDir} (${iWick})`},
-        {ok:_wsIsToday,       tf:'WS', text:_wsIsToday?`Dato en tiempo real (WebSocket Finnhub activo)`:`Dato de última vela cerrada (WS sin datos de hoy)`},
-        {ok:lBBW15>=0.8,      tf:'15m',text:`Bandas abiertas (BBW ${lBBW15.toFixed(2)}% ≥ 0.8%)${bbwRising?' ⚡ expandiéndose':''}`},
-        {ok:intentoBull?lP15>lMA20_15:lP15<lMA20_15, tf:'15m',text:`MA20 alineada: $${lMA20_15.toFixed(2)}`},
-        {ok:intentoBull?align1hBull:align1hBear, tf:'1H',text:`1H confirma dirección`},
-        {ok:stochCallOk||stochPutOk||stochCallCross||stochPutCross, tf:'15m',text:`Stochastics${(stochCallCross||stochPutCross)?` 🔔 CRUCE`:''} apoyando (%K ${lK15.toFixed(0)})`},
+    // ════════════════════════════════════════════════════════════════════════
+    // MOMENTUM HACIA LA BANDA — FIX (auditoría 2026-07-02, caso META 3PM)
+    // ════════════════════════════════════════════════════════════════════════
+    // Problema: META a las 3PM con BBW=1.26% estático y precio drifting
+    // lentamente hacia la banda inferior disparaba SETUP sin volatilidad real.
+    // Con bbwRising=+0.06% (threshold demasiado bajo) y precio a 0.28% de
+    // la banda, la señal se generaba sin que hubiera fuerza real en el movimiento.
+    //
+    // Las tres condiciones que garantizan movimiento real:
+    //
+    //  1. _bbwExpandActive: BBW creció ≥0.12% en las últimas 2 velas (30min).
+    //     No solo "subió algo" sino expansión estadísticamente significativa.
+    //     META 3PM: Δ≈0.06% → FALLA. Breakout real 9:30AM: Δ≈0.30% → PASA.
+    //
+    //  2. _mom2of3Lower/Upper: ≥2 de las últimas 3 velas de 15min tienen
+    //     CUERPO en la dirección de la banda. Precio moviéndose, no lateral.
+    //     META 3PM: mezcla de velas rojas/verdes → FALLA. Caída fuerte: 3 rojas → PASA.
+    //
+    //  3. _velocityToLower/Upper: la distancia a la banda se redujo ≥0.05%
+    //     en las últimas 2 velas. El precio se está ACERCANDO activamente.
+    //     META 3PM: drift lento, <0.03%/vela → FALLA. Momentum fuerte: 0.15%/vela → PASA.
+    //
+    // INTENTO (wick toca la banda): usa gate más suave — solo _bbwExpandActive
+    //   o BBW ya muy abierto (≥1.8%), porque la vela ya probó la banda.
+    // SETUP (close cerca sin tocar): requiere las 3 condiciones en AND.
+    // AVISO (a 1.0% de la banda): bbwAccelerating subido a 0.12% (era 0.05%).
+    //
+    // Ventana de máxima confiabilidad: 9:30–11:00 AM ET (primer impulso del día).
+    // Los breakouts de banda con mayor follow-through ocurren en este período.
+    // Fuera de ella las señales son válidas pero se informa al trader.
+    // ════════════════════════════════════════════════════════════════════════
+
+    // 1. BBW expandiéndose activamente: Δ ≥ 0.12% en 2 velas (30min)
+    const _bbwExpandActive=(lBBW15-lBBW15_2)>=0.12;
+
+    // 2. Dirección de las últimas 3 velas de 15min (o15_arr declarado en línea ~2063)
+    const _v3bull=[c15[n15-3]>o15_arr[n15-3],c15[n15-2]>o15_arr[n15-2],c15[n15-1]>o15_arr[n15-1]];
+    const _mom2of3Upper=_v3bull.filter(Boolean).length>=2; // ≥2 alcistas → momentum a banda sup
+    const _mom2of3Lower=_v3bull.filter(v=>!v).length>=2;  // ≥2 bajistas → momentum a banda inf
+
+    // 3. Velocidad de acercamiento: distancia a la banda se redujo en 2 velas
+    const _c2ago=n15>=3?c15[n15-3]:c15[0];
+    const _dLow2ago=lLow15>0?Math.max(0,(_c2ago-lLow15)/_c2ago*100):99;
+    const _dUp2ago =lUp15>0 ?Math.max(0,(lUp15-_c2ago)/_c2ago*100) :99;
+    const _velocityToLower=(_dLow2ago-distClosToLower)>=0.05; // precio se acercó ≥0.05%
+    const _velocityToUpper=(_dUp2ago -distClosToUpper)>=0.05;
+
+    // GATE COMPLETO de momentum para SETUP (AND de las 3 condiciones):
+    const _momentumToLower=_mom2of3Lower&&_bbwExpandActive&&_velocityToLower;
+    const _momentumToUpper=_mom2of3Upper&&_bbwExpandActive&&_velocityToUpper;
+
+    // GATE suave para INTENTO (wick ya toca = fuerza implícita, solo validar volatilidad):
+    const _intentoVolOk=_bbwExpandActive||lBBW15>=1.8; // expanding OR ya muy abierto
+
+    // Ventana de máxima confiabilidad para breakouts de banda
+    const _momentumWindow=_mNow>=570&&_mNow<660; // 9:30–11:00 AM ET
+
+    // ── Nivel 2: INTENTO — wick ya tocó la banda ─────────────────────────────
+    const intentoBull=wickTestingUpper&&_baseCallCondsLoose&&_intentoVolOk;
+    const intentoBear=wickTestingLower&&_basePutCondsLoose&&_intentoVolOk;
+
+    // ── Nivel 3: PRE-RUPTURA — close muy cerca de la banda con momentum ───────
+    const setupBull=!intentoBull&&nearUpper&&lBBW15<2.0&&_baseCallConds&&(stochCallOk||stochCallCross)&&_momentumToUpper;
+    const setupBear=!intentoBear&&nearLower&&lBBW15<2.0&&_basePutConds&&(stochPutOk||stochPutCross)&&_momentumToLower;
+
+    // ── Nivel 1: AVISO — precio acercándose con BBW expandiéndose activamente ─
+    const _bbwAccelStrict=(lBBW15-lBBW15_2)>0.12; // umbral estricto (era >0.05)
+    const acercBull=!intentoBull&&!setupBull&&approachingUpper1&&_baseCallConds&&_bbwAccelStrict;
+    const acercBear=!intentoBear&&!setupBear&&approachingLower1&&_basePutConds&&_bbwAccelStrict;
+
+    // ════════════════════════════════════════════════════════════════════════
+    // SETUP UNIFICADO — UN SOLO AVISO por dirección
+    // Colapsa los 3 niveles en una tarjeta para que el trader entre a verificar.
+    // Prioridad: INTENTO (wick tocó) > PRE-RUPTURA (close cerca) > AVISO (se acerca)
+    // Code siempre = 'SETUP'. El nombre refleja cuál nivel disparó.
+    // ════════════════════════════════════════════════════════════════════════
+
+    // ── CALL (hacia banda superior) ───────────────────────────────────────────
+    if(_bbSessionOk&&(intentoBull||setupBull||acercBull)){
+      const _lvl=intentoBull?2:setupBull?3:1;
+      const _nm=_lvl===2?'⚡ Setup — Banda Superior (wick tocando)':_lvl===3?'🎯 Setup — Banda Superior (precio cerca)':'📡 Setup — Banda Superior (acercándose)';
+      const _trigLine=intentoBull
+        ?`🔥 HIGH $${_candleHigh.toFixed(2)} tocó banda superior $${lUp15.toFixed(2)}`
+        :`Close a ${distClosToUpper.toFixed(2)}% de banda superior $${lUp15.toFixed(2)}`;
+      all.push({...meta,code:'SETUP',name:_nm,type:'call',isSetup:true,_setupLevel:_lvl,reqs:[
+        {ok:true,          tf:'15m',text:_trigLine},
+        {ok:_bbwExpandActive||lBBW15>=1.8, tf:'15m',text:_bbwExpandActive?`BBW expandiéndose: +${(lBBW15-lBBW15_2).toFixed(2)}% en 30min`:lBBW15>=1.8?`Bandas abiertas (BBW ${lBBW15.toFixed(2)}%)`:(`BBW estático (${lBBW15.toFixed(2)}%, Δ${(lBBW15-lBBW15_2).toFixed(2)}%/30min)`)},
+        {ok:_mom2of3Upper, tf:'15m',text:`Momentum: ${_v3bull.map(v=>v?'🟢':'🔴').join(' ')} — ${_v3bull.filter(Boolean).length}/3 velas alcistas`},
+        {ok:_velocityToUpper,tf:'15m',text:`Velocidad hacia banda: Δ${(_dUp2ago-distClosToUpper).toFixed(2)}% en 30min`},
+        {ok:lP15>lMA20_15, tf:'15m',text:`MA20 alineada — precio sobre $${lMA20_15.toFixed(2)}`},
+        {ok:align1hBull,   tf:'1H', text:`1H confirma dirección alcista`},
+        {ok:stochCallOk||stochCallCross,tf:'15m',text:`Stochastics${stochCallCross?' 🔔 CRUCE':''} apoyando (%K ${lK15.toFixed(0)} > %D ${lD15.toFixed(0)})`},
+        {ok:_momentumWindow,tf:'⏰',text:_momentumWindow?`✅ Ventana óptima 9:30–11:00 AM`:`ℹ️ ${Math.floor(_mNow/60)}:${String(_mNow%60).padStart(2,'0')} ET — fuera de ventana, confirmar`},
       ]});
     }
 
-    // ── Nivel 3: PRE-RUPTURA (solo si no hubo intento ya detectado) ──────────
-    // FIX B6 (2026-07-02): setupBull/setupBear ahora incluyen lBBW15<2.0 como gate real
-    // — antes la condición aparecía en el req de la tarjeta (ok:lBBW15<2.0) pero NO
-    // bloqueaba el signal, causando señales SETUP con BBW>2% que mostraban ❌ engañoso.
-    const setupBull=!intentoBull&&nearUpper&&lBBW15<2.0&&_baseCallConds&&(stochCallOk||stochCallCross);
-    const setupBear=!intentoBear&&nearLower&&lBBW15<2.0&&_basePutConds&&(stochPutOk||stochPutCross);
-    if((setupBull||setupBear)&&_bbSessionOk){
-      const setupType=setupBull?'call':'put';
-      const setupDir=setupBull?'Superior':'Inferior';
-      const setupDist=(setupBull?distClosToUpper:distClosToLower).toFixed(2);
-      all.push({...meta,code:'SETUP',name:`Setup BB — Precio cerca de banda ${setupDir}`,type:setupType,isSetup:true,_setupLevel:3,reqs:[
-        {ok:lBBW15<2.0,              tf:'15m',text:`BB comprimido (BBW ${lBBW15.toFixed(1)}% < 2%)`},
-        {ok:setupBull||setupBear,    tf:'15m',text:`Close a ${setupDist}% de banda ${setupDir} ($${(setupBull?lUp15:lLow15).toFixed(2)}) — umbral 0.5%`},
-        {ok:setupBull?lP15>lMA20_15:lP15<lMA20_15,tf:'15m',text:`MA20 alineada: $${lMA20_15.toFixed(2)}`},
-        {ok:setupBull?(stochCallOk||stochCallCross):(stochPutOk||stochPutCross), tf:'15m',text:`Stochastics${(setupBull?stochCallCross:stochPutCross)?` 🔔 CRUCE `:' '}apoyando (%K ${lK15.toFixed(0)} ${lK15>lD15?'>':'<'} %D ${lD15.toFixed(0)})`},
-        {ok:bbwRising,               tf:'15m',text:`BBW expandiéndose: ${lBBW15.toFixed(2)}% > ${lBBW15_1.toFixed(2)}%`},
-        {ok:setupBull?align1hBull:align1hBear, tf:'1H', text:`1H confirma dirección: precio ${setupBull?'sobre':'bajo'} MA20 1H`},
-      ]});
-    }
-
-    // ── Nivel 1: ACERCÁNDOSE (solo si no hay intento ni pre-ruptura ya) ───────
-    const acercBull=!intentoBull&&!setupBull&&approachingUpper1&&_baseCallConds&&bbwAccelerating;
-    const acercBear=!intentoBear&&!setupBear&&approachingLower1&&_basePutConds&&bbwAccelerating;
-    if((acercBull||acercBear)&&_bbSessionOk){
-      const acType=acercBull?'call':'put';
-      const acDir=acercBull?'Superior':'Inferior';
-      const acDist=(acercBull?distClosToUpper:distClosToLower).toFixed(2);
-      all.push({...meta,code:'AVISO',name:`📡 Precio acercándose a banda ${acDir}`,type:acType,isSetup:true,_setupLevel:1,reqs:[
-        {ok:true,             tf:'15m',text:`Precio a ${acDist}% de banda ${acDir} ($${(acercBull?lUp15:lLow15).toFixed(2)})`},
-        {ok:bbwAccelerating,  tf:'15m',text:`BBW acelerando: ${lBBW15_2.toFixed(2)}% → ${lBBW15_1.toFixed(2)}% → ${lBBW15.toFixed(2)}%`},
-        {ok:acercBull?lP15>lMA20_15:lP15<lMA20_15, tf:'15m',text:`MA20 alineada: $${lMA20_15.toFixed(2)}`},
-        {ok:acercBull?align1hBull:align1hBear, tf:'1H',text:`1H confirma dirección`},
+    // ── PUT (hacia banda inferior) ────────────────────────────────────────────
+    if(_bbSessionOk&&(intentoBear||setupBear||acercBear)){
+      const _lvl=intentoBear?2:setupBear?3:1;
+      const _nm=_lvl===2?'⚡ Setup — Banda Inferior (wick tocando)':_lvl===3?'🎯 Setup — Banda Inferior (precio cerca)':'📡 Setup — Banda Inferior (acercándose)';
+      const _trigLine=intentoBear
+        ?`🔥 LOW $${_candleLow.toFixed(2)} tocó banda inferior $${lLow15.toFixed(2)}`
+        :`Close a ${distClosToLower.toFixed(2)}% de banda inferior $${lLow15.toFixed(2)}`;
+      all.push({...meta,code:'SETUP',name:_nm,type:'put',isSetup:true,_setupLevel:_lvl,reqs:[
+        {ok:true,          tf:'15m',text:_trigLine},
+        {ok:_bbwExpandActive||lBBW15>=1.8, tf:'15m',text:_bbwExpandActive?`BBW expandiéndose: +${(lBBW15-lBBW15_2).toFixed(2)}% en 30min`:lBBW15>=1.8?`Bandas abiertas (BBW ${lBBW15.toFixed(2)}%)`:(`BBW estático (${lBBW15.toFixed(2)}%, Δ${(lBBW15-lBBW15_2).toFixed(2)}%/30min)`)},
+        {ok:_mom2of3Lower, tf:'15m',text:`Momentum: ${_v3bull.map(v=>v?'🟢':'🔴').join(' ')} — ${_v3bull.filter(v=>!v).length}/3 velas bajistas`},
+        {ok:_velocityToLower,tf:'15m',text:`Velocidad hacia banda: Δ${(_dLow2ago-distClosToLower).toFixed(2)}% en 30min`},
+        {ok:lP15<lMA20_15, tf:'15m',text:`MA20 alineada — precio bajo $${lMA20_15.toFixed(2)}`},
+        {ok:align1hBear,   tf:'1H', text:`1H confirma dirección bajista`},
+        {ok:stochPutOk||stochPutCross,tf:'15m',text:`Stochastics${stochPutCross?' 🔔 CRUCE':''} apoyando (%K ${lK15.toFixed(0)} < %D ${lD15.toFixed(0)})`},
+        {ok:_momentumWindow,tf:'⏰',text:_momentumWindow?`✅ Ventana óptima 9:30–11:00 AM`:`ℹ️ ${Math.floor(_mNow/60)}:${String(_mNow%60).padStart(2,'0')} ET — fuera de ventana, confirmar`},
       ]});
     }
 

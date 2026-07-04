@@ -117,13 +117,13 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
 /* ── Índices Panel ── */
 .idx-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
 .idx-card{background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);padding:8px 10px;cursor:default;}
-.idx-card.idx-bull{border-left:2px solid var(--green);}
-.idx-card.idx-bear{border-left:2px solid var(--red);}
-.idx-card.idx-flat{border-left:2px solid var(--border2);}
 .idx-top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:3px;}
 .idx-sym{font-family:var(--mono);font-size:12px;font-weight:700;color:var(--text);}
-.idx-pct{font-family:var(--mono);font-size:12px;font-weight:700;}
+.idx-pct{font-family:var(--mono);font-size:16px;font-weight:700;}
 .idx-price{font-family:var(--mono);font-size:10px;color:var(--text3);margin-bottom:4px;}
+.idx-card.idx-bull{border-left:3px solid var(--green);background:rgba(0,209,122,.04);}
+.idx-card.idx-bear{border-left:3px solid var(--red);background:rgba(255,77,109,.04);}
+.idx-card.idx-flat{border-left:3px solid var(--border2);}
 .idx-spark{display:block;width:100%;height:38px;border-radius:3px;background:rgba(0,0,0,.15);}
 .idx-time{display:flex;justify-content:space-between;margin-top:2px;}
 .idx-time span{font-size:9px;color:var(--text3);}
@@ -9005,36 +9005,8 @@ function _renderFuturesSemaphore(data){
 }
 
 async function updateFuturesSemaphore(){
-  const el=document.getElementById('futuresSemaphore');
-  if(!el)return;
-  const _showOffline=(reason)=>{
-    el.style.cssText='display:flex;align-items:center;gap:4px;background:rgba(176,191,212,.07);border:1px solid rgba(176,191,212,.18);color:var(--text3,#6b7a8d);font-family:var(--mono);font-size:11px;font-weight:600;padding:3px 10px;border-radius:20px;white-space:nowrap;cursor:default;opacity:.7;margin-bottom:8px;';
-    el.title=reason;
-    el.textContent='\u25cc SPY —  QQQ —';
-  };
-  try{
-    // Si Schwab no está configurado — ocultar completamente
-    const hasCreds=!!(localStorage.getItem('schwab_client_id'));
-    if(!hasCreds){el.style.display='none';return;}
-
-    // getSchwabToken() intenta refresh automático si el token expiró
-    const token=await getSchwabToken();
-    if(!token){
-      // Fin de semana o token no renovable — mostrar pill offline
-      _showOffline('Futuros /ES /NQ — Schwab sin sesión activa\nEl token se renueva automáticamente el lunes al abrir la plataforma.');
-      return;
-    }
-    // Token válido → fetch y render
-    const data=await _fetchFuturesBias();
-    if(data){
-      _renderFuturesSemaphore(data);
-    }else{
-      _showOffline('Futuros /ES /NQ — datos no disponibles ahora\nSchwab conectado. Se reintentará en el próximo ciclo.');
-    }
-  }catch(e){
-    addLog('debug','Futuros',`updateFuturesSemaphore: ${e.message}`);
-    try{_showOffline(`Futuros — error: ${e.message}`);}catch(_){}
-  }
+  // futuresSemaphore eliminado de la UI — idxBlockInline maneja el estado del mercado
+  // Esta función se conserva para no romper los call sites existentes
 }
 </script>
 <!-- ══════════════════════════════════════════════════════

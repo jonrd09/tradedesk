@@ -319,13 +319,12 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
         ⟳ Actualizar
       </button>
     </div>
-    <!-- Semáforo SPY/QQQ + aviso de movimiento en la misma barra -->
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;min-height:28px;">
-      <span id="futuresSemaphore"
-        style="display:none;font-family:var(--mono);font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;white-space:nowrap;cursor:default;border:1px solid transparent;">
-      </span>
-      <span id="idxBlockInline" style="font-size:12px;font-weight:700;white-space:nowrap;"></span>
+    <!-- Barra de estado de mercado — solo mensaje de bloque, sin datos de índices -->
+    <div style="margin-bottom:8px;min-height:28px;">
+      <span id="idxBlockInline" style="font-size:12px;font-weight:700;white-space:nowrap;display:block;"></span>
     </div>
+    <!-- futuresSemaphore oculto — el JS lo necesita pero no se muestra -->
+    <span id="futuresSemaphore" style="display:none;"></span>
     <div id="idxArea">
       <div class="idx-loading">⟳ Cargando índices…</div>
     </div>
@@ -7889,18 +7888,49 @@ function renderIndicesPanel(){
 
   area.innerHTML=`<div class="idx-grid">${cards}</div>`;
 
-  // Aviso de movimiento → esquina derecha de la barra SPY/QQQ
+  // ── Barra de estado de bloque — sistema visual por intensidad ──────────────
   const _blkEl=document.getElementById('idxBlockInline');
   if(_blkEl){
-    // Extraer solo el texto del blockHTML (sin el div wrapper con estilos de bloque)
-    const _tmp=document.createElement('div');
-    _tmp.innerHTML=blockHTML;
-    const _txt=_tmp.firstChild?.textContent||'';
-    const _cls=_tmp.firstChild?.className||'';
-    const _isBull=_cls.includes('bull'),_isBear=_cls.includes('bear'),_isMix=_cls.includes('mix');
-    _blkEl.textContent=_txt;
-    _blkEl.style.color=_isBull?'var(--green)':_isBear?'var(--red)':_isMix?'var(--yellow)':'var(--text3)';
+    let _bgStyle='', _txt='', _color='';
+
+    if(allUp){
+      // Bloque alcista total (4/4) — fondo verde sólido
+      _bgStyle=`background:rgba(0,209,122,.25);border:1px solid rgba(0,209,122,.6);border-radius:10px;padding:5px 14px;display:inline-block;`;
+      _txt=`🚀 BLOQUE ALCISTA — ${avgPct>=0?'+':''}${avgPct}% promedio · Favorable para CALLS`;
+      _color='var(--green)';
+    }else if(allDn){
+      // Bloque bajista total (4/4) — fondo rojo sólido
+      _bgStyle=`background:rgba(255,77,109,.22);border:1px solid rgba(255,77,109,.6);border-radius:10px;padding:5px 14px;display:inline-block;`;
+      _txt=`🔻 BLOQUE BAJISTA — ${avgPct}% promedio · Favorable para PUTS`;
+      _color='var(--red)';
+    }else if(ups>=3){
+      // Mayoría alcista (3/4) — borde verde
+      _bgStyle=`background:rgba(0,209,122,.08);border:1px solid rgba(0,209,122,.4);border-radius:10px;padding:5px 14px;display:inline-block;`;
+      _txt=`📈 Mayoría alcista — ${ups}↑ ${dns}↓`;
+      _color='var(--green)';
+    }else if(dns>=3){
+      // Mayoría bajista (3/4) — borde rojo
+      _bgStyle=`background:rgba(255,77,109,.08);border:1px solid rgba(255,77,109,.4);border-radius:10px;padding:5px 14px;display:inline-block;`;
+      _txt=`📉 Mayoría bajista — ${dns}↓ ${ups}↑`;
+      _color='var(--red)';
+    }else if(withData.length<4){
+      // Sin datos completos
+      _bgStyle=`background:var(--bg4);border:1px solid var(--border);border-radius:10px;padding:5px 14px;display:inline-block;`;
+      _txt=`⏳ Cargando índices (${withData.length}/4)`;
+      _color='var(--text3)';
+    }else{
+      // Mixto — borde amarillo
+      _bgStyle=`background:rgba(255,194,52,.08);border:1px solid rgba(255,194,52,.4);border-radius:10px;padding:5px 14px;display:inline-block;`;
+      _txt=`⚡ Movimiento mixto — sin bloque claro (${ups}↑ ${dns}↓)`;
+      _color='var(--yellow)';
+    }
+
+    _blkEl.style.cssText=`font-size:13px;font-weight:700;white-space:nowrap;display:block;`;
+    _blkEl.innerHTML=`<span style="${_bgStyle}color:${_color};">${_txt}</span>`;
   }
+
+  // Sincronizar barra izquierda con los mismos datos Finnhub que acaban de renderizar
+  updateFuturesSemaphore().catch(()=>{});
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -8937,46 +8967,23 @@ async function _pmPDF(id){
 const _futCache={};
 
 async function _fetchFuturesBias(){
-  // Primero intentar leer de _livePrices — ya están cargados por loadLivePrices()
-  const spyLive=_livePrices?.['SPY'];
-  const qqqLive=_livePrices?.['QQQ'];
-  const liveOk=(d)=>d&&d.price>0&&(Date.now()-d.ts<15*60*1000);
+  // Leer directamente de _idxCache — misma fuente que las tarjetas de índices (Finnhub)
+  // Esto garantiza que la barra y las tarjetas muestran exactamente el mismo % (correcto)
+  // y elimina la llamada duplicada a Schwab /quotes que daba porcentajes incorrectos.
+  const spy=_idxCache['SPY'], qqq=_idxCache['QQQ'];
+  const hasData=(d)=>d&&d.pct!==null&&d.pct!==undefined;
 
-  if(liveOk(spyLive)&&liveOk(qqqLive)){
+  if(hasData(spy)&&hasData(qqq)){
     return{
-      SPY:{bias:spyLive.pct>0.15?'bull':spyLive.pct<-0.15?'bear':'neutral',
-           price:spyLive.price,pct:spyLive.pct,ts:Date.now()},
-      QQQ:{bias:qqqLive.pct>0.15?'bull':qqqLive.pct<-0.15?'bear':'neutral',
-           price:qqqLive.price,pct:qqqLive.pct,ts:Date.now()}
+      SPY:{bias:spy.pct>0.15?'bull':spy.pct<-0.15?'bear':'neutral',
+           price:spy.price,pct:spy.pct,ts:spy.ts||Date.now()},
+      QQQ:{bias:qqq.pct>0.15?'bull':qqq.pct<-0.15?'bear':'neutral',
+           price:qqq.price,pct:qqq.pct,ts:qqq.ts||Date.now()}
     };
   }
-
-  // Fallback: fetch directo si _livePrices no tiene SPY/QQQ (no están en signal tickers)
-  const token=await getSchwabToken();
-  if(!token)return null;
-  // Cache 9min para el fallback
-  if(_futCache['SPY']&&_futCache['QQQ']&&Date.now()-_futCache['SPY'].ts<9*60*1000)
-    return{SPY:_futCache['SPY'],QQQ:_futCache['QQQ']};
-  try{
-    const url=`${SCHWAB_API_BASE}/quotes?symbols=SPY%2CQQQ&fields=quote`;
-    const r=await fetch(url,{headers:{'Authorization':'Bearer '+token},signal:AbortSignal.timeout(6000)});
-    if(!r.ok){addLog('warn','Índices',`quotes HTTP ${r.status}`);return null;}
-    const d=await r.json();
-    const results={};
-    for(const sym of ['SPY','QQQ']){
-      const q=d[sym]?.quote||null;
-      if(!q)continue;
-      const last=q.lastPrice||q.mark||0;
-      const prev=q.closePrice||q.openPrice||last;
-      if(!last||last<=0)continue;
-      const pct=prev>0?((last-prev)/prev*100):0;
-      const bias=pct>0.15?'bull':pct<-0.15?'bear':'neutral';
-      _futCache[sym]={bias,price:last,prev,pct,ts:Date.now()};
-      results[sym]=_futCache[sym];
-      addLog('debug','Índices',`${sym} $${last.toFixed(2)} → ${pct>=0?'+':''}${pct.toFixed(2)}% → ${bias}`);
-    }
-    return results['SPY']&&results['QQQ']?results:null;
-  }catch(e){addLog('warn','Índices',`_fetchFuturesBias: ${e.message}`);return null;}
+  // Si el panel de índices aún no cargó — no hacer llamada extra, devolver null
+  // updateFuturesSemaphore() lo reintentará en el próximo ciclo
+  return null;
 }
 
 function _renderFuturesSemaphore(data){

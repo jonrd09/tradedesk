@@ -142,7 +142,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
 </style>
 </head>
 <body>
-<div class="shell">
+<div class="shell" id="mainShell">
 
 <!-- TOPBAR -->
 <header class="topbar">
@@ -196,9 +196,10 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
 <div class="main">
 
 <!-- Banner modo viewer — visible solo cuando viewer_mode está activo -->
-<div id="viewerBanner" style="display:none;position:fixed;top:0;left:0;right:0;z-index:9999;background:linear-gradient(90deg,#7c3aed,#4f46e5);color:#fff;text-align:center;padding:6px 12px;font-size:12px;font-weight:600;">
-  👁 MODO VISUALIZACIÓN — Solo lectura · Las señales y alertas funcionan normalmente · Edición deshabilitada
-  <button onclick="promptViewerUnlock()" style="margin-left:12px;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.4);border-radius:10px;color:#fff;padding:2px 10px;font-size:11px;cursor:pointer;">🔓 Desbloquear</button>
+<div id="viewerBanner" style="display:none;background:linear-gradient(90deg,#7c3aed,#4f46e5);color:#fff;text-align:center;padding:6px 12px;font-size:12px;font-weight:600;">
+  <span>👁 MODO VISUALIZACIÓN — Solo lectura · Las señales y alertas funcionan normalmente</span>
+  <button onclick="promptViewerUnlock()" style="margin-left:10px;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.4);border-radius:10px;color:#fff;padding:2px 10px;font-size:11px;cursor:pointer;">🔓 Desbloquear</button>
+  <button onclick="document.getElementById('viewerBanner').style.display='none'" style="margin-left:6px;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);border-radius:10px;color:#fff;padding:2px 8px;font-size:11px;cursor:pointer;">✕</button>
 </div>
 <!-- Input oculto para importar config -->
 <input type="file" id="importCfgInput" accept=".tdpconfig,.json" style="display:none" onchange="importTDPConfig(this)">
@@ -7962,10 +7963,14 @@ function renderIndicesPanel(){
 
 const _TDP_EXPORT_KEYS=[
   'finnhub_key','levetf_apikey','ms_fh_key',
-  'schwab_client_id','schwab_access_token','schwab_refresh_token',
+  'schwab_client_id','schwab_client_secret',
+  'schwab_access_token','schwab_refresh_token',
   'schwab_token_expiry','schwab_refresh_expiry',
   'tg_token','tg_chat_id','tg_enabled',
   'telegram_bot_token','telegram_chat_id',
+  'anthropic_api_key',
+  'github_token',
+  'app_pin',
   'cfg_main_tickers','cfg_signal_tickers',
   'strat_enabled',
   'gainPct','paperBalance',
@@ -7998,7 +8003,7 @@ const _SENSITIVE_KEYS=['schwab_client_id','schwab_client_secret','schwab_access_
   'schwab_refresh_token','schwab_token_expiry','schwab_refresh_expiry',
   'finnhub_key','levetf_apikey','ms_fh_key',
   'tg_token','tg_chat_id','tg_enabled','telegram_bot_token','telegram_chat_id',
-  'anthropic_key','app_pin'];
+  'anthropic_api_key','github_token','app_pin'];
 
 function _isSensitive(key){
   return _SENSITIVE_KEYS.some(s=>key.toLowerCase()===s.toLowerCase());
@@ -8172,20 +8177,10 @@ function importTDPConfig(input){
 function applyViewerMode(){
   const isViewer=localStorage.getItem('tdp_viewer_mode')==='1';
   if(!isViewer)return;
-  // Mostrar banner con botón de importar nueva config
+  // Mostrar banner informativo (sin bloquear nada)
   const banner=document.getElementById('viewerBanner');
   if(banner)banner.style.display='block';
-  // Ocultar botones de admin
-  ['configBtn','testBtn'].forEach(id=>{
-    const el=document.getElementById(id);
-    if(el)el.style.display='none';
-  });
-  // Bloquear openConfigModal para que no abra aunque alguien llame la función directamente
-  window._originalOpenConfigModal=window.openConfigModal;
-  window.openConfigModal=function(){
-    alert('🔒 Modo Solo Lectura — La configuración no se puede editar en esta PC.\n\nPara editar, usa la PC principal con el archivo TradeDeskPro original.');
-  };
-  addLog('debug','Viewer','👁 Modo Solo Lectura activo — edición deshabilitada');
+  addLog('debug','Viewer','👁 Modo Visualización activo');
 }
 
 function promptViewerUnlock(){

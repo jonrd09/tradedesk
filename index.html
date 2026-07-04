@@ -308,13 +308,6 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
     <div id="limitResult"></div>
   </div>
 
-  <!-- IDs fantasma: loadRotation() los necesita para calcular el sesgo interno -->
-  <div style="display:none;">
-    <div id="rotSignal"></div>
-    <div id="rotIndices"></div>
-    <div id="rotSectores"></div>
-    <div id="rotRefugios"></div>
-  </div>
 
   <!-- ── ÍNDICES DEL DÍA ──────────────────────────────────── -->
   <div class="rsec" style="flex:1;min-height:0;">
@@ -1431,7 +1424,6 @@ async function loadLivePrices(){
   // and send Telegram if threshold still met
   addLog('debug','Finnhub','Precios confirmados → reconstruyendo señales con precios live');
   buildSignals();
-  loadRotation();
   // Re-render indices panel with updated Finnhub prices (no new Schwab fetch needed)
   if(Object.keys(_idxCache).length)renderIndicesPanel();
 }
@@ -3405,57 +3397,6 @@ function rotCell(sym,name,pct,color){
   const up=pct>=0;const col=up?'var(--green)':'var(--red)';const bdr=color?`border-left:2px solid ${color}`:`border-left:2px solid ${col}`;
   return`<div style="background:var(--bg3);border-radius:var(--r);padding:7px 9px;${bdr};"><div style="display:flex;justify-content:space-between;align-items:center;"><div><div style="font-family:var(--mono);font-size:12px;font-weight:700;color:var(--text)">${sym}</div><div style="font-size:10px;color:var(--text3)">${name}</div></div><div style="font-family:var(--mono);font-size:13px;font-weight:700;color:${col}">${up?'+':''}${pct.toFixed(2)}%</div></div></div>`;
 }
-// FIX RATE-LIMIT (2026-07-02): _rotationBusy evita dos loadRotation() simultáneas
-// que duplicaban las llamadas a Finnhub y generaban pares de errores 429.
-let _rotationBusy=false;
-async function loadRotation(){
-  if(_rotationBusy)return; // ya corriendo — ignorar llamada duplicada
-  _rotationBusy=true;
-  const allSyms=[...ROT_DATA.indices.map(x=>x.sym),...ROT_DATA.sectores.map(x=>x.sym),...ROT_DATA.refugios.map(x=>x.sym)];
-  const quotes={};
-  // No hardcoded fallback prices — show "sin datos" if Finnhub doesn't respond
-  allSyms.forEach(s=>{quotes[s]=null;}); // null = waiting for live data
-  const key=getKey();
-  if(key&&key.length>8){
-    // 1 símbolo a la vez con 1.2s de pausa — evita 429 con plan gratuito Finnhub
-    for(let i=0;i<allSyms.length;i++){
-      try{
-        const res=await fetchRotationQuote(allSyms[i]).catch(()=>null);
-        if(res)quotes[allSyms[i]]=res;
-      }catch(e){}
-    if(i<allSyms.length-1)await new Promise(r=>setTimeout(r,2500)); // 2.5s entre llamadas — reduce 429
-    }
-  }
-  const indEl=document.getElementById('rotIndices');
-  if(indEl)indEl.innerHTML=ROT_DATA.indices.map(x=>quotes[x.sym]?rotCell(x.sym,x.name,quotes[x.sym].pct,x.color):'').join('');
-  const secEl=document.getElementById('rotSectores');  if(secEl){
-    const wp=ROT_DATA.sectores.filter(x=>quotes[x.sym]).map(x=>({...x,pct:quotes[x.sym].pct})).sort((a,b)=>b.pct-a.pct);
-    secEl.innerHTML=wp.map(x=>{
-      const up=x.pct>=0;const col=up?'var(--green)':'var(--red)';const bw=Math.min(Math.abs(x.pct)*20,100);
-      return`<div style="display:flex;align-items:center;gap:6px;padding:4px 0;border-bottom:1px solid var(--border);"><div style="font-family:var(--mono);font-size:11px;font-weight:700;color:var(--text);min-width:44px">${x.sym}</div><div style="font-size:10px;color:var(--text3);min-width:90px">${x.name}</div><div style="flex:1;height:5px;background:var(--bg4);border-radius:3px;overflow:hidden;"><div style="height:100%;width:${bw}%;background:${col};border-radius:3px;${!up?'margin-left:auto':''}"></div></div><div style="font-family:var(--mono);font-size:11px;font-weight:700;color:${col};min-width:50px;text-align:right">${up?'+':''}${x.pct.toFixed(2)}%</div></div>`;
-    }).join('');
-  }
-  const refEl=document.getElementById('rotRefugios');
-  if(refEl)refEl.innerHTML=ROT_DATA.refugios.map(x=>quotes[x.sym]?rotCell(x.sym,x.name,quotes[x.sym].pct,x.color):'').join('');
-  const sigEl=document.getElementById('rotSignal');
-  if(sigEl){
-    const techPct=quotes['XLK']?.pct||0,semiPct=quotes['SOXX']?.pct||0;
-    const goldPct=quotes['GLD']?.pct||0,bondPct=quotes['TLT']?.pct||0;
-    const vixPct=quotes['VIXY']?.pct||0;
-    const metaPct=quotes['META']?.pct||0,googPct=quotes['GOOG']?.pct||0;
-    const pltrPct=quotes['PLTR']?.pct||0,coinPct=quotes['COIN']?.pct||0;
-    const avgSignalTickers=(metaPct+googPct+pltrPct+coinPct)/4;
-    let sig='〰️ MIXTO — Sin señal clara. Opera con confirmación técnica.',col='var(--text2)',bg='var(--bg3)',bdr='var(--border)';
-    if(vixPct>5&&goldPct>0&&bondPct>0&&techPct<0){sig='🚨 FUGA AL REFUGIO — VIXY↑ Oro↑ Bonos↑ Tech↓';col='var(--red)';bg='var(--red-bg)';bdr='rgba(255,77,109,.3)';}
-    else if(avgSignalTickers>1.5&&techPct>0&&vixPct<0){sig=`🚀 RISK ON — META/GOOG/PLTR/COIN promedio +${avgSignalTickers.toFixed(1)}%. Favorable para CALLS.`;col='var(--green)';bg='var(--green-bg)';bdr='rgba(0,209,122,.3)';}
-    else if(avgSignalTickers<-1.5&&vixPct>0){sig=`🔻 PRESIÓN EN TUS ACTIVOS — promedio ${avgSignalTickers.toFixed(1)}%. Cuidado con CALLS.`;col='var(--red)';bg='var(--red-bg)';bdr='rgba(255,77,109,.3)';}
-    else if(semiPct<-2&&techPct<-1){sig='⚠️ PRESIÓN TECH/SEMIS — Cuidado con CALLS en tech.';col='var(--yellow)';bg='var(--yellow-bg)';bdr='rgba(255,194,52,.3)';}
-    else if(goldPct>0.5&&bondPct>0.5){sig='🛡️ ROTACIÓN DEFENSIVA — Oro y Bonos lideran.';col='var(--yellow)';bg='var(--yellow-bg)';bdr='rgba(255,194,52,.3)';}
-    sigEl.innerHTML=`<div style="background:${bg};border:1px solid ${bdr};border-radius:var(--r);padding:9px 12px;font-size:12px;color:${col};font-weight:600;line-height:1.5;margin-top:8px;">${sig}</div>`;
-  }
-  _rotationBusy=false; // FIX: liberar flag para permitir próxima actualización
-}
-
 // ═══════════════════════════════════════════════════════════════
 // CALCULADORA
 // ═══════════════════════════════════════════════════════════════

@@ -365,8 +365,8 @@ body.window-active .window-banner{animation:pulse-banner 2s infinite;}
           </div>
         </div>
 
-        <!-- Capital + riesgo -->
-        <div style="display:flex;gap:8px;margin-bottom:10px;">
+        <!-- Capital + riesgo + modo -->
+        <div style="display:flex;gap:8px;margin-bottom:6px;">
           <div style="flex:1;">
             <div class="risk-label" style="margin-bottom:3px;">Capital $</div>
             <input type="number" id="mc-capital" class="risk-input" style="width:100%;font-size:12px;padding:6px 8px;" value="10000" oninput="saveCapitalPrefs();calcMiniRisk()">
@@ -375,6 +375,12 @@ body.window-active .window-banner{animation:pulse-banner 2s infinite;}
             <div class="risk-label" style="margin-bottom:3px;">Riesgo %</div>
             <input type="number" id="mc-pct" class="risk-input" style="width:100%;font-size:12px;padding:6px 8px;" value="1" step="0.1" oninput="saveCapitalPrefs();calcMiniRisk()">
           </div>
+        </div>
+
+        <!-- Toggle modo -->
+        <div style="display:flex;gap:4px;margin-bottom:10px;">
+          <button id="mc-mode-risk" onclick="setMcMode('risk')" style="flex:1;font-size:10px;font-family:var(--mono);font-weight:700;padding:5px 0;border-radius:6px;border:1px solid var(--green);background:var(--green);color:#fff;cursor:pointer;">Por riesgo %</button>
+          <button id="mc-mode-capital" onclick="setMcMode('capital')" style="flex:1;font-size:10px;font-family:var(--mono);font-weight:700;padding:5px 0;border-radius:6px;border:1px solid var(--border2);background:var(--bg3);color:var(--muted);cursor:pointer;">Todo el capital</button>
         </div>
 
         <!-- Stop / Target -->
@@ -390,22 +396,34 @@ body.window-active .window-banner{animation:pulse-banner 2s infinite;}
         </div>
 
         <!-- Resultados -->
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:10px;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px;">
           <div style="background:var(--bg3);border-radius:8px;padding:9px;text-align:center;border:1px solid var(--border);">
-            <div id="mc-shares" style="font-size:20px;font-weight:700;font-family:var(--mono);color:var(--text);">—</div>
-            <div style="font-size:9px;color:var(--muted);font-family:var(--mono);margin-top:2px;">ACCIONES</div>
+            <div id="mc-shares" style="font-size:22px;font-weight:700;font-family:var(--mono);color:var(--text);">—</div>
+            <div id="mc-shares-lbl" style="font-size:9px;color:var(--muted);font-family:var(--mono);margin-top:2px;">ACCIONES</div>
           </div>
           <div style="background:var(--gd);border-radius:8px;padding:9px;text-align:center;border:1px solid var(--gb);">
-            <div id="mc-profit" style="font-size:20px;font-weight:700;font-family:var(--mono);color:var(--green);">—</div>
+            <div id="mc-profit" style="font-size:22px;font-weight:700;font-family:var(--mono);color:var(--green);">—</div>
             <div style="font-size:9px;color:var(--green);font-family:var(--mono);margin-top:2px;">GANANCIA</div>
           </div>
           <div style="background:var(--rd);border-radius:8px;padding:9px;text-align:center;border:1px solid var(--rb);">
-            <div id="mc-loss" style="font-size:20px;font-weight:700;font-family:var(--mono);color:var(--red);">—</div>
+            <div id="mc-loss" style="font-size:22px;font-weight:700;font-family:var(--mono);color:var(--red);">—</div>
             <div style="font-size:9px;color:var(--red);font-family:var(--mono);margin-top:2px;">PÉRDIDA MÁX.</div>
           </div>
           <div style="background:var(--bg3);border-radius:8px;padding:9px;text-align:center;border:1px solid var(--border);">
-            <div id="mc-rr" style="font-size:20px;font-weight:700;font-family:var(--mono);color:var(--amber);">—</div>
+            <div id="mc-rr" style="font-size:22px;font-weight:700;font-family:var(--mono);color:var(--amber);">—</div>
             <div style="font-size:9px;color:var(--muted);font-family:var(--mono);margin-top:2px;">RATIO R:R</div>
+          </div>
+        </div>
+
+        <!-- Comparativa: acciones por riesgo vs por capital -->
+        <div id="mc-compare" style="display:none;background:var(--bg3);border-radius:8px;padding:8px 10px;margin-bottom:8px;border:1px solid var(--border);font-size:11px;font-family:var(--mono);">
+          <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+            <span style="color:var(--muted);">Por riesgo <span id="mc-pct-lbl" style="color:var(--text);font-weight:700;"></span></span>
+            <span id="mc-shares-byrisk" style="font-weight:700;color:var(--text);">—</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;">
+            <span style="color:var(--muted);">Con todo el capital</span>
+            <span id="mc-shares-bycap" style="font-weight:700;color:var(--blue);">—</span>
           </div>
         </div>
 
@@ -703,16 +721,37 @@ function forgetKey(){
    REST FALLBACK (Finnhub)
 ══════════════════════════════════════ */
 async function fh(ep){
-  // Key como query param para evitar CORS preflight desde GitHub Pages / hosting externo
   const sep=ep.includes('?')?'&':'?';
   const url=`https://finnhub.io/api/v1${ep}${sep}token=${encodeURIComponent(APIKEY)}`;
+  // Timeout manual con Promise.race — AbortSignal.timeout no soportado en todos los browsers
+  const timeout=new Promise((_,reject)=>
+    setTimeout(()=>reject(new Error('Timeout — Finnhub no respondió en 10s. Verifica tu conexión.')),10000)
+  );
   let r;
-  try{r=await fetch(url,{signal:AbortSignal.timeout(10000)});}
-  catch(ex){throw new Error('Sin conexión a Finnhub — verifica tu internet o que la key sea correcta.');}
-  if(r.status===401||r.status===403) throw new Error('API key inválida o sin permisos (HTTP '+r.status+').');
-  if(r.status===429) throw new Error('Rate limit alcanzado. Espera 30 segundos e intenta de nuevo.');
-  if(!r.ok) throw new Error('Finnhub HTTP '+r.status+'.');
-  return r.json();
+  try{
+    r=await Promise.race([
+      fetch(url,{method:'GET',mode:'cors',cache:'no-cache'}),
+      timeout
+    ]);
+  }catch(ex){
+    const msg=ex.message||'';
+    if(msg.includes('Timeout')) throw ex;
+    if(msg.includes('Failed to fetch')||msg.includes('NetworkError')||msg.includes('fetch')){
+      throw new Error('No se pudo conectar a Finnhub.\n\nPosibles causas:\n• Sin conexión a internet\n• Extensión de browser bloqueando la petición (AdBlock, etc.)\n• Firewall corporativo');
+    }
+    throw new Error('Error de red: '+msg);
+  }
+  if(r.status===401||r.status===403){
+    throw new Error('API key inválida (HTTP '+r.status+').\nVerifica que la copiaste completa desde finnhub.io/dashboard');
+  }
+  if(r.status===429) throw new Error('Rate limit alcanzado. Espera 30 segundos.');
+  if(r.status===0)   throw new Error('Bloqueado por CORS o sin internet.');
+  if(!r.ok)          throw new Error('Finnhub respondió HTTP '+r.status+'.');
+  try{
+    return await r.json();
+  }catch(ex){
+    throw new Error('Respuesta inválida de Finnhub — intenta de nuevo.');
+  }
 }
 
 /* ══════════════════════════════════════
@@ -810,7 +849,8 @@ async function getHistory(symbol,days=80){
   ];
   for(const proxy of proxies){
     try{
-      const r=await fetch(proxy,{signal:AbortSignal.timeout(8000)});
+      const _t=new Promise((_,rej)=>setTimeout(()=>rej(new Error('to')),8000));
+      const r=await Promise.race([fetch(proxy,{mode:'cors',cache:'no-cache'}),_t]);
       if(!r.ok) continue;
       const raw=await r.text();
       let parsed;
@@ -1580,7 +1620,9 @@ async function loadCandleChartYahoo(sym){
   ];
   for(const proxy of proxies){
     try{
-      const r=await fetch(proxy,{signal:AbortSignal.timeout(8000)});if(!r.ok) continue;
+      const _t=new Promise((_,rej)=>setTimeout(()=>rej(new Error('to')),8000));
+      const r=await Promise.race([fetch(proxy,{mode:'cors',cache:'no-cache'}),_t]);
+      if(!r.ok) continue;
       const raw=await r.text();
       let parsed;try{const w=JSON.parse(raw);parsed=w.contents?JSON.parse(w.contents):w;}catch(ex){parsed=JSON.parse(raw);}
       const result=parsed?.chart?.result?.[0];if(!result) continue;
@@ -1694,6 +1736,24 @@ async function fillMiniCalc(sym,price){
   calcMiniRisk();
 }
 
+let mcMode='risk'; // 'risk' = por riesgo%, 'capital' = todo el capital
+
+function setMcMode(mode){
+  mcMode=mode;
+  const riskBtn=document.getElementById('mc-mode-risk');
+  const capBtn=document.getElementById('mc-mode-capital');
+  if(riskBtn&&capBtn){
+    if(mode==='risk'){
+      riskBtn.style.background='var(--green)';riskBtn.style.color='#fff';riskBtn.style.borderColor='var(--green)';
+      capBtn.style.background='var(--bg3)';capBtn.style.color='var(--muted)';capBtn.style.borderColor='var(--border2)';
+    } else {
+      capBtn.style.background='var(--blue)';capBtn.style.color='#fff';capBtn.style.borderColor='var(--blue)';
+      riskBtn.style.background='var(--bg3)';riskBtn.style.color='var(--muted)';riskBtn.style.borderColor='var(--border2)';
+    }
+  }
+  calcMiniRisk();
+}
+
 function calcMiniRisk(){
   const sym=document.getElementById('mc-sym').value;
   const capital=parseFloat(document.getElementById('mc-capital').value)||10000;
@@ -1707,32 +1767,63 @@ function calcMiniRisk(){
     ['mc-shares','mc-profit','mc-loss','mc-rr'].forEach(id=>{
       document.getElementById(id).textContent='—';
     });
+    const cmp=document.getElementById('mc-compare');
+    if(cmp) cmp.style.display='none';
     if(note) note.textContent='Haz clic en cualquier tarjeta para auto-llenar';
     return;
   }
 
-  const maxLoss=capital*(riskPct/100);
   const riskPerShare=entry-stop;
-  const shares=Math.max(Math.floor(maxLoss/riskPerShare),1);
+  const maxLoss=capital*(riskPct/100);
+
+  // Acciones por riesgo % (gestión de riesgo clásica)
+  const sharesByRisk=Math.max(Math.floor(maxLoss/riskPerShare),1);
+  // Acciones con todo el capital disponible
+  const sharesByCapital=Math.floor(capital/entry);
+
+  // Modo activo determina qué se usa para los resultados
+  const shares=mcMode==='risk'?sharesByRisk:sharesByCapital;
+
   const profit=shares*(target-entry);
   const loss=shares*riskPerShare;
-  const rr=profit/loss;
+  const rr=loss>0?profit/loss:0;
+  const pctGain=((target-entry)/entry*100).toFixed(2);
 
-  document.getElementById('mc-shares').textContent=shares;
+  // Actualizar caja principal
+  const sharesEl=document.getElementById('mc-shares');
+  sharesEl.textContent=shares;
+  sharesEl.style.color=mcMode==='capital'?'var(--blue)':'var(--text)';
+
+  const lbl=document.getElementById('mc-shares-lbl');
+  if(lbl) lbl.textContent=mcMode==='risk'?'ACC. (RIESGO)':'ACC. (CAPITAL)';
 
   const profEl=document.getElementById('mc-profit');
   profEl.textContent='$'+profit.toFixed(2);
   profEl.style.color=profit>0?'var(--green)':'var(--red)';
 
-  document.getElementById('mc-loss').textContent='-$'+loss.toFixed(2);
+  const lossEl=document.getElementById('mc-loss');
+  lossEl.textContent='-$'+loss.toFixed(2);
+  // Advertencia visual si pérdida > 5% del capital
+  lossEl.style.color=loss>capital*0.05?'#b91c1c':'var(--red)';
 
   const rrEl=document.getElementById('mc-rr');
   rrEl.textContent=rr.toFixed(2)+'x';
   rrEl.style.color=rr>=2?'var(--green)':rr>=1?'var(--amber)':'var(--red)';
 
+  // Comparativa siempre visible
+  const cmp=document.getElementById('mc-compare');
+  if(cmp){
+    cmp.style.display='block';
+    const pctLbl=document.getElementById('mc-pct-lbl');
+    if(pctLbl) pctLbl.textContent='('+riskPct+'%)';
+    const byRiskEl=document.getElementById('mc-shares-byrisk');
+    const byCapEl=document.getElementById('mc-shares-bycap');
+    if(byRiskEl) byRiskEl.textContent=sharesByRisk+' acc (-$'+(sharesByRisk*riskPerShare).toFixed(2)+' riesgo)';
+    if(byCapEl)  byCapEl.textContent=sharesByCapital+' acc ($'+(sharesByCapital*entry).toFixed(2)+' total)';
+  }
+
   if(note&&sym){
-    const pctGain=((target-entry)/entry*100).toFixed(2);
-    note.innerHTML=`<strong>${sym}</strong> · ${shares} acc @ $${entry.toFixed(2)}<br>Stop $${stop.toFixed(2)} · Target $${target.toFixed(2)} (+${pctGain}%)<br>R:R ${rr.toFixed(2)}x`;
+    note.innerHTML=`<strong>${sym}</strong> · ${shares} acc @ $${entry.toFixed(2)}<br>Stop $${stop.toFixed(2)} · Target $${target.toFixed(2)} (+${pctGain}%)<br>R:R ${rr.toFixed(2)}x · Pérdida máx -$${loss.toFixed(2)}`;
   }
 }
 function populateSymSelects(){

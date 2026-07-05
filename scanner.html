@@ -365,8 +365,8 @@ body.window-active .window-banner{animation:pulse-banner 2s infinite;}
           </div>
         </div>
 
-        <!-- Capital + riesgo + modo -->
-        <div style="display:flex;gap:8px;margin-bottom:6px;">
+        <!-- Capital + riesgo -->
+        <div style="display:flex;gap:8px;margin-bottom:10px;">
           <div style="flex:1;">
             <div class="risk-label" style="margin-bottom:3px;">Capital $</div>
             <input type="number" id="mc-capital" class="risk-input" style="width:100%;font-size:12px;padding:6px 8px;" value="10000" oninput="saveCapitalPrefs();calcMiniRisk()">
@@ -375,12 +375,6 @@ body.window-active .window-banner{animation:pulse-banner 2s infinite;}
             <div class="risk-label" style="margin-bottom:3px;">Riesgo %</div>
             <input type="number" id="mc-pct" class="risk-input" style="width:100%;font-size:12px;padding:6px 8px;" value="1" step="0.1" oninput="saveCapitalPrefs();calcMiniRisk()">
           </div>
-        </div>
-
-        <!-- Toggle modo -->
-        <div style="display:flex;gap:4px;margin-bottom:10px;">
-          <button id="mc-mode-risk" onclick="setMcMode('risk')" style="flex:1;font-size:10px;font-family:var(--mono);font-weight:700;padding:5px 0;border-radius:6px;border:1px solid var(--green);background:var(--green);color:#fff;cursor:pointer;">Por riesgo %</button>
-          <button id="mc-mode-capital" onclick="setMcMode('capital')" style="flex:1;font-size:10px;font-family:var(--mono);font-weight:700;padding:5px 0;border-radius:6px;border:1px solid var(--border2);background:var(--bg3);color:var(--muted);cursor:pointer;">Todo el capital</button>
         </div>
 
         <!-- Stop / Target -->
@@ -428,8 +422,14 @@ body.window-active .window-banner{animation:pulse-banner 2s infinite;}
         </div>
 
         <!-- Resumen -->
-        <div id="mc-note" style="font-size:10px;color:var(--muted);line-height:1.6;padding:8px;background:var(--bg3);border-radius:7px;border:1px solid var(--border);">
+        <div id="mc-note" style="font-size:10px;color:var(--muted);line-height:1.6;padding:8px;background:var(--bg3);border-radius:7px;border:1px solid var(--border);margin-bottom:8px;">
           Haz clic en cualquier tarjeta para auto-llenar
+        </div>
+
+        <!-- Toggle modo — al fondo -->
+        <div style="display:flex;gap:4px;">
+          <button id="mc-mode-risk" onclick="setMcMode('risk')" style="flex:1;font-size:10px;font-family:var(--mono);font-weight:700;padding:6px 0;border-radius:6px;border:1px solid var(--green);background:var(--green);color:#fff;cursor:pointer;">📐 Por riesgo %</button>
+          <button id="mc-mode-capital" onclick="setMcMode('capital')" style="flex:1;font-size:10px;font-family:var(--mono);font-weight:700;padding:6px 0;border-radius:6px;border:1px solid var(--border2);background:var(--bg3);color:var(--muted);cursor:pointer;">💰 Todo el capital</button>
         </div>
       </div>
     </div>

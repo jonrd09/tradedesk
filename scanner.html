@@ -114,7 +114,14 @@ body.window-active .window-banner{animation:pulse-banner 2s infinite;}
 .qcard.is-hot{border-color:var(--green);animation:hot-glow 2.5s ease-in-out infinite;}
 .qcard.is-hot-bear{border-color:var(--red);animation:hot-glow-bear 2.5s ease-in-out infinite;}
 
-/* ── DUAL COL ── */
+/* ── 3-col dashboard responsive ── */
+@media(max-width:900px){
+  .dash-3col{grid-template-columns:1fr 1fr !important;}
+  .dash-3col .mini-calc-col{display:none;}
+}
+@media(max-width:600px){
+  .dash-3col{grid-template-columns:1fr !important;}
+}
 .dual-col{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:20px;}
 @media(max-width:700px){.dual-col{grid-template-columns:1fr;}}
 .col-block{border-radius:12px;overflow:hidden;}
@@ -294,58 +301,139 @@ body.window-active .window-banner{animation:pulse-banner 2s infinite;}
 <div id="p-dashboard" class="panel act">
 
 <!-- TOP PICK banner -->
-<div id="top-pick-banner" style="display:none;margin-bottom:14px;background:linear-gradient(135deg,#064e35,#0a7a52);border-radius:12px;padding:14px 18px;color:#fff;">
+<div id="top-pick-banner" style="display:none;margin-bottom:12px;background:linear-gradient(135deg,#064e35,#0a7a52);border-radius:12px;padding:12px 16px;color:#fff;">
   <div style="font-size:10px;font-family:var(--mono);font-weight:600;letter-spacing:.1em;opacity:.7;margin-bottom:4px;">🏆 TOP PICK DEL MOMENTO</div>
   <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-    <div id="tp-sym" style="font-size:26px;font-weight:700;font-family:var(--mono);"></div>
+    <div id="tp-sym" style="font-size:24px;font-weight:700;font-family:var(--mono);"></div>
     <div>
-      <div id="tp-price" style="font-size:16px;font-weight:700;font-family:var(--mono);"></div>
+      <div id="tp-price" style="font-size:15px;font-weight:700;font-family:var(--mono);"></div>
       <div id="tp-reason" style="font-size:11px;opacity:.85;margin-top:2px;line-height:1.5;"></div>
     </div>
-    <button onclick="selETF(document.getElementById('tp-sym').textContent.trim())" style="margin-left:auto;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);border-radius:8px;color:#fff;font-size:12px;font-weight:600;padding:7px 14px;cursor:pointer;font-family:var(--font);">Ver gráfico →</button>
+    <button onclick="selETF(document.getElementById('tp-sym').textContent.trim())" style="margin-left:auto;background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);border-radius:8px;color:#fff;font-size:12px;font-weight:600;padding:6px 12px;cursor:pointer;font-family:var(--font);">Ver gráfico →</button>
   </div>
 </div>
 
-<!-- DUAL COLUMNS -->
-  <div class="dual-col">
-    <div class="col-block">
-      <div class="col-header bull-hdr">
-        <div class="col-header-dot" style="background:var(--green);"></div>
-        Alcistas (Long)
-        <span style="margin-left:auto;font-size:10px;font-weight:400;opacity:.7;">ordenados por momentum</span>
-      </div>
-      <div class="col-body bull-body" id="col-bull">
-        <div style="color:var(--muted);font-size:12px;text-align:center;padding:16px;">Conecta API key para cargar</div>
-      </div>
+<!-- 3-COLUMN LAYOUT: BULL | BEAR | MINI CALC -->
+<div style="display:grid;grid-template-columns:1fr 1fr 280px;gap:12px;align-items:start;">
+
+  <!-- COLUMNA ALCISTAS -->
+  <div class="col-block">
+    <div class="col-header bull-hdr">
+      <div class="col-header-dot" style="background:var(--green);"></div>
+      Alcistas (Long)
+      <span style="margin-left:auto;font-size:10px;font-weight:400;opacity:.7;">por momentum</span>
     </div>
-    <div class="col-block">
-      <div class="col-header bear-hdr">
-        <div class="col-header-dot" style="background:var(--red);"></div>
-        Bajistas (Short/Inversos)
-        <span style="margin-left:auto;font-size:10px;font-weight:400;opacity:.7;">ordenados por momentum</span>
+    <div class="col-body bull-body" id="col-bull">
+      <div style="color:var(--muted);font-size:12px;text-align:center;padding:16px;">Conecta API key para cargar</div>
+    </div>
+  </div>
+
+  <!-- COLUMNA BAJISTAS -->
+  <div class="col-block">
+    <div class="col-header bear-hdr">
+      <div class="col-header-dot" style="background:var(--red);"></div>
+      Bajistas (Short/Inv.)
+      <span style="margin-left:auto;font-size:10px;font-weight:400;opacity:.7;">por momentum</span>
+    </div>
+    <div class="col-body bear-body" id="col-bear">
+      <div style="color:var(--muted);font-size:12px;text-align:center;padding:16px;">Conecta API key para cargar</div>
+    </div>
+  </div>
+
+  <!-- MINI CALCULADORA VERTICAL -->
+  <div style="position:sticky;top:70px;">
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;overflow:hidden;box-shadow:var(--shadow);">
+      <!-- Header -->
+      <div style="background:var(--bg3);border-bottom:1px solid var(--border);padding:10px 13px;display:flex;align-items:center;justify-content:space-between;">
+        <div style="font-size:11px;font-weight:700;font-family:var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.06em;">📐 Sizing</div>
+        <div id="mc-sym-lbl" style="font-size:13px;font-weight:700;font-family:var(--mono);color:var(--green);">— clic en tarjeta</div>
       </div>
-      <div class="col-body bear-body" id="col-bear">
-        <div style="color:var(--muted);font-size:12px;text-align:center;padding:16px;">Conecta API key para cargar</div>
+
+      <div style="padding:12px;">
+
+        <!-- ETF + precio -->
+        <div style="display:flex;gap:8px;margin-bottom:10px;align-items:flex-end;">
+          <div style="flex:1;">
+            <div class="risk-label" style="margin-bottom:3px;">ETF</div>
+            <select id="mc-sym" class="risk-input" style="width:100%;font-size:12px;padding:6px 8px;" onchange="mcSymChange()">
+              <option value="">—</option>
+            </select>
+          </div>
+          <div style="flex:1;">
+            <div class="risk-label" style="margin-bottom:3px;">Entrada $</div>
+            <input type="number" id="mc-entry" class="risk-input" style="width:100%;font-size:12px;padding:6px 8px;" step="0.01" placeholder="Live" oninput="calcMiniRisk()">
+          </div>
+        </div>
+
+        <!-- Capital + riesgo -->
+        <div style="display:flex;gap:8px;margin-bottom:10px;">
+          <div style="flex:1;">
+            <div class="risk-label" style="margin-bottom:3px;">Capital $</div>
+            <input type="number" id="mc-capital" class="risk-input" style="width:100%;font-size:12px;padding:6px 8px;" value="10000" oninput="saveCapitalPrefs();calcMiniRisk()">
+          </div>
+          <div style="flex:1;">
+            <div class="risk-label" style="margin-bottom:3px;">Riesgo %</div>
+            <input type="number" id="mc-pct" class="risk-input" style="width:100%;font-size:12px;padding:6px 8px;" value="1" step="0.1" oninput="saveCapitalPrefs();calcMiniRisk()">
+          </div>
+        </div>
+
+        <!-- Stop / Target -->
+        <div style="display:flex;gap:8px;margin-bottom:12px;">
+          <div style="flex:1;">
+            <div class="risk-label" style="margin-bottom:3px;">Stop $</div>
+            <input type="number" id="mc-stop" class="risk-input" style="width:100%;font-size:12px;padding:6px 8px;" step="0.01" placeholder="ATR auto" oninput="calcMiniRisk()">
+          </div>
+          <div style="flex:1;">
+            <div class="risk-label" style="margin-bottom:3px;">Target $</div>
+            <input type="number" id="mc-target" class="risk-input" style="width:100%;font-size:12px;padding:6px 8px;" step="0.01" placeholder="+1.25%" oninput="calcMiniRisk()">
+          </div>
+        </div>
+
+        <!-- Resultados -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:10px;">
+          <div style="background:var(--bg3);border-radius:8px;padding:9px;text-align:center;border:1px solid var(--border);">
+            <div id="mc-shares" style="font-size:20px;font-weight:700;font-family:var(--mono);color:var(--text);">—</div>
+            <div style="font-size:9px;color:var(--muted);font-family:var(--mono);margin-top:2px;">ACCIONES</div>
+          </div>
+          <div style="background:var(--gd);border-radius:8px;padding:9px;text-align:center;border:1px solid var(--gb);">
+            <div id="mc-profit" style="font-size:20px;font-weight:700;font-family:var(--mono);color:var(--green);">—</div>
+            <div style="font-size:9px;color:var(--green);font-family:var(--mono);margin-top:2px;">GANANCIA</div>
+          </div>
+          <div style="background:var(--rd);border-radius:8px;padding:9px;text-align:center;border:1px solid var(--rb);">
+            <div id="mc-loss" style="font-size:20px;font-weight:700;font-family:var(--mono);color:var(--red);">—</div>
+            <div style="font-size:9px;color:var(--red);font-family:var(--mono);margin-top:2px;">PÉRDIDA MÁX.</div>
+          </div>
+          <div style="background:var(--bg3);border-radius:8px;padding:9px;text-align:center;border:1px solid var(--border);">
+            <div id="mc-rr" style="font-size:20px;font-weight:700;font-family:var(--mono);color:var(--amber);">—</div>
+            <div style="font-size:9px;color:var(--muted);font-family:var(--mono);margin-top:2px;">RATIO R:R</div>
+          </div>
+        </div>
+
+        <!-- Resumen -->
+        <div id="mc-note" style="font-size:10px;color:var(--muted);line-height:1.6;padding:8px;background:var(--bg3);border-radius:7px;border:1px solid var(--border);">
+          Haz clic en cualquier tarjeta para auto-llenar
+        </div>
       </div>
     </div>
   </div>
 
+</div><!-- /3-col grid -->
+
   <!-- DETAIL PANEL -->
-  <div id="detail" style="display:none;">
+  <div id="detail" style="display:none;margin-top:14px;">
     <div style="font-size:11px;font-family:var(--mono);color:var(--green);margin-bottom:10px;display:flex;align-items:center;gap:8px;font-weight:600;flex-wrap:wrap;">
       <span id="det-title">—</span>
       <button class="btn-ghost" style="padding:3px 10px;font-size:10px;" onclick="refreshDet()">↻ actualizar</button>
-      <button class="btn-ghost" style="padding:3px 10px;font-size:10px;" onclick="openRiskFromDet()" id="btn-risk-from-det">📐 Calcular sizing</button>
     </div>
     <div class="card">
       <div class="ctitle">Precio intraday — <span id="det-chart-ticker" style="color:var(--green);font-weight:600;"></span>
         <span id="det-vwap-lbl" style="display:none;font-size:10px;background:var(--pd);color:var(--purple);border:1px solid var(--pb);padding:1px 7px;border-radius:10px;font-family:var(--mono);">VWAP</span>
       </div>
-      <div class="cw" style="height:280px;"><canvas id="pChart" role="img" aria-label="Gráfico precio histórico"></canvas></div>
+      <div class="cw" style="height:260px;"><canvas id="pChart" role="img" aria-label="Gráfico precio histórico"></canvas></div>
     </div>
   </div>
 
-  <div class="disc"><strong>v3:</strong> HOT score compuesto (% día + señal técnica + momentum + urgencia) · TOP PICK automático · Sin heat map · Badges RSI + señal en cada tarjeta · Cache técnico en background · Bug calcRisk corregido.</div>
+  <div class="disc" style="margin-top:14px;"><strong>v3:</strong> HOT score compuesto · TOP PICK automático · Mini calculadora integrada · Sizing 1 acción +1.25% al clic.</div>
 </div>
 
 <!-- ════════════════════════════════════
@@ -369,11 +457,11 @@ body.window-active .window-banner{animation:pulse-banner 2s infinite;}
       </div>
       <div class="risk-input-group">
         <span class="risk-label">Capital ($)</span>
-        <input type="number" id="risk-capital" class="risk-input" value="10000" min="100" oninput="calcRisk()">
+        <input type="number" id="risk-capital" class="risk-input" value="10000" min="100" oninput="saveCapitalPrefs();calcRisk()">
       </div>
       <div class="risk-input-group">
         <span class="risk-label">Riesgo máx. (%)</span>
-        <input type="number" id="risk-pct" class="risk-input" value="1" min="0.1" max="10" step="0.1" oninput="calcRisk()">
+        <input type="number" id="risk-pct" class="risk-input" value="1" min="0.1" max="10" step="0.1" oninput="saveCapitalPrefs();calcRisk()">
       </div>
       <div class="risk-input-group">
         <span class="risk-label">Precio entrada ($)</span>
@@ -670,7 +758,18 @@ function openWS(){
         liveQ[sym]={...prev,c:price,dp};
         updateQCardLive(sym,price,dp);
         checkAlertThreshold(sym,dp);
-        if(curSel===sym) updateDetPrice(sym,price,dp);
+        if(curSel===sym){
+          updateDetPrice(sym,price,dp);
+          // Actualizar precio en mini calc si está mostrando ese ETF
+          const mcSym=document.getElementById('mc-sym')?.value;
+          if(mcSym===sym){
+            document.getElementById('mc-entry').value=price.toFixed(2);
+            const tgt=price*1.0125;
+            if(!document.getElementById('mc-target').value)
+              document.getElementById('mc-target').value=tgt.toFixed(2);
+            calcMiniRisk();
+          }
+        }
       });
       tick();
     }catch(ex){}
@@ -1319,7 +1418,7 @@ function updateDetPrice(sym,price,dp){
 }
 
 /* ══════════════════════════════════════
-   SELECT ETF → CHART
+   SELECT ETF → CHART + MINI CALC
 ══════════════════════════════════════ */
 async function selETF(sym){
   document.querySelectorAll('.qcard').forEach(c=>{c.classList.remove('sel','sel-bear');});
@@ -1329,11 +1428,15 @@ async function selETF(sym){
   curSel=sym;
   const q=liveQ[sym];
   const price=q?.c??0,dp=q?.dp??0;
+
+  // ── Auto-fill mini calculadora con 1.25% target ──────────────
+  if(price>0) fillMiniCalc(sym,price);
+
   document.getElementById('detail').style.display='block';
   document.getElementById('det-title').textContent=
     `▶ ${sym}  $${price.toFixed(2)}  ${dp>=0?'+':''}${dp.toFixed(2)}%`;
   document.getElementById('det-chart-ticker').textContent=sym;
-  // Auto-rellenar riesgo
+  // Auto-rellenar panel riesgo también
   if(q&&q.c){
     document.getElementById('risk-entry').value=q.c.toFixed(2);
     calcRisk();
@@ -1509,13 +1612,128 @@ function drawLineChart(canvasId,hist,sym,existingChart,setChart){
 }
 
 /* ══════════════════════════════════════
-   CALCULADORA RIESGO (DEFICIENCIA #1)
+   PERSISTENCIA DE CAPITAL Y RIESGO %
+   Compartido entre mini calc y panel riesgo
 ══════════════════════════════════════ */
+function saveCapitalPrefs(){
+  try{
+    const cap=document.getElementById('mc-capital').value;
+    const pct=document.getElementById('mc-pct').value;
+    if(cap) localStorage.setItem('levetf_capital',cap);
+    if(pct) localStorage.setItem('levetf_riskpct',pct);
+  }catch(e){}
+}
+function loadCapitalPrefs(){
+  try{
+    const cap=localStorage.getItem('levetf_capital');
+    const pct=localStorage.getItem('levetf_riskpct');
+    const capVal=cap||'10000';
+    const pctVal=pct||'1';
+    // Aplicar a los 4 inputs
+    ['mc-capital','risk-capital'].forEach(id=>{
+      const el=document.getElementById(id);
+      if(el) el.value=capVal;
+    });
+    ['mc-pct','risk-pct'].forEach(id=>{
+      const el=document.getElementById(id);
+      if(el) el.value=pctVal;
+    });
+  }catch(e){}
+}
+   Al clic en tarjeta: auto-fill con precio live,
+   stop ATR, target +1.25%, 1 acción base
+══════════════════════════════════════ */
+let prevMcSym='';
+
+function mcSymChange(){
+  const sym=document.getElementById('mc-sym').value;
+  if(sym&&sym!==prevMcSym){
+    prevMcSym=sym;
+    document.getElementById('mc-entry').value='';
+    document.getElementById('mc-stop').value='';
+    document.getElementById('mc-target').value='';
+    if(liveQ[sym]?.c) fillMiniCalc(sym,liveQ[sym].c);
+    else calcMiniRisk();
+  }
+}
+
+async function fillMiniCalc(sym,price){
+  // Actualizar header label
+  const lbl=document.getElementById('mc-sym-lbl');
+  if(lbl) lbl.textContent=sym;
+  document.getElementById('mc-sym').value=sym;
+  prevMcSym=sym;
+
+  // Precio de entrada = precio live
+  document.getElementById('mc-entry').value=price.toFixed(2);
+
+  // Target = +1.25% (no +2% — más conservador, más alcanzable en 30 min)
+  const target=price*1.0125;
+  document.getElementById('mc-target').value=target.toFixed(2);
+
+  // Stop = precio - ATR*1.5 via cache técnico, o fallback -1.5%
+  let stop=price*0.985; // fallback -1.5%
+  const tc=techCache[sym];
+  if(tc&&tc.atr){
+    stop=Math.max(price-tc.atr*1.5, price*0.97);
+  } else {
+    // intentar cargar ATR del histórico
+    try{
+      const hist=await getHistory(sym,15);
+      const atr=calcATR(hist,5);
+      if(atr) stop=Math.max(price-atr*1.5,price*0.97);
+    }catch(ex){}
+  }
+  document.getElementById('mc-stop').value=stop.toFixed(2);
+  calcMiniRisk();
+}
+
+function calcMiniRisk(){
+  const sym=document.getElementById('mc-sym').value;
+  const capital=parseFloat(document.getElementById('mc-capital').value)||10000;
+  const riskPct=parseFloat(document.getElementById('mc-pct').value)||1;
+  const entry=parseFloat(document.getElementById('mc-entry').value)||0;
+  const stop=parseFloat(document.getElementById('mc-stop').value)||0;
+  const target=parseFloat(document.getElementById('mc-target').value)||0;
+  const note=document.getElementById('mc-note');
+
+  if(!entry||!stop||stop>=entry||!target){
+    ['mc-shares','mc-profit','mc-loss','mc-rr'].forEach(id=>{
+      document.getElementById(id).textContent='—';
+    });
+    if(note) note.textContent='Haz clic en cualquier tarjeta para auto-llenar';
+    return;
+  }
+
+  const maxLoss=capital*(riskPct/100);
+  const riskPerShare=entry-stop;
+  const shares=Math.max(Math.floor(maxLoss/riskPerShare),1);
+  const profit=shares*(target-entry);
+  const loss=shares*riskPerShare;
+  const rr=profit/loss;
+
+  document.getElementById('mc-shares').textContent=shares;
+
+  const profEl=document.getElementById('mc-profit');
+  profEl.textContent='$'+profit.toFixed(2);
+  profEl.style.color=profit>0?'var(--green)':'var(--red)';
+
+  document.getElementById('mc-loss').textContent='-$'+loss.toFixed(2);
+
+  const rrEl=document.getElementById('mc-rr');
+  rrEl.textContent=rr.toFixed(2)+'x';
+  rrEl.style.color=rr>=2?'var(--green)':rr>=1?'var(--amber)':'var(--red)';
+
+  if(note&&sym){
+    const pctGain=((target-entry)/entry*100).toFixed(2);
+    note.innerHTML=`<strong>${sym}</strong> · ${shares} acc @ $${entry.toFixed(2)}<br>Stop $${stop.toFixed(2)} · Target $${target.toFixed(2)} (+${pctGain}%)<br>R:R ${rr.toFixed(2)}x`;
+  }
+}
 function populateSymSelects(){
   const opts=ALL.map(e=>`<option value="${esc(e.t)}">${esc(e.t)} — ${esc(e.n)}</option>`).join('');
-  ['risk-sym','j-sym'].forEach(id=>{
+  ['risk-sym','j-sym','mc-sym'].forEach(id=>{
     const sel=document.getElementById(id);
-    if(sel) sel.innerHTML=sel.innerHTML.replace(/<option value="">.*?<\/option>/,'')+'<option value="">—</option>'+opts;
+    if(sel) sel.innerHTML='<option value="">—</option>'+opts;
   });
 }
 let prevRiskSym='';
@@ -1771,6 +1989,7 @@ function goPanel(id,btn){
   updateMarketBadge();
   setInterval(updateMarketBadge,30000);
   loadJournal();
+  loadCapitalPrefs(); // ← restaurar capital y riesgo % guardados
   const saved=loadKey();
   if(saved){
     APIKEY=saved;

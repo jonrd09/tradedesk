@@ -1267,8 +1267,11 @@ async function connect(){
   slbl.textContent='verificando key...';
   try{
     const test=await fh('/quote?symbol=SPY');
-    if(!test||typeof test.c==='undefined') throw new Error('Respuesta inesperada. Verifica que la key sea de Finnhub (finnhub.io).');
-    if(test.c===0&&test.pc===0) throw new Error('Key válida pero sin datos — puede ser que el mercado esté cerrado y tu plan no tenga datos EOD.');
+    // Solo verificamos que Finnhub respondió sin error HTTP.
+    // c=0 y pc=0 es normal cuando el mercado está cerrado en plan gratuito.
+    if(!test||typeof test.c==='undefined'){
+      throw new Error('Respuesta inesperada. Verifica que la key sea de Finnhub (finnhub.io).');
+    }
     saveKey(k);
     await afterConnect();
   }catch(e){

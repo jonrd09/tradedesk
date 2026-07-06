@@ -7166,6 +7166,9 @@ function _exportHistorialTxt(){
   URL.revokeObjectURL(url);
   addLog('debug','Historial',`📄 Exportado: ${fname} — ${entries.length} señales`);
 }
+
+// Versión para el panel de Configuration — sin confirm, refresca el panel inmediatamente
+function _clearHistorialCfg(){
   const entries=getHistorial();
   if(!entries.length){
     // Ya está vacío — feedback visual sin modal

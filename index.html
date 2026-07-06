@@ -1762,12 +1762,10 @@ const STRAT_DEFAULTS={
   // ── Estrategias de Bollinger Puro — ACTIVAS por defecto ──────────────────
   'BB-A':true,       // BB Breakout CALL (precio saliendo banda superior)
   'BB-B':true,       // BB Breakout PUT  (precio saliendo banda inferior)
-  'BB-C':true,       // Efecto Imán PUT  (vela completa sobre BB → regresa, apertura)
-  'BB-D':true,       // Efecto Imán CALL (vela completa bajo BB → regresa, apertura)
-  'BB-REGRESO':true, // FIX B2: Precio fuera de banda regresando — todo el horario
+  'BB-C':false,      // Efecto Imán PUT  — desactivado (gaps sin volatilidad = ruido)
+  'BB-D':false,      // Efecto Imán CALL — desactivado (BB-REGRESO lo cubre mejor)
+  'BB-REGRESO':true, // Precio fuera de banda regresando — todo el horario
   // ── Estrategias de Medias Móviles — INACTIVAS por defecto ────────────────
-  // Desactivadas porque las MAs no siempre están alineadas incluso cuando hay
-  // un breakout real de BB. El usuario puede re-activarlas desde Configuración.
   'RPM':false,    // Rebote Punto Medio — requiere MA20 daily alineada
   'MA20-R':false, // MA20 Rebote — requiere tendencia clara de MAs
   'CT-MA20':false // Cambio Tendencia MA20 — requiere cruce de MAs confirmado
@@ -1785,6 +1783,16 @@ function _stratSetEnabled(code,val){
     localStorage.setItem('strat_enabled',JSON.stringify(saved));
   }catch(e){}
 }
+// Forzar BB-C y BB-D a OFF — limpiar cualquier valor guardado anteriormente
+(function(){
+  try{
+    const saved=JSON.parse(localStorage.getItem('strat_enabled')||'{}');
+    if(saved['BB-C']===true||saved['BB-D']===true){
+      saved['BB-C']=false;saved['BB-D']=false;
+      localStorage.setItem('strat_enabled',JSON.stringify(saved));
+    }
+  }catch(e){}
+})();
 
 // H-05: Debounce flag — prevents concurrent buildSignals() runs
 let _signalsBusy=false;
@@ -7085,8 +7093,78 @@ function clearHistorial(){
   updateHistBadge();
 }
 
-// Versión para el panel de Configuration — sin confirm, refresca el panel inmediatamente
-function _clearHistorialCfg(){
+function _exportHistorialTxt(){
+  const entries=getHistorial();
+  if(!entries.length){alert('Sin señales en el historial para exportar.');return;}
+
+  const et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+  const dateStr=et.toLocaleDateString('es-PR',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
+  const wins=entries.filter(e=>e.outcome==='win').length;
+  const losses=entries.filter(e=>e.outcome==='loss').length;
+  const pending=entries.filter(e=>!e.outcome).length;
+  const total=wins+losses;
+  const winRate=total>0?Math.round(wins/total*100):0;
+
+  // Agrupar por estrategia
+  const byStrat={};
+  entries.forEach(e=>{
+    if(!byStrat[e.code])byStrat[e.code]=[];
+    byStrat[e.code].push(e);
+  });
+
+  let txt='';
+  txt+='═══════════════════════════════════════════════════════\n';
+  txt+=`  TradeDesk Pro — Historial de Señales\n`;
+  txt+=`  ${dateStr}\n`;
+  txt+='═══════════════════════════════════════════════════════\n\n';
+
+  txt+=`RESUMEN DEL DÍA\n`;
+  txt+='───────────────────────────────────────────────────────\n';
+  txt+=`Total señales  : ${entries.length}\n`;
+  txt+=`Correctas      : ${wins}\n`;
+  txt+=`Incorrectas    : ${losses}\n`;
+  txt+=`Pendientes     : ${pending}\n`;
+  txt+=`Win rate       : ${total>0?winRate+'%':'sin evaluar'}\n\n`;
+
+  // Por estrategia
+  txt+=`SEÑALES POR ESTRATEGIA\n`;
+  txt+='───────────────────────────────────────────────────────\n';
+  Object.keys(byStrat).sort().forEach(code=>{
+    const list=byStrat[code];
+    const w=list.filter(e=>e.outcome==='win').length;
+    const l=list.filter(e=>e.outcome==='loss').length;
+    txt+=`${code.padEnd(12)} ${list.length} señales`;
+    if(w+l>0)txt+=`  ✅${w} ❌${l} (${Math.round(w/(w+l)*100)}%)`;
+    txt+='\n';
+  });
+  txt+='\n';
+
+  // Detalle de cada señal
+  txt+=`DETALLE COMPLETO\n`;
+  txt+='───────────────────────────────────────────────────────\n';
+  entries.forEach((e,i)=>{
+    const outcome=e.outcome==='win'?'✅ CORRECTA':e.outcome==='loss'?'❌ INCORRECTA':'⏳ PENDIENTE';
+    txt+=`\n[${i+1}] ${e.sym} ${e.type.toUpperCase()} — ${e.code}\n`;
+    txt+=`    Señal    : ${e.name}\n`;
+    txt+=`    Hora     : ${e.time} ET · ${e.date}\n`;
+    txt+=`    Precio   : $${(e.price||0).toFixed(2)} (${e.pct>=0?'+':''}${(e.pct||0).toFixed(2)}%)\n`;
+    txt+=`    Confianza: ${e.pct_signal||100}%\n`;
+    txt+=`    Resultado: ${outcome}\n`;
+    if(e.tgRef)txt+=`    Ref TG   : ${e.tgRef}\n`;
+    if(e.note) txt+=`    Notas    : ${e.note}\n`;
+  });
+
+  txt+='\n═══════════════════════════════════════════════════════\n';
+  txt+=`Exportado: ${et.toLocaleString('es-PR',{timeZone:'America/New_York'})}\n`;
+
+  const blob=new Blob([txt],{type:'text/plain;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  const fname=`TDP_historial_${et.getFullYear()}-${String(et.getMonth()+1).padStart(2,'0')}-${String(et.getDate()).padStart(2,'0')}.txt`;
+  a.href=url;a.download=fname;a.click();
+  URL.revokeObjectURL(url);
+  addLog('debug','Historial',`📄 Exportado: ${fname} — ${entries.length} señales`);
+}
   const entries=getHistorial();
   if(!entries.length){
     // Ya está vacío — feedback visual sin modal
@@ -9396,10 +9474,16 @@ async function updateFuturesSemaphore(){
           <button onclick="filterHistorial('put')"  class="hist-filter-btn" id="hf-put2" >✅ PUT</button>
           <button onclick="filterHistorial('win')"  class="hist-filter-btn" id="hf-win2" >🟢 Correctas</button>
           <button onclick="filterHistorial('loss')" class="hist-filter-btn" id="hf-loss2">🔴 Incorrectas</button>
-          <button onclick="_clearHistorialCfg()"
-            style="margin-left:auto;background:rgba(255,77,109,.08);border:1px solid rgba(255,77,109,.35);border-radius:var(--r);color:var(--red,#ff4d6d);font-size:11px;font-weight:600;padding:4px 12px;cursor:pointer;white-space:nowrap;">
-            🗑 Clean
-          </button>
+          <div style="margin-left:auto;display:flex;gap:6px;">
+            <button onclick="_exportHistorialTxt()"
+              style="background:rgba(61,139,255,.08);border:1px solid rgba(61,139,255,.35);border-radius:var(--r);color:var(--blue);font-size:11px;font-weight:600;padding:4px 12px;cursor:pointer;white-space:nowrap;">
+              📄 Export
+            </button>
+            <button onclick="_clearHistorialCfg()"
+              style="background:rgba(255,77,109,.08);border:1px solid rgba(255,77,109,.35);border-radius:var(--r);color:var(--red,#ff4d6d);font-size:11px;font-weight:600;padding:4px 12px;cursor:pointer;white-space:nowrap;">
+              🗑 Clean
+            </button>
+          </div>
         </div>
         <div style="font-size:11px;color:var(--text3);margin-bottom:8px;">
           <span id="histStats2"></span>

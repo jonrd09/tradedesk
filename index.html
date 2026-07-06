@@ -2342,12 +2342,13 @@ async function _buildSignalsCore(){
     // ════════════════════════════════════════════════════════════════════════
 
     // ── CALL (hacia banda superior) ───────────────────────────────────────────
-    if(_bbSessionOk&&(intentoBull||setupBull||acercBull)){
-      const _lvl=intentoBull?2:setupBull?3:1;
-      const _nm=_lvl===2?'⚡ Setup — Banda Superior (wick tocando)':_lvl===3?'🎯 Setup — Banda Superior (precio cerca)':'📡 Setup — Banda Superior (acercándose)';
-      const _trigLine=intentoBull
-        ?`🔥 HIGH $${_candleHigh.toFixed(2)} tocó banda superior $${lUp15.toFixed(2)}`
-        :`Close a ${distClosToUpper.toFixed(2)}% de banda superior $${lUp15.toFixed(2)}`;
+    // SETUP CALL — no mostrar si ya hay BB-A activo para este ticker (señal más fuerte ya presente)
+    // Nivel 2 (Intento/wick) eliminado — demasiado recurrente
+    const _bbAActiveCall=all.some(s=>s.sym===sym&&s.code==='BB-A'&&s.type==='call');
+    if(_bbSessionOk&&(setupBull||acercBull)&&!_bbAActiveCall){
+      const _lvl=setupBull?3:1;
+      const _nm=_lvl===3?'🎯 Setup — Banda Superior (precio cerca)':'📡 Setup — Banda Superior (acercándose)';
+      const _trigLine=`Close a ${distClosToUpper.toFixed(2)}% de banda superior $${lUp15.toFixed(2)}`;
       all.push({...meta,code:'SETUP',name:_nm,type:'call',isSetup:true,_setupLevel:_lvl,reqs:[
         {ok:true,          tf:'15m',text:_trigLine},
         {ok:_bbwExpandActive||lBBW15>=1.8, tf:'15m',text:_bbwExpandActive?`BBW expandiéndose: +${(lBBW15-lBBW15_2).toFixed(2)}% en 30min`:lBBW15>=1.8?`Bandas abiertas (BBW ${lBBW15.toFixed(2)}%)`:(`BBW estático (${lBBW15.toFixed(2)}%, Δ${(lBBW15-lBBW15_2).toFixed(2)}%/30min)`)},
@@ -2360,13 +2361,13 @@ async function _buildSignalsCore(){
       ]});
     }
 
-    // ── PUT (hacia banda inferior) ────────────────────────────────────────────
-    if(_bbSessionOk&&(intentoBear||setupBear||acercBear)){
-      const _lvl=intentoBear?2:setupBear?3:1;
-      const _nm=_lvl===2?'⚡ Setup — Banda Inferior (wick tocando)':_lvl===3?'🎯 Setup — Banda Inferior (precio cerca)':'📡 Setup — Banda Inferior (acercándose)';
-      const _trigLine=intentoBear
-        ?`🔥 LOW $${_candleLow.toFixed(2)} tocó banda inferior $${lLow15.toFixed(2)}`
-        :`Close a ${distClosToLower.toFixed(2)}% de banda inferior $${lLow15.toFixed(2)}`;
+    // SETUP PUT — no mostrar si ya hay BB-B activo para este ticker (señal más fuerte ya presente)
+    // Nivel 2 (Intento/wick) eliminado — demasiado recurrente
+    const _bbBActivePut=all.some(s=>s.sym===sym&&s.code==='BB-B'&&s.type==='put');
+    if(_bbSessionOk&&(setupBear||acercBear)&&!_bbBActivePut){
+      const _lvl=setupBear?3:1;
+      const _nm=_lvl===3?'🎯 Setup — Banda Inferior (precio cerca)':'📡 Setup — Banda Inferior (acercándose)';
+      const _trigLine=`Close a ${distClosToLower.toFixed(2)}% de banda inferior $${lLow15.toFixed(2)}`;
       all.push({...meta,code:'SETUP',name:_nm,type:'put',isSetup:true,_setupLevel:_lvl,reqs:[
         {ok:true,          tf:'15m',text:_trigLine},
         {ok:_bbwExpandActive||lBBW15>=1.8, tf:'15m',text:_bbwExpandActive?`BBW expandiéndose: +${(lBBW15-lBBW15_2).toFixed(2)}% en 30min`:lBBW15>=1.8?`Bandas abiertas (BBW ${lBBW15.toFixed(2)}%)`:(`BBW estático (${lBBW15.toFixed(2)}%, Δ${(lBBW15-lBBW15_2).toFixed(2)}%/30min)`)},

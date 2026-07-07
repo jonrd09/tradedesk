@@ -2549,8 +2549,11 @@ async function _buildSignalsCore(){
     // score pero NO bloquean la señal. Si el precio sale de la banda con BBW
     // expandiendo, eso ES el evento — el resto da contexto de confianza.
     // ════════════════════════════════════════════════════════════════════════
-    const bbPureGateCall = lBBW15>=1.0 && bbCallTrigger && _bbSessionOk;
-    const bbPureGatePut  = lBBW15>=1.0 && bbPutTrigger  && _bbSessionOk;
+    // Gate puro BB: BBW abierto + precio tocando/cruzando banda + sesión activa
+    // bbwAboveMedian ahora es OBLIGATORIO en el gate — sin expansión real no hay señal
+    // Esto bloquea breakouts con bandas estrechas (BBW < mediana histórica) que son ruido
+    const bbPureGateCall = lBBW15>=1.0 && bbCallTrigger && _bbSessionOk && bbwAboveMedian;
+    const bbPureGatePut  = lBBW15>=1.0 && bbPutTrigger  && _bbSessionOk && bbwAboveMedian;
 
     // Pesos — Bollinger ocupa 50 puntos base (siempre se suman si el gate pasó)
     // El resto son bonificaciones de contexto

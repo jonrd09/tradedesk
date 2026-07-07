@@ -2613,7 +2613,7 @@ async function _buildSignalsCore(){
       if(_hlCallOk)            score+=_WBB.ctx_hlines;  // +7
 
       all.push({...meta,code:'BB-A',name:'BB Breakout — CALL',type:'call',
-        weighted:true,score,threshold:35,
+        weighted:true,score,threshold:65,
         _scoreQuality:score>=BB_SCORE_STRONG?'strong':score>=BB_SCORE_MODERATE?'moderate':'weak',
         reqs:[
         // ── GATE PURO BB (siempre ✅ cuando llegamos aquí) ──
@@ -2644,7 +2644,7 @@ async function _buildSignalsCore(){
       if(_hlPutOk)            score+=_WBB.ctx_hlines;
 
       all.push({...meta,code:'BB-B',name:'BB Breakout — PUT',type:'put',
-        weighted:true,score,threshold:35,
+        weighted:true,score,threshold:65,
         _scoreQuality:score>=BB_SCORE_STRONG?'strong':score>=BB_SCORE_MODERATE?'moderate':'weak',
         reqs:[
         {ok:lBBW15>=1.0,    tf:'15m',weight:'BB',text:`Expansión BB: bandas abiertas (BBW ${lBBW15.toFixed(1)}%)`},

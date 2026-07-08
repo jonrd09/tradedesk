@@ -4703,7 +4703,17 @@ function addStrikeEntry(){
   const _now=new Date();
   const _date=_now.toLocaleDateString('es-PR',{day:'2-digit',month:'2-digit',year:'numeric'});
   const _time=_now.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true,timeZone:'America/New_York'});
-  log.unshift({day,dist,costo,spread,date:_date,time:_time});
+  const newEntry={day,dist,costo,spread,date:_date,time:_time};
+  // Reemplazar entrada del mismo día de la semana si existe — máximo 5 entradas (una por día)
+  const existingIdx=log.findIndex(e=>e.day===day);
+  if(existingIdx>=0){
+    log[existingIdx]=newEntry; // reemplaza el día anterior
+  }else{
+    log.unshift(newEntry); // nuevo día — agregar al tope
+  }
+  // Orden canónico: Lunes → Martes → Miércoles → Jueves → Viernes
+  const _dayOrder=['Lunes','Martes','Miércoles','Jueves','Viernes'];
+  log.sort((a,b)=>_dayOrder.indexOf(a.day)-_dayOrder.indexOf(b.day));
   try{localStorage.setItem(key,JSON.stringify(log));}catch(e){}
   document.getElementById('strikeDist').value='';
   document.getElementById('strikeCosto').value='';
@@ -8626,14 +8636,20 @@ async function init(){
       // Con la pre-carga hecha, a las 9:30 solo necesita el precio en tiempo real
       // (ya disponible vía WebSocket) y reconstruir los indicadores — sin esperar
       // ninguna llamada de red.
-      if(isWeekday&&h===9&&m>=20&&m<=22){
+      if(isWeekday&&h===9&&m>=15&&m<=28){
         const _today=new Date().toLocaleDateString('es-PR');
         if(!localStorage.getItem(`preload_ran_${_today}`)){
           localStorage.setItem(`preload_ran_${_today}`,'1');
           addLog('warn','Pre-carga','🔄 Precargando velas históricas antes de apertura (9:20 AM)...');
           (async()=>{
             const schwabToken=await getSchwabToken().catch(()=>null);
-            if(!schwabToken){addLog('warn','Pre-carga','Sin token Schwab — pre-carga omitida');return;}
+            if(!schwabToken){
+              addLog('warn','Pre-carga','Sin token Schwab — pre-carga omitida');
+              if(isTgEnabled()&&getTgToken()&&getTgChat()){
+                sendTelegram('⚠️ *TradeDesk Pro — Pre-carga omitida*\n\nSin token Schwab válido a las 9:20 AM\nReconecta Schwab en ⚙️ → APIs',getTgToken(),getTgChat());
+              }
+              return;
+            }
             let loaded=0,failed=0;
             for(const sym of _signalTickers){
               try{

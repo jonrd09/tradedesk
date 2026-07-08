@@ -2549,44 +2549,36 @@ async function _buildSignalsCore(){
     // score pero NO bloquean la señal. Si el precio sale de la banda con BBW
     // expandiendo, eso ES el evento — el resto da contexto de confianza.
     // ════════════════════════════════════════════════════════════════════════
-    // Gate puro BB: BBW abierto + precio tocando/cruzando banda + sesión activa
-    // bbwAboveMedian ahora es OBLIGATORIO en el gate — sin expansión real no hay señal
-    // Esto bloquea breakouts con bandas estrechas (BBW < mediana histórica) que son ruido
-    const bbPureGateCall = lBBW15>=1.0 && bbCallTrigger && _bbSessionOk && bbwAboveMedian;
-    const bbPureGatePut  = lBBW15>=1.0 && bbPutTrigger  && _bbSessionOk && bbwAboveMedian;
-
-    // Pesos — Bollinger ocupa 50 puntos base (siempre se suman si el gate pasó)
-    // El resto son bonificaciones de contexto
-    const _WBB={
-      bb_expansion: 15,  // BBW abierto (≥1.0%)
-      bb_pierce:    20,  // precio fuera de la banda
-      bb_bbwAboveMedian: 15, // BBW sobre mediana histórica (expansión real)
-      bb_body:      10,  // cuerpo de vela confirmando dirección
-      bb_volume:    10,  // volumen por encima del promedio
-      ctx_media:     8,  // media BB apuntando en la dirección
-      ctx_ma_cross:  8,  // MA20>MA40 contexto
-      ctx_stoch:     7,  // estocástico a favor
-      ctx_hlines:    7,  // sin resistencia/soporte cercano
-    };  // total: 100
-
-    // M-05: BB comprimido — percentil dinámico de las últimas 20 velas de BBW
-    // Se declara aquí porque lo usan tanto BB-A/BB-B (mediana) como BB-C/BB-D (pct25)
-    // M-05 FIX (C-1 auditoría): BBW histórico correcto.
-    // Antes: calculaba BBW con ventanas de solo 3 velas (std sobre 3 puntos = ruido puro).
-    // Ahora: usa bollinger(20,2) estándar sobre toda la serie y toma las últimas 22 lecturas.
-    // Esto hace que _bbwMedian sea estadísticamente representativo de la volatilidad
-    // histórica real del ticker — el filtro "expansión real vs ruido lateral" funciona de verdad.
+    // ── BBW histórico — percentiles para gate y scoring ─────────────────────
+    // Calculado ANTES del gate porque bbwAboveMedian es condición obligatoria
     const _bbFullHist=bollinger(c15,20,2);
     const _bbwHistory=c15.map((_,i)=>{
       const up=_bbFullHist.upper[i],lo=_bbFullHist.lower[i],mid=_bbFullHist.mid[i];
       return (mid&&up!=null&&lo!=null)?(up-lo)/mid*100:null;
     }).filter(v=>v!=null).slice(-22).sort((a,b)=>a-b);
-    // Mediana (percentil 50): expansión real vs lateral ruidoso — usada por BB-A/BB-B
     const _bbwMedian=_bbwHistory.length?_bbwHistory[Math.floor(_bbwHistory.length*0.5)]||lBBW15:lBBW15;
     const bbwAboveMedian=lBBW15>=_bbwMedian;
-    // Percentil 25 — usado por BB-C/BB-D para detectar BBW comprimido (bands apretadas)
-    // Con el fix, este valor ahora es estadísticamente correcto también
     const _bbwPct25=_bbwHistory.length?_bbwHistory[Math.floor(_bbwHistory.length*0.25)]||lBBW15:lBBW15;
+
+    // Gate puro BB: BBW abierto + precio tocando/cruzando banda + sesión activa
+    // bbwAboveMedian es OBLIGATORIO — sin expansión real no hay señal
+    const bbPureGateCall = lBBW15>=1.0 && bbCallTrigger && _bbSessionOk && bbwAboveMedian;
+    const bbPureGatePut  = lBBW15>=1.0 && bbPutTrigger  && _bbSessionOk && bbwAboveMedian;
+
+    // Pesos — Bollinger ocupa 50 puntos base (siempre se suman si el gate pasó)
+    const _WBB={
+      bb_expansion: 15,
+      bb_pierce:    20,
+      bb_bbwAboveMedian: 15,
+      bb_body:      10,
+      bb_volume:    10,
+      ctx_media:     8,
+      ctx_ma_cross:  8,
+      ctx_stoch:     7,
+      ctx_hlines:    7,
+    };  // total: 100
+
+    // M-05 — bloque original eliminado (movido arriba)
 
     // ── VOLATILIDAD CÍCLICA (tus notas: "baja vol → alta vol → baja vol") ───
     // _bbwSqueezeBreakout detecta la TRANSICIÓN: el BBW estaba en zona comprimida

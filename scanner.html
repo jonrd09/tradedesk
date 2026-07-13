@@ -1970,7 +1970,7 @@ function renderJournalTable(){
   if(!trades.length){wrap.innerHTML='<div style="color:var(--muted);font-size:12px;text-align:center;padding:20px;">No hay operaciones registradas aún.</div>';return;}
   let html=`<table class="tbl"><tr>
     <th>Fecha</th><th>ETF</th><th>Tipo</th><th>Acciones</th><th>Entrada</th>
-    <th>Stop</th><th>Target</th><th>Precio act.</th><th>P&L</th><th>Estado</th><th></th>
+    <th>Stop</th><th>Target</th><th>Precio act.</th><th>P&L</th><th>Nota</th><th>Estado</th><th></th>
   </tr>`;
   trades.forEach(t=>{
     const livePrice=liveQ[t.sym]?.c||0;
@@ -1989,6 +1989,7 @@ function renderJournalTable(){
       <td class="${t.target?'vpos':'vneu'}">${t.target?'$'+t.target.toFixed(2):'—'}</td>
       <td class="vneu">${livePrice?'$'+livePrice.toFixed(2):'—'}</td>
       <td class="${pnlClass}">${pnlStr}</td>
+      <td style="font-size:11px;color:var(--muted);max-width:140px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${esc(t.note||'')}">${esc(t.note||'—')}</td>
       <td><span class="badge ${t.status==='OPEN'?'b-warn':'b-neu'}">${t.status}</span></td>
       <td style="white-space:nowrap;">
         ${t.status==='OPEN'?`<button class="close-trade-btn" onclick="closeTrade(${t.id})">Cerrar</button> `:''}

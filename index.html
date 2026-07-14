@@ -2561,9 +2561,9 @@ async function _buildSignalsCore(){
     const _bbwPct25=_bbwHistory.length?_bbwHistory[Math.floor(_bbwHistory.length*0.25)]||lBBW15:lBBW15;
 
     // Gate puro BB: BBW abierto + precio tocando/cruzando banda + sesión activa
-    // bbwAboveMedian es OBLIGATORIO — sin expansión real no hay señal
-    const bbPureGateCall = lBBW15>=1.0 && bbCallTrigger && _bbSessionOk && bbwAboveMedian;
-    const bbPureGatePut  = lBBW15>=1.0 && bbPutTrigger  && _bbSessionOk && bbwAboveMedian;
+    // bbwAboveMedian es BONUS de puntos (+15) pero NO bloquea el gate
+    const bbPureGateCall = lBBW15>=1.0 && bbCallTrigger && _bbSessionOk;
+    const bbPureGatePut  = lBBW15>=1.0 && bbPutTrigger  && _bbSessionOk;
 
     // Pesos — Bollinger ocupa 50 puntos base (siempre se suman si el gate pasó)
     const _WBB={

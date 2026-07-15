@@ -1868,6 +1868,16 @@ async function buildSignals(){
   }
 }
 
+// M-10: Intensidad de color por confianza -- rampa clara-a-oscura empieza en 80%.
+// Bajo 80% siempre se ve el tono mas claro (evita "ruido" de color en senales
+// recien formadas). CALL = verde, PUT = rojo. Reemplaza el 'col' viejo que
+// nunca distinguia CALL/PUT (siempre verde/amarillo).
+function _sigIntensityColor(type,pct){
+  const p=Math.max(0,Math.min(1,(pct-80)/20)); // 80%->0, 100%->1 (clamped)
+  const light=72-p*34; // 72% (claro) -> 38% (oscuro)
+  return type==='put'?`hsl(350,75%,${light}%)`:`hsl(150,65%,${light}%)`;
+}
+
 async function _buildSignalsCore(){
   const area=document.getElementById('signalArea');
   _purgeCandleCache(); // M-09: cleanup stale entries
@@ -2561,9 +2571,9 @@ async function _buildSignalsCore(){
     const _bbwPct25=_bbwHistory.length?_bbwHistory[Math.floor(_bbwHistory.length*0.25)]||lBBW15:lBBW15;
 
     // Gate puro BB: BBW abierto + precio tocando/cruzando banda + sesión activa
-    // bbwAboveMedian es BONUS de puntos (+15) pero NO bloquea el gate
-    const bbPureGateCall = lBBW15>=1.0 && bbCallTrigger && _bbSessionOk;
-    const bbPureGatePut  = lBBW15>=1.0 && bbPutTrigger  && _bbSessionOk;
+    // bbwAboveMedian es OBLIGATORIO — sin expansión real no hay señal
+    const bbPureGateCall = lBBW15>=1.0 && bbCallTrigger && _bbSessionOk && bbwAboveMedian;
+    const bbPureGatePut  = lBBW15>=1.0 && bbPutTrigger  && _bbSessionOk && bbwAboveMedian;
 
     // Pesos — Bollinger ocupa 50 puntos base (siempre se suman si el gate pasó)
     const _WBB={
@@ -3085,10 +3095,14 @@ async function _buildSignalsCore(){
     const total=s.reqs.length;
     const disp=s.weighted?s.pct:Math.round(s.passed/total*100);
     const pctLabel=disp;
-    const col=disp===100?'var(--green)':disp>=86?'var(--green)':'var(--yellow)';
+    const col=_sigIntensityColor(s.type,disp);
     const hdr=s.type==='call'?'sig-call':'sig-put';
     const fullSignal=s.weighted?s.pct>=100:s.passed===total;
     const accentCol=s.isSetup?'#ffc234':s.type==='call'?'#00d17a':'#ff4d6d';
+    // Guardar valores calculados en el objeto para que el bloque de "smart
+    // render" (mas abajo) pueda actualizar la tarjeta EXISTENTE en vez de
+    // crear una nueva cuando la senal sube de % (mismo sym+code+type).
+    s._disp=disp;s._col=col;s._fullSignal=fullSignal;s._accentCol=accentCol;
     // Guardar SIEMPRE en historial cuando la señal pasa el threshold
     // (independiente de si el precio es live o stale — el trader necesita el registro)
     const _passThreshold=s.weighted?(s.threshold||70):75;
@@ -3207,6 +3221,7 @@ async function _buildSignalsCore(){
       :_sq==='weak'
       ?`<span style="background:rgba(255,77,109,.2);color:#ff4d6d;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;">📉 BREAKOUT DÉBIL</span>`
       :`<span style="background:rgba(255,194,52,.25);color:#ffc234;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;">★ ${pctLabel}% — EN FORMACIÓN</span>`;
+    s._pctBadge=pctBadge;
 
     html.push(`<div class="sig-card" data-sigkey="${s.sym}_${s.code}_${s.type}" style="margin-bottom:12px;${fullSignal?`box-shadow:0 0 0 2px ${accentCol};`:''}">
       <div class="sig-hdr ${hdr}" data-card-header style="padding:12px 14px;position:relative;">
@@ -3219,7 +3234,7 @@ async function _buildSignalsCore(){
           <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:4px;">
             <span style="font-family:var(--mono);font-size:18px;font-weight:700;color:#fff;">${s.sym}</span>
             <span style="background:rgba(0,0,0,.25);color:#fff;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;">${s.type.toUpperCase()} · ${s.code}</span>
-            ${pctBadge}
+            <span data-card-badge>${pctBadge}</span>
           </div>
           <div style="font-size:12px;color:rgba(255,255,255,.8);font-weight:600;">${s.name}</div>
           <div data-card-price style="font-size:11px;color:rgba(255,255,255,.55);margin-top:2px;">
@@ -3228,8 +3243,8 @@ async function _buildSignalsCore(){
           </div>
         </div>
         <div style="text-align:right;flex-shrink:0;margin-left:10px;margin-top:18px;">
-          <div style="font-family:var(--mono);font-size:28px;font-weight:700;color:${col};line-height:1;">${disp}%</div>
-          <div style="font-size:10px;color:rgba(255,255,255,.45);margin-top:2px;">${s.passed}/${total} cond.</div>
+          <div data-card-pct style="font-family:var(--mono);font-size:28px;font-weight:700;color:${col};line-height:1;transition:color .6s;">${disp}%</div>
+          <div data-card-cond style="font-size:10px;color:rgba(255,255,255,.45);margin-top:2px;">${s.passed}/${total} cond.</div>
         </div>
       </div>
       <div class="sig-body" style="padding:10px 14px;">
@@ -3243,7 +3258,7 @@ async function _buildSignalsCore(){
           </div>`).join('')}
         </div>
         <div style="height:4px;background:var(--bg4);border-radius:2px;margin-bottom:10px;overflow:hidden;">
-          <div style="height:100%;width:${disp}%;background:${col};border-radius:2px;transition:width .6s;"></div>
+          <div data-card-bar style="height:100%;width:${disp}%;background:${col};border-radius:2px;transition:width .6s, background .6s;"></div>
         </div>
         ${chartSvg?`<div style="margin-top:4px;">
           <div style="font-size:10px;color:var(--text3);margin-bottom:4px;">📈 Precio 1H · BB (azul) · MA20 (amarillo)</div>
@@ -3334,6 +3349,18 @@ async function _buildSignalsCore(){
           :`<span style="color:var(--yellow);font-size:10px;">⚠ % n/d</span>`;
         priceEl.innerHTML=`$${s.price.toFixed(2)} ${pctDisplay} · ${s.dataLabel}${s._priceStale?` <span style="color:var(--yellow);font-size:10px;">⚠ precio est.</span>`:''}${s._timeET?` <span style="color:rgba(255,194,52,.8);margin-left:4px;">· ${s._timeET} ET</span>`:''}`;
       }
+      // M-10: actualizar % + color + barra + badge EN LA MISMA tarjeta cuando
+      // la señal sube (o baja) de confianza — evita crear una tarjeta nueva
+      // para el mismo sym+code+type. Rampa clara→oscura ya calculada en s._col.
+      const pctEl=existing.querySelector('[data-card-pct]');
+      if(pctEl){pctEl.textContent=`${s._disp}%`;pctEl.style.color=s._col;}
+      const condEl=existing.querySelector('[data-card-cond]');
+      if(condEl)condEl.textContent=`${s.passed}/${s.reqs.length} cond.`;
+      const barEl=existing.querySelector('[data-card-bar]');
+      if(barEl){barEl.style.width=`${s._disp}%`;barEl.style.background=s._col;}
+      const badgeEl=existing.querySelector('[data-card-badge]');
+      if(badgeEl&&s._pctBadge)badgeEl.innerHTML=s._pctBadge;
+      existing.style.boxShadow=s._fullSignal?`0 0 0 2px ${s._accentCol}`:'';
     }
   });
 

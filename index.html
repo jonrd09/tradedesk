@@ -1878,6 +1878,33 @@ function _sigIntensityColor(type,pct){
   return type==='put'?`hsl(350,75%,${light}%)`:`hsl(150,65%,${light}%)`;
 }
 
+// M-11: ETFs apalancados de referencia por ticker -- SOLO informativo, no
+// cambia que ticker/estrategia se rastrea (eso sigue siendo el activo
+// principal). Verificado en vivo 2026-07-15 (Direxion/GraniteShares/REX/
+// LongPoint/ProShares). Acciones individuales en EE.UU. solo tienen version
+// 2x (no existe 3x de accion individual por regulacion); algunos inversos de
+// Direxion son -1x (no -2x) porque ese emisor no ofrece bear 2x de acciones
+// individuales -- se etiqueta el multiplicador real de cada uno para no
+// insinuar una simetria que no existe.
+const _LEV_MAP={
+  'PLTR': {bullSym:'PLTU', bullX:'2x',  bearSym:'PLTZ', bearX:'-2x'},
+  'GOOG': {bullSym:'GGLL', bullX:'2x',  bearSym:'GGLS', bearX:'-1x'},
+  'GOOGL':{bullSym:'GGLL', bullX:'2x',  bearSym:'GGLS', bearX:'-1x'},
+  'META': {bullSym:'METU', bullX:'2x',  bearSym:'METD', bearX:'-1x'},
+  'COIN': {bullSym:'CONL', bullX:'2x',  bearSym:'COID', bearX:'-2x'},
+  'QQQ':  {bullSym:'TQQQ', bullX:'3x',  bearSym:'SQQQ', bearX:'-3x'},
+};
+function _leveragedBadge(sym,type){
+  const m=_LEV_MAP[sym];
+  if(!m)return '';
+  // Solo 2x/3x -- si el unico inverso disponible para este ticker es 1x
+  // (ej. GGLS/METD, que Direxion ofrece solo como Bear 1X, no 2x), no se
+  // muestra badge en absoluto en vez de mostrar una magnitud "floja".
+  if(type==='put'&&(m.bearX==='-1x'||m.bearX==='1x'))return '';
+  const ref=type==='call'?`${m.bullSym} ${m.bullX}`:`${m.bearSym} ${m.bearX}`;
+  return `<span style="background:rgba(255,255,255,.12);color:#f5f7fa;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;font-family:var(--mono);margin-left:6px;" title="ETF apalancado de referencia -- no es lo que se rastrea">${ref}</span>`;
+}
+
 async function _buildSignalsCore(){
   const area=document.getElementById('signalArea');
   _purgeCandleCache(); // M-09: cleanup stale entries
@@ -3236,7 +3263,7 @@ async function _buildSignalsCore(){
             <span style="background:rgba(0,0,0,.25);color:#fff;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;">${s.type.toUpperCase()} · ${s.code}</span>
             <span data-card-badge>${pctBadge}</span>
           </div>
-          <div style="font-size:12px;color:rgba(255,255,255,.8);font-weight:600;">${s.name}</div>
+          <div style="font-size:12px;color:rgba(255,255,255,.8);font-weight:600;">${s.name}${_leveragedBadge(s.sym,s.type)}</div>
           <div data-card-price style="font-size:11px;color:rgba(255,255,255,.55);margin-top:2px;">
             $${s.price.toFixed(2)} ${s._pctReliable!==false?`<span style="color:${s.pct>=0?'rgba(0,209,122,.9)':'rgba(255,77,109,.9)'}">(${s.pct>=0?'+':''}${s.pct.toFixed(2)}%)</span>`:`<span style="color:var(--yellow);font-size:10px;" title="% diario no confiable — Finnhub devolvió referencia incorrecta (after-hours)">⚠ % n/d</span>`} · ${s.dataLabel}${s._wsIsToday===true?` <span style="color:var(--green);font-size:10px;" title="Precio en tiempo real — WebSocket Finnhub activo">🟢 RT</span>`:s._wsIsToday===false?` <span style="color:var(--yellow);font-size:10px;" title="Dato retrasado — WebSocket sin datos de hoy, usando última vela cerrada">🟡 delay</span>`:''}${s._priceStale?` <span style="color:var(--yellow);font-size:10px;" title="Precio de Finnhub no disponible — usando último close de Schwab">⚠ precio est.</span>`:''}
             ${s._timeET?`<span style="color:rgba(255,194,52,.8);margin-left:4px;">· ${s._timeET} ET</span>`:''}

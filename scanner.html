@@ -361,7 +361,7 @@ body.window-active .window-banner{animation:pulse-banner 2s infinite;}
           </div>
           <div style="flex:1;">
             <div class="risk-label" style="margin-bottom:3px;">Entrada $</div>
-            <input type="number" id="mc-entry" class="risk-input" style="width:100%;font-size:12px;padding:6px 8px;" step="0.01" placeholder="Live" oninput="calcMiniRisk()">
+            <input type="number" id="mc-entry" class="risk-input" style="width:100%;font-size:12px;padding:6px 8px;" step="0.01" placeholder="Live" oninput="mcEntryChanged()">
           </div>
         </div>
 
@@ -385,7 +385,7 @@ body.window-active .window-banner{animation:pulse-banner 2s infinite;}
           </div>
           <div style="flex:1;">
             <div class="risk-label" style="margin-bottom:3px;">Target $</div>
-            <input type="number" id="mc-target" class="risk-input" style="width:100%;font-size:12px;padding:6px 8px;" step="0.01" placeholder="+1.25%" oninput="calcMiniRisk()">
+            <input type="number" id="mc-target" class="risk-input" style="width:100%;font-size:12px;padding:6px 8px;" step="0.01" placeholder="+1.25%" oninput="mcTargetUserEdited=true;calcMiniRisk()">
           </div>
         </div>
 
@@ -1697,6 +1697,7 @@ function mcSymChange(){
   const sym=document.getElementById('mc-sym').value;
   if(sym&&sym!==prevMcSym){
     prevMcSym=sym;
+    mcTargetUserEdited=false; // reset al cambiar de ETF
     document.getElementById('mc-entry').value='';
     document.getElementById('mc-stop').value='';
     document.getElementById('mc-target').value='';
@@ -1706,6 +1707,7 @@ function mcSymChange(){
 }
 
 async function fillMiniCalc(sym,price){
+  mcTargetUserEdited=false; // reset: nuevo ticker = target auto de nuevo
   // Actualizar header label
   const lbl=document.getElementById('mc-sym-lbl');
   if(lbl) lbl.textContent=sym;
@@ -1737,6 +1739,17 @@ async function fillMiniCalc(sym,price){
 }
 
 let mcMode='risk'; // 'risk' = por riesgo%, 'capital' = todo el capital
+let mcTargetUserEdited=false; // true cuando el usuario escribe el target manualmente
+
+// Cuando el usuario escribe la entrada manualmente:
+// recalcular target +1.25% solo si el usuario NO ha editado el target a mano
+function mcEntryChanged(){
+  const entry=parseFloat(document.getElementById('mc-entry').value)||0;
+  if(entry>0&&!mcTargetUserEdited){
+    document.getElementById('mc-target').value=(entry*1.0125).toFixed(2);
+  }
+  calcMiniRisk();
+}
 
 function setMcMode(mode){
   mcMode=mode;

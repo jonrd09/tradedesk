@@ -673,7 +673,7 @@ function isInWindow(){
 function isMarketOpen(){
   const et=getETNow();
   const d=et.getDay(),h=et.getHours(),m=et.getMinutes(),tot=h*60+m;
-  return d>=1&&d<=5&&tot>=570&&tot<960;
+  return d>=1&&d<=5&&tot>=560&&tot<960; // 9:20am–4:00pm ET
 }
 function updateMarketBadge(){
   const open=isMarketOpen();
@@ -887,10 +887,9 @@ async function getFinnhubCandles(sym){
   // para obtener el timestamp UTC correcto sin cálculos de offset manuales
   const etNow=getETNow();
   const etMinutesToday=etNow.getHours()*60+etNow.getMinutes();
-  const minutesSince929=etMinutesToday - (9*60+29);
-  // Si el mercado aún no abrió (antes de 9:29am ET), usar 1h atrás como fallback
-  const from=minutesSince929>0
-    ? now - minutesSince929*60
+  const minutesSince919=etMinutesToday - (9*60+19); // desde 9:19am ET para capturar pre-apertura
+  const from=minutesSince919>0
+    ? now - minutesSince919*60
     : now - 3600;
 
   const data=await fh(`/stock/candle?symbol=${encodeURIComponent(sym)}&resolution=1&from=${from}&to=${now}`);

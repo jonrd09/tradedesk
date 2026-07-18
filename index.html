@@ -3945,6 +3945,7 @@ function renderNewsTickerButtons(){
     `<button onclick="loadNews('${sym}')" class="news-ticker-btn" id="nbtn-${sym}">${sym}</button>`
   ).join('')+
   `<button onclick="loadNews('ALL')" class="news-ticker-btn" id="nbtn-ALL" style="color:var(--yellow);">ALL</button>`;
+  _renderEarningsBadges(); // reaplica badge + borde de earnings tras reconstruir los botones
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -7681,6 +7682,16 @@ function _renderEarningsBadges(){
       tag.style.cssText='font-size:9px;font-weight:700;color:#ffc234;margin-left:3px;';
       tag.textContent=label;
       btn.appendChild(tag);
+    }
+    // Borde de alerta: dia antes del earning = amarillo, dia del earning = rojo.
+    // Se resetea al borde default (`.news-ticker-btn`) fuera de esa ventana.
+    const days=_daysUntilEarnings(sym);
+    if(days===0){
+      btn.style.border='2px solid var(--red)';
+    }else if(days===1){
+      btn.style.border='2px solid var(--yellow)';
+    }else{
+      btn.style.border='';
     }
   });
 }

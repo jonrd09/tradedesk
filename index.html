@@ -7591,6 +7591,18 @@ function initNews(){
 // ═══════════════════════════════════════════════════════════════
 let _earningsCache={};     // sym → {date, eps_est, eps_act, ts}
 let _earningsLoaded=false;
+// FIX (2026-07-18): GOOG/GOOGL son tickers distintos para la misma empresa
+// (Alphabet) y Finnhub a veces reporta el earnings event bajo un simbolo que
+// no es el que el usuario rastrea en _signalTickers (ej. rastrea 'GOOG' pero
+// el evento llega con symbol:'GOOGL'). Antes esto causaba que el match
+// `syms.includes(ev.symbol)` fallara silenciosamente y el earnings real
+// (confirmado 22-jul-2026) nunca apareciera. Se agrega un mapa de alias.
+const _EARNINGS_SYM_ALIASES={'GOOG':['GOOG','GOOGL'],'GOOGL':['GOOG','GOOGL']};
+function _earningsSymbolMatch(trackedSym,eventSym){
+  if(trackedSym===eventSym)return true;
+  const aliases=_EARNINGS_SYM_ALIASES[trackedSym];
+  return aliases?aliases.includes(eventSym):false;
+}
 
 async function loadEarningsCalendar(){
   const key=getKey();
@@ -7610,9 +7622,13 @@ async function loadEarningsCalendar(){
 
     _earningsCache={};
     events.forEach(ev=>{
-      if(!syms.includes(ev.symbol))return; // solo activos en el sistema
-      if(!_earningsCache[ev.symbol]||ev.date>_earningsCache[ev.symbol].date){
-        _earningsCache[ev.symbol]={
+      // Buscar el ticker RASTREADO que corresponda a este evento (por match
+      // directo o por alias GOOG/GOOGL) — se guarda bajo el símbolo rastreado
+      // para que _daysUntilEarnings(sym) lo encuentre.
+      const matchedSym=syms.find(s=>_earningsSymbolMatch(s,ev.symbol));
+      if(!matchedSym)return; // no es un ticker activo en el sistema
+      if(!_earningsCache[matchedSym]||ev.date>_earningsCache[matchedSym].date){
+        _earningsCache[matchedSym]={
           date:ev.date,
           epsEst:ev.epsEstimate,
           epsAct:ev.epsActual,
@@ -7646,8 +7662,8 @@ function _getEarningsLabel(sym){
   if(days===0)return '📣 HOY';
   if(days===1)return '📣 Mañana';
   if(days<=3)return `📣 ${days}d`;
-  if(days<=7)return `📅 ${days}d`;
-  return null; // more than 7 days — don't badge
+  if(days<=14)return `📅 ${days}d`;
+  return null; // more than 14 days — don't badge
 }
 
 function _renderEarningsBadges(){
@@ -7673,11 +7689,11 @@ function _renderEarningsSection(){
   const area=document.getElementById('earningsArea');
   if(!area)return;
   const upcoming=_signalTickers
-    .filter(sym=>{const d=_daysUntilEarnings(sym);return d!==null&&d>=0&&d<=7;})
+    .filter(sym=>{const d=_daysUntilEarnings(sym);return d!==null&&d>=0&&d<=14;})
     .sort((a,b)=>(_daysUntilEarnings(a)||99)-(_daysUntilEarnings(b)||99));
 
   if(!upcoming.length){
-    area.innerHTML='<div style="font-size:11px;color:var(--text3);padding:6px 0;">Sin earnings en los próximos 7 días para tus activos</div>';
+    area.innerHTML='<div style="font-size:11px;color:var(--text3);padding:6px 0;">Sin earnings en los próximos 14 días para tus activos</div>';
     return;
   }
   area.innerHTML=upcoming.map(sym=>{

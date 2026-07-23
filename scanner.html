@@ -633,20 +633,28 @@ let trades=[];
 const THRESHOLD=2.0; // % alerta
 
 const BULL=[
-  {t:'TQQQ',n:'ProShares UltraPro QQQ',tags:['x3','bull'],tc:['t-x3','t-bull']},
-  {t:'UPRO',n:'ProShares UltraPro S&P500',tags:['x3','bull'],tc:['t-x3','t-bull']},
-  {t:'SSO', n:'ProShares Ultra S&P500',tags:['x2','bull'],tc:['t-x2','t-bull']},
-  {t:'QLD', n:'ProShares Ultra QQQ',tags:['x2','bull'],tc:['t-x2','t-bull']},
-  {t:'SOXL',n:'Direxion Semis Bull 3x',tags:['x3','bull'],tc:['t-x3','t-bull'],sector:true},
-  {t:'TNA', n:'Direxion Russell 2000 Bull',tags:['x3','bull'],tc:['t-x3','t-bull'],sector:true},
-  {t:'ERX', n:'Direxion Energy Bull 2x',tags:['x2','bull'],tc:['t-x2','t-bull'],sector:true},
+  // ── Índices apalancados (x3) ──────────────────────────────────────
+  {t:'TQQQ',n:'ProShares UltraPro QQQ',tags:['x3','Nasdaq'],tc:['t-x3','t-bull']},
+  {t:'UPRO',n:'ProShares UltraPro S&P500',tags:['x3','S&P500'],tc:['t-x3','t-bull']},
+  {t:'SOXL',n:'Direxion Semis Bull 3x',tags:['x3','Semis'],tc:['t-x3','t-bull'],sector:true},
+  {t:'TNA', n:'Direxion Russell 2000 Bull 3x',tags:['x3','SmallCap'],tc:['t-x3','t-bull'],sector:true},
+  // ── Índices apalancados (x2) ──────────────────────────────────────
+  {t:'SSO', n:'ProShares Ultra S&P500',tags:['x2','S&P500'],tc:['t-x2','t-bull']},
+  {t:'QLD', n:'ProShares Ultra QQQ',tags:['x2','Nasdaq'],tc:['t-x2','t-bull']},
+  // ── Single-stock x2 (Direxion) ───────────────────────────────────
+  {t:'PLTU',n:'Direxion PLTR Bull 2x',tags:['x2','PLTR'],tc:['t-x2','t-bull'],sector:true},
+  {t:'METU',n:'Direxion META Bull 2x',tags:['x2','META'],tc:['t-x2','t-bull'],sector:true},
+  {t:'GGLL',n:'Direxion GOOGL Bull 2x',tags:['x2','GOOGL'],tc:['t-x2','t-bull'],sector:true},
+  {t:'CONX',n:'Direxion COIN Bull 2x',tags:['x2','COIN'],tc:['t-x2','t-bull'],sector:true},
 ];
 const BEAR=[
-  {t:'SQQQ',n:'ProShares UltraPro Short QQQ',tags:['-3x','bear'],tc:['t-x3','t-bear']},
-  {t:'SPXU',n:'ProShares UltraPro Short S&P500',tags:['-3x','bear'],tc:['t-x3','t-bear']},
-  {t:'SDS', n:'ProShares UltraShort S&P500',tags:['-2x','bear'],tc:['t-x2','t-bear']},
-  {t:'QID', n:'ProShares UltraShort QQQ',tags:['-2x','bear'],tc:['t-x2','t-bear']},
-  {t:'SOXS',n:'Direxion Semis Bear 3x',tags:['-3x','bear'],tc:['t-x3','t-bear'],sector:true},
+  // ── Índices inversos (x3) ─────────────────────────────────────────
+  {t:'SQQQ',n:'ProShares UltraPro Short QQQ',tags:['-3x','Nasdaq'],tc:['t-x3','t-bear']},
+  {t:'SPXU',n:'ProShares UltraPro Short S&P500',tags:['-3x','S&P500'],tc:['t-x3','t-bear']},
+  {t:'SOXS',n:'Direxion Semis Bear 3x',tags:['-3x','Semis'],tc:['t-x3','t-bear'],sector:true},
+  // ── Índices inversos (x2) ─────────────────────────────────────────
+  {t:'SDS', n:'ProShares UltraShort S&P500',tags:['-2x','S&P500'],tc:['t-x2','t-bear']},
+  {t:'QID', n:'ProShares UltraShort QQQ',tags:['-2x','Nasdaq'],tc:['t-x2','t-bear']},
 ];
 const ALL=[...BULL,...BEAR];
 const CTX_SYMS=['SPY','QQQ','VIX'];

@@ -4735,10 +4735,19 @@ function updateRecomLabel(){
   el.textContent=label;el.style.color=col;el.style.fontWeight='700';
   el.style.background=bg;el.style.border='1px solid '+bdr;el.style.borderRadius='8px';el.style.padding='2px 8px';
 }
+// Ganancia %: (venta - costo) / costo * 100. TOS no da este % directo al
+// cerrar la posición -- se calcula aquí a partir del costo (compra) ya
+// existente y el nuevo campo de precio de venta.
+function _strikeGainPct(costo,venta){
+  if(venta==null||!isFinite(venta))return null;
+  if(!costo||costo<=0)return null; // evita división por cero / costo no capturado
+  return (venta-costo)/costo*100;
+}
 function addStrikeEntry(){
   const day=document.getElementById('strikeDay').value;
   const dist=parseFloat(document.getElementById('strikeDist').value);
   const costo=parseFloat(document.getElementById('strikeCosto').value)||0;
+  const venta=parseFloat(document.getElementById('strikeVenta').value);
   const spread=parseFloat(document.getElementById('strikeSpread').value)||null;
   if(!dist&&dist!==0)return;
   const key='strikelog_'+_strikeTicker;
@@ -4746,7 +4755,7 @@ function addStrikeEntry(){
   const _now=new Date();
   const _date=_now.toLocaleDateString('es-PR',{day:'2-digit',month:'2-digit',year:'numeric'});
   const _time=_now.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true,timeZone:'America/New_York'});
-  const newEntry={day,dist,costo,spread,date:_date,time:_time};
+  const newEntry={day,dist,costo,venta:isNaN(venta)?null:venta,spread,date:_date,time:_time};
   // Reemplazar entrada del mismo día de la semana si existe — máximo 5 entradas (una por día)
   const existingIdx=log.findIndex(e=>e.day===day);
   if(existingIdx>=0){
@@ -4760,6 +4769,7 @@ function addStrikeEntry(){
   try{localStorage.setItem(key,JSON.stringify(log));}catch(e){}
   document.getElementById('strikeDist').value='';
   document.getElementById('strikeCosto').value='';
+  document.getElementById('strikeVenta').value='';
   document.getElementById('strikeSpread').value='';
   renderStrikeLog();updateCardAverages();
 }
@@ -4777,7 +4787,8 @@ function editStrikeEntry(ticker,idx){
   const days=['Lunes','Martes','Miércoles','Jueves','Viernes'];
   const opts=days.map(d=>`<option value="${d}" ${d===e.day?'selected':''}>${d}</option>`).join('');
   el.innerHTML=`<select id="ed-${idx}" style="background:var(--bg4);border:1px solid var(--blue);border-radius:6px;color:var(--text);padding:3px 6px;font-size:12px;flex:1;">${opts}</select>
-    <input type="number" id="ec-${idx}" value="${e.costo||0}" step="0.01" placeholder="$" style="background:var(--bg4);border:1px solid var(--blue);border-radius:6px;color:var(--yellow);padding:3px 6px;font-size:12px;width:65px;text-align:center;">
+    <input type="number" id="ec-${idx}" value="${e.costo||0}" step="0.01" placeholder="Costo $" style="background:var(--bg4);border:1px solid var(--blue);border-radius:6px;color:var(--yellow);padding:3px 6px;font-size:12px;width:65px;text-align:center;">
+    <input type="number" id="ew-${idx}" value="${e.venta!=null?e.venta:''}" step="0.01" placeholder="Venta $" style="background:var(--bg4);border:1px solid var(--blue);border-radius:6px;color:var(--green);padding:3px 6px;font-size:12px;width:65px;text-align:center;">
     <input type="number" id="ev-${idx}" value="${e.dist}" step="0.5" style="background:var(--bg4);border:1px solid var(--blue);border-radius:6px;color:var(--text);padding:3px 6px;font-size:12px;width:60px;text-align:center;">
     <input type="number" id="es-${idx}" value="${e.spread||''}" step="0.01" placeholder="Spread" style="background:var(--bg4);border:1px solid var(--blue);border-radius:6px;color:var(--purple);padding:3px 6px;font-size:12px;width:60px;text-align:center;">
     <button onclick="saveStrikeEdit('${ticker}',${idx})" style="background:var(--green);border:none;border-radius:6px;color:#001a0e;padding:3px 10px;font-size:12px;font-weight:700;cursor:pointer;">✓</button>
@@ -4792,7 +4803,9 @@ function saveStrikeEdit(ticker,idx){
   const key='strikelog_'+ticker;let log=[];
   try{log=JSON.parse(localStorage.getItem(key)||'[]');}catch(e){}
   const spread=parseFloat(document.getElementById('es-'+idx)?.value)||null;
-  if(!log[idx])return;log[idx].day=day;log[idx].dist=dist;log[idx].costo=costo;log[idx].spread=spread;
+  const _ventaRaw=parseFloat(document.getElementById('ew-'+idx)?.value);
+  const venta=isNaN(_ventaRaw)?null:_ventaRaw;
+  if(!log[idx])return;log[idx].day=day;log[idx].dist=dist;log[idx].costo=costo;log[idx].venta=venta;log[idx].spread=spread;
   // preserve original time when editing
   try{localStorage.setItem(key,JSON.stringify(log));}catch(e){}
   renderStrikeLog();updateCardAverages();
@@ -4806,16 +4819,26 @@ function renderStrikeLog(){
     area.innerHTML='<div style="text-align:center;padding:16px;color:var(--text3);font-size:12px;">Sin entradas — agrega tu primer registro</div>';
     return;
   }
-  const listHTML=log.map((e,i)=>`<div style="display:flex;align-items:center;gap:6px;padding:7px 0;border-bottom:1px solid var(--border);font-size:13px;flex-wrap:wrap;" id="sentry-${i}">
+  const listHTML=log.map((e,i)=>{
+    // % ganancia = (venta - costo) / costo * 100 -- TOS no lo calcula solo al
+    // cerrar la posición, así que se saca aquí a partir del costo (compra)
+    // ya capturado y el nuevo precio de venta.
+    const _gain=_strikeGainPct(e.costo,e.venta);
+    const _gainHTML=_gain!=null
+      ?`<span style="font-family:var(--mono);font-size:13px;font-weight:700;color:${_gain>=0?'var(--green)':'var(--red)'};min-width:70px;text-align:right;" title="Venta $${e.venta.toFixed(2)} vs Costo $${(e.costo||0).toFixed(2)}">${_gain>=0?'+':''}${_gain.toFixed(1)}%</span>`
+      :'<span style="min-width:70px;"></span>';
+    return`<div style="display:flex;align-items:center;gap:6px;padding:7px 0;border-bottom:1px solid var(--border);font-size:13px;flex-wrap:wrap;" id="sentry-${i}">
     <span style="min-width:72px;color:var(--text);font-weight:600;">${e.day}</span>
     <span style="font-size:11px;color:var(--text3);min-width:76px;">${e.date||''}</span>
     <span style="font-size:11px;color:var(--blue);min-width:58px;font-family:var(--mono);">${e.time||''}</span>
     <span style="font-family:var(--mono);font-size:12px;color:var(--yellow);min-width:52px;">$${(e.costo||0).toFixed(2)}</span>
     <span style="font-family:var(--mono);font-weight:700;color:${_strikeColor};min-width:28px;text-align:right;">${e.dist}</span>
     ${e.spread!=null?`<span style="font-family:var(--mono);font-size:11px;color:var(--purple);min-width:44px;" title="Spread Bid/Ask">Δ$${e.spread.toFixed(2)}</span>`:'<span style="min-width:44px;"></span>'}
+    ${_gainHTML}
     <button onclick="editStrikeEntry('${_strikeTicker}',${i})" style="background:none;border:none;color:var(--blue);cursor:pointer;font-size:12px;padding:0 4px;">✏️</button>
     <button onclick="deleteStrikeEntry('${_strikeTicker}',${i})" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:12px;padding:0 4px;">✕</button>
-  </div>`).join('');
+  </div>`;
+  }).join('');
   // Promedios por día
   const byDay={};log.forEach(e=>{if(!byDay[e.day])byDay[e.day]=[];byDay[e.day].push(e.dist);});
   const dayOrder=['Lunes','Martes','Miércoles','Jueves','Viernes'];
@@ -9327,6 +9350,9 @@ async function updateFuturesSemaphore(){
       </select>
       <input type="number" id="strikeCosto" placeholder="Costo $" min="0" step="0.01"
         style="flex:1;min-width:80px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--yellow);padding:6px 8px;font-size:13px;font-family:var(--mono);outline:none;text-align:center;">
+      <input type="number" id="strikeVenta" placeholder="Venta $" min="0" step="0.01"
+        title="Precio de venta al cerrar la posición — se usa para calcular el % de ganancia (TOS no lo da directo)"
+        style="flex:1;min-width:80px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--green);padding:6px 8px;font-size:13px;font-family:var(--mono);outline:none;text-align:center;">
       <input type="number" id="strikeDist" placeholder="Lugares" min="-50" max="100" step="0.5"
         style="flex:1;min-width:70px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--text);padding:6px 8px;font-size:13px;font-family:var(--mono);outline:none;text-align:center;">
       <input type="number" id="strikeSpread" placeholder="Spread" min="0" step="0.01"

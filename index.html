@@ -4844,28 +4844,31 @@ function renderStrikeLog(){
     // cerrar la posición, así que se saca aquí a partir del costo (compra)
     // ya capturado y el nuevo precio de venta.
     const _gain=_strikeGainPct(e.costo,e.venta);
-    const _gainHTML=_gain!=null
-      ?`<span style="font-family:var(--mono);font-size:13px;font-weight:700;color:${_gain>=0?'var(--green)':'var(--red)'};min-width:60px;text-align:right;" title="Venta $${e.venta.toFixed(2)} vs Costo $${(e.costo||0).toFixed(2)}">${_gain>=0?'+':''}${_gain.toFixed(1)}%</span>`
-      :'<span style="min-width:60px;"></span>';
     // Entrada/Salida = precio de la ACCIÓN (no de la opción). Diferencia en $
     // = salida - entrada -- mide cuánto corre el precio al salir de la banda
     // de Bollinger, para calibrar el timing de salida.
     const _diff=_strikeDiffDollars(e.entrada,e.salida);
-    const _entradaSalidaHTML=(e.entrada!=null||e.salida!=null)
-      ?`<span style="font-family:var(--mono);font-size:11px;color:var(--blue);min-width:110px;" title="Precio de la acción: entrada → salida">${e.entrada!=null?'$'+e.entrada.toFixed(2):'—'} → ${e.salida!=null?'$'+e.salida.toFixed(2):'—'}</span>`
-      :'<span style="min-width:110px;"></span>';
-    const _diffHTML=_diff!=null
-      ?`<span style="font-family:var(--mono);font-size:13px;font-weight:700;color:${_diff>=0?'var(--green)':'var(--red)'};min-width:70px;text-align:right;" title="Diferencia de la acción entre entrada y salida">${_diff>=0?'+':''}$${_diff.toFixed(2)}</span>`
-      :'<span style="min-width:70px;"></span>';
+    // ── Columnas EN EL MISMO ORDEN que el formulario de arriba ──────────────
+    // Día | Fecha | Hora | Costo $ | Venta $ | Entrada $ | Salida $ | Lugares
+    // | Spread | % Ganancia | Diferencia $ | editar/borrar. Ancho fijo en
+    // cada columna (aunque esté vacía) para que la grilla quede alineada con
+    // los inputs de arriba en vez de "saltar" cuando falta un dato.
+    const _ventaHTML=`<span style="font-family:var(--mono);font-size:12px;color:var(--green);min-width:60px;">${e.venta!=null?'$'+e.venta.toFixed(2):'—'}</span>`;
+    const _entradaHTML=`<span style="font-family:var(--mono);font-size:12px;color:var(--blue);min-width:70px;">${e.entrada!=null?'$'+e.entrada.toFixed(2):'—'}</span>`;
+    const _salidaHTML=`<span style="font-family:var(--mono);font-size:12px;color:var(--blue);min-width:70px;">${e.salida!=null?'$'+e.salida.toFixed(2):'—'}</span>`;
+    const _gainHTML=`<span style="font-family:var(--mono);font-size:13px;font-weight:700;color:${_gain!=null?(_gain>=0?'var(--green)':'var(--red)'):'var(--text3)'};min-width:60px;text-align:right;" title="Venta vs Costo">${_gain!=null?(_gain>=0?'+':'')+_gain.toFixed(1)+'%':'—'}</span>`;
+    const _diffHTML=`<span style="font-family:var(--mono);font-size:13px;font-weight:700;color:${_diff!=null?(_diff>=0?'var(--green)':'var(--red)'):'var(--text3)'};min-width:70px;text-align:right;" title="Diferencia de la acción entre entrada y salida">${_diff!=null?(_diff>=0?'+':'')+'$'+_diff.toFixed(2):'—'}</span>`;
     return`<div style="display:flex;align-items:center;gap:14px;padding:7px 0;border-bottom:1px solid var(--border);font-size:13px;flex-wrap:wrap;" id="sentry-${i}">
     <span style="min-width:72px;color:var(--text);font-weight:600;">${e.day}</span>
     <span style="font-size:11px;color:var(--text3);min-width:76px;">${e.date||''}</span>
     <span style="font-size:11px;color:var(--blue);min-width:58px;font-family:var(--mono);">${e.time||''}</span>
-    <span style="font-family:var(--mono);font-size:12px;color:var(--yellow);min-width:52px;">$${(e.costo||0).toFixed(2)}</span>
-    <span style="font-family:var(--mono);font-weight:700;color:${_strikeColor};min-width:28px;text-align:right;">${e.dist}</span>
-    ${e.spread!=null?`<span style="font-family:var(--mono);font-size:11px;color:var(--purple);min-width:44px;" title="Spread Bid/Ask">Δ$${e.spread.toFixed(2)}</span>`:'<span style="min-width:44px;"></span>'}
+    <span style="font-family:var(--mono);font-size:12px;color:var(--yellow);min-width:60px;">$${(e.costo||0).toFixed(2)}</span>
+    ${_ventaHTML}
+    ${_entradaHTML}
+    ${_salidaHTML}
+    <span style="font-family:var(--mono);font-weight:700;color:${_strikeColor};min-width:50px;text-align:right;">${e.dist}</span>
+    <span style="font-family:var(--mono);font-size:11px;color:var(--purple);min-width:60px;" title="Spread Bid/Ask">${e.spread!=null?'Δ$'+e.spread.toFixed(2):'—'}</span>
     ${_gainHTML}
-    ${_entradaSalidaHTML}
     ${_diffHTML}
     <button onclick="editStrikeEntry('${_strikeTicker}',${i})" style="background:none;border:none;color:var(--blue);cursor:pointer;font-size:12px;padding:0 4px;">✏️</button>
     <button onclick="deleteStrikeEntry('${_strikeTicker}',${i})" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:12px;padding:0 4px;">✕</button>

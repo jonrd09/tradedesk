@@ -1878,6 +1878,100 @@ function _sigIntensityColor(type,pct){
   return type==='put'?`hsl(350,75%,${light}%)`:`hsl(150,65%,${light}%)`;
 }
 
+// ═══════════════════════════════════════════════════════════════
+// NOTAS POR TELEGRAM — bot dedicado (distinto al de alertas)
+// El browser NO llama a Telegram directo (getUpdates no soporta CORS),
+// pasa por el Worker (/telegram-notes) que ya tiene NOTES_BOT_TOKEN guardado
+// del lado servidor. El Worker nunca confirma el offset ante Telegram, así
+// que cada llamada trae de nuevo los mensajes no confirmados — dedup aquí
+// por update_id en localStorage (tdp_notes).
+// ═══════════════════════════════════════════════════════════════
+function _escapeHtmlNote(s){
+  return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+async function loadTelegramNotes(){
+  const proxyUrl=(localStorage.getItem('proxy_url')||'').trim();
+  const statusEl=document.getElementById('notasStatus');
+  if(!proxyUrl||!proxyUrl.startsWith('http')){
+    if(statusEl){statusEl.textContent='⚠ Configura el Proxy URL en Configuración → APIs primero.';statusEl.style.color='var(--yellow)';}
+    return;
+  }
+  if(statusEl){statusEl.textContent='⟳ Buscando notas nuevas…';statusEl.style.color='var(--text3)';}
+  try{
+    const r=await fetch(`${proxyUrl}/telegram-notes`,{signal:AbortSignal.timeout(10000)});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok||d.error){
+      if(statusEl){statusEl.textContent=`⚠ Error: ${d.error||'HTTP '+r.status}`;statusEl.style.color='var(--red)';}
+      addLog('warn','Notas',`Error cargando notas de Telegram: ${d.error||r.status}`);
+      return;
+    }
+    const updates=d.updates||[];
+    let notes=[];try{notes=JSON.parse(localStorage.getItem('tdp_notes')||'[]');}catch(e){}
+    const seenIds=new Set(notes.map(n=>n.updateId));
+    let added=0;
+    updates.forEach(u=>{
+      const msg=u.message||u.edited_message;
+      if(!msg||!msg.text)return;
+      if(seenIds.has(u.update_id))return;
+      const from=msg.from?(msg.from.first_name||msg.from.username||'—'):'—';
+      const ts=msg.date?msg.date*1000:Date.now();
+      const dt=new Date(ts);
+      notes.unshift({
+        updateId:u.update_id,
+        text:msg.text,
+        from,
+        date:dt.toLocaleDateString('es-PR',{day:'2-digit',month:'2-digit',year:'numeric'}),
+        time:dt.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true,timeZone:'America/New_York'}),
+        ts
+      });
+      seenIds.add(u.update_id);
+      added++;
+    });
+    notes.sort((a,b)=>b.ts-a.ts);
+    try{localStorage.setItem('tdp_notes',JSON.stringify(notes));}catch(e){}
+    if(statusEl){statusEl.textContent=added>0?`✅ ${added} nota${added>1?'s':''} nueva${added>1?'s':''}`:'✅ Sin notas nuevas';statusEl.style.color='var(--green)';}
+    renderTelegramNotes();
+  }catch(e){
+    if(statusEl){statusEl.textContent=`⚠ Error: ${e.message}`;statusEl.style.color='var(--red)';}
+    addLog('warn','Notas',`Error de red cargando notas: ${e.message}`);
+  }
+}
+function renderTelegramNotes(){
+  const area=document.getElementById('notasList');
+  if(!area)return;
+  let notes=[];try{notes=JSON.parse(localStorage.getItem('tdp_notes')||'[]');}catch(e){}
+  if(!notes.length){
+    area.innerHTML='<div style="text-align:center;padding:20px;color:var(--text3);font-size:12px;">Sin notas todavía — dale a Actualizar después de mandarte un mensaje al bot.</div>';
+    return;
+  }
+  area.innerHTML=notes.map((n,i)=>`
+    <div style="padding:10px 12px;border-bottom:1px solid var(--border);display:flex;gap:10px;align-items:flex-start;">
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:11px;color:var(--text3);margin-bottom:3px;">${n.date} · ${n.time} ET${n.from&&n.from!=='—'?` · ${_escapeHtmlNote(n.from)}`:''}</div>
+        <div style="font-size:13px;color:var(--text);white-space:pre-wrap;line-height:1.5;">${_escapeHtmlNote(n.text)}</div>
+      </div>
+      <button onclick="deleteTelegramNote(${i})" title="Borrar nota" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:12px;padding:0 4px;flex-shrink:0;">✕</button>
+    </div>`).join('');
+}
+function deleteTelegramNote(idx){
+  let notes=[];try{notes=JSON.parse(localStorage.getItem('tdp_notes')||'[]');}catch(e){}
+  notes.splice(idx,1);
+  try{localStorage.setItem('tdp_notes',JSON.stringify(notes));}catch(e){}
+  renderTelegramNotes();
+}
+function exportTelegramNotes(){
+  let notes=[];try{notes=JSON.parse(localStorage.getItem('tdp_notes')||'[]');}catch(e){}
+  if(!notes.length){alert('No hay notas para exportar.');return;}
+  const esc=(s)=>`"${String(s||'').replace(/"/g,'""')}"`;
+  const lines=['Fecha,Hora,De,Nota'];
+  notes.forEach(n=>lines.push([esc(n.date),esc(n.time),esc(n.from),esc(n.text)].join(',')));
+  const blob=new Blob(['\ufeff'+lines.join('\n')],{type:'text/csv;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;a.download=`TradeDeskPro_Notas_${new Date().toISOString().slice(0,10)}.csv`;
+  document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);
+}
+
 // M-11: ETFs apalancados de referencia por ticker -- SOLO informativo, no
 // cambia que ticker/estrategia se rastrea (eso sigue siendo el activo
 // principal). Verificado en vivo 2026-07-15 (Direxion/GraniteShares/REX/
@@ -3483,7 +3577,7 @@ function closeConfigModal(){
   document.getElementById('configModal').style.display='none';
 }
 function switchCfgTab(tab){
-  ['apis','telegram','historial','pin','tickers','estrategias','noticias','sync'].forEach(t=>{
+  ['apis','telegram','historial','pin','tickers','estrategias','noticias','sync','notas'].forEach(t=>{
     document.getElementById('cfgTab-'+t).classList.toggle('active',t===tab);
     document.getElementById('cfgPanel-'+t).style.display=t===tab?'block':'none';
   });
@@ -3492,6 +3586,7 @@ function switchCfgTab(tab){
   if(tab==='estrategias')_renderStratTab();
   if(tab==='noticias')_renderNewsFilterTab();
   if(tab==='pin')_renderPinDiag();
+  if(tab==='notas')renderTelegramNotes();
 }
 function _updateApiStatus(){
   // Schwab: verde si token válido, rojo si tiene credenciales pero expiró, gris si vacío
@@ -8190,6 +8285,7 @@ const _TDP_EXPORT_KEYS=[
   'gainPct','paperBalance',
   'tdp_news_filter_v1',
   'proxy_url',
+  'tdp_notes',
   // niveles técnicos — se incluyen dinámicamente para todos los tickers
 ];
 
@@ -9477,6 +9573,7 @@ async function updateFuturesSemaphore(){
       <button class="cfg-tab"        id="cfgTab-pin"       onclick="switchCfgTab('pin')"      >🔐 PIN</button>
       <button class="cfg-tab"        id="cfgTab-apis"      onclick="switchCfgTab('apis')"     >🔑 APIs</button>
       <button class="cfg-tab"        id="cfgTab-sync"      onclick="switchCfgTab('sync')"     >🔄 Sync</button>
+      <button class="cfg-tab"        id="cfgTab-notas"     onclick="switchCfgTab('notas')"    >📝 Notas</button>
     </div>
 
     <!-- Body (scrollable) -->
@@ -9844,6 +9941,44 @@ async function updateFuturesSemaphore(){
           </div>
         </div>
       </div><!-- /cfgPanel-sync -->
+
+      <!-- ── TAB: Notas ─────────────────────────────────────── -->
+      <div id="cfgPanel-notas" style="display:none;">
+        <div class="cfg-section-title">Notas por Telegram</div>
+        <div style="font-size:11px;color:var(--text3);margin-bottom:14px;">
+          Mándale un mensaje a tu bot dedicado de Notas (ideas, recordatorios, reglas a seguir) y dale a "Actualizar" para traerlo aquí.
+        </div>
+
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;align-items:center;">
+          <button onclick="loadTelegramNotes()"
+            style="background:var(--blue);color:#fff;border:none;border-radius:var(--r);padding:8px 18px;font-size:13px;font-weight:700;cursor:pointer;">
+            🔄 Actualizar
+          </button>
+          <button onclick="exportTelegramNotes()"
+            style="background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--text2);padding:8px 14px;font-size:12px;cursor:pointer;">
+            ↓ Exportar
+          </button>
+          <span id="notasStatus" style="font-size:12px;color:var(--text3);"></span>
+        </div>
+
+        <div id="notasList" style="border:1px solid var(--border);border-radius:var(--r);max-height:320px;overflow-y:auto;margin-bottom:14px;">
+          <div style="text-align:center;padding:20px;color:var(--text3);font-size:12px;">Sin notas todavía — dale a Actualizar después de mandarte un mensaje al bot.</div>
+        </div>
+
+        <div style="padding:10px 12px;background:rgba(61,139,255,.06);border:1px solid rgba(61,139,255,.15);border-radius:var(--r);">
+          <div style="font-size:11px;color:var(--blue);font-weight:700;margin-bottom:4px;">¿Cómo configurar el bot de Notas?</div>
+          <div style="font-size:11px;color:var(--text3);line-height:1.7;">
+            1. Busca <strong style="color:#fff">@BotFather</strong> en Telegram y crea un bot NUEVO (distinto al de alertas) con <strong style="color:#fff">/newbot</strong><br>
+            2. Copia el token del bot nuevo<br>
+            3. En Cloudflare → tu Worker → Settings → Variables and Secrets, agrega el secret <strong style="color:#fff">NOTES_BOT_TOKEN</strong> con ese token, y dale Deploy<br>
+            4. Escríbele cualquier mensaje a tu bot nuevo desde Telegram (una idea, una regla a seguir, lo que sea)<br>
+            5. Vuelve aquí y dale clic a <strong style="color:#fff">🔄 Actualizar</strong> — el mensaje aparecerá en la lista de arriba
+          </div>
+          <div style="font-size:10px;color:var(--text3);margin-top:8px;">
+            El token del bot de Notas vive solo en el Worker (nunca en este navegador) — esta pestaña solo necesita el Proxy URL ya configurado en ⚙️ → APIs.
+          </div>
+        </div>
+      </div><!-- /cfgPanel-notas -->
 
     </div><!-- /body -->
   </div>

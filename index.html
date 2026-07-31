@@ -4743,11 +4743,20 @@ function _strikeGainPct(costo,venta){
   if(!costo||costo<=0)return null; // evita división por cero / costo no capturado
   return (venta-costo)/costo*100;
 }
+// Diferencia en $ del precio de la ACCIÓN (no de la opción) entre entrada y
+// salida -- sirve para medir cuántos dólares corre el precio al salir de la
+// banda de Bollinger, y así calibrar el timing de salida.
+function _strikeDiffDollars(entrada,salida){
+  if(entrada==null||salida==null||!isFinite(entrada)||!isFinite(salida))return null;
+  return salida-entrada;
+}
 function addStrikeEntry(){
   const day=document.getElementById('strikeDay').value;
   const dist=parseFloat(document.getElementById('strikeDist').value);
   const costo=parseFloat(document.getElementById('strikeCosto').value)||0;
   const venta=parseFloat(document.getElementById('strikeVenta').value);
+  const entrada=parseFloat(document.getElementById('strikeEntrada').value);
+  const salida=parseFloat(document.getElementById('strikeSalida').value);
   const spread=parseFloat(document.getElementById('strikeSpread').value)||null;
   if(!dist&&dist!==0)return;
   const key='strikelog_'+_strikeTicker;
@@ -4755,7 +4764,9 @@ function addStrikeEntry(){
   const _now=new Date();
   const _date=_now.toLocaleDateString('es-PR',{day:'2-digit',month:'2-digit',year:'numeric'});
   const _time=_now.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true,timeZone:'America/New_York'});
-  const newEntry={day,dist,costo,venta:isNaN(venta)?null:venta,spread,date:_date,time:_time};
+  const newEntry={day,dist,costo,venta:isNaN(venta)?null:venta,
+    entrada:isNaN(entrada)?null:entrada,salida:isNaN(salida)?null:salida,
+    spread,date:_date,time:_time};
   // Reemplazar entrada del mismo día de la semana si existe — máximo 5 entradas (una por día)
   const existingIdx=log.findIndex(e=>e.day===day);
   if(existingIdx>=0){
@@ -4770,6 +4781,8 @@ function addStrikeEntry(){
   document.getElementById('strikeDist').value='';
   document.getElementById('strikeCosto').value='';
   document.getElementById('strikeVenta').value='';
+  document.getElementById('strikeEntrada').value='';
+  document.getElementById('strikeSalida').value='';
   document.getElementById('strikeSpread').value='';
   renderStrikeLog();updateCardAverages();
 }
@@ -4789,6 +4802,8 @@ function editStrikeEntry(ticker,idx){
   el.innerHTML=`<select id="ed-${idx}" style="background:var(--bg4);border:1px solid var(--blue);border-radius:6px;color:var(--text);padding:3px 6px;font-size:12px;flex:1;">${opts}</select>
     <input type="number" id="ec-${idx}" value="${e.costo||0}" step="0.01" placeholder="Costo $" style="background:var(--bg4);border:1px solid var(--blue);border-radius:6px;color:var(--yellow);padding:3px 6px;font-size:12px;width:65px;text-align:center;">
     <input type="number" id="ew-${idx}" value="${e.venta!=null?e.venta:''}" step="0.01" placeholder="Venta $" style="background:var(--bg4);border:1px solid var(--blue);border-radius:6px;color:var(--green);padding:3px 6px;font-size:12px;width:65px;text-align:center;">
+    <input type="number" id="een-${idx}" value="${e.entrada!=null?e.entrada:''}" step="0.01" placeholder="Entrada $" style="background:var(--bg4);border:1px solid var(--blue);border-radius:6px;color:var(--blue);padding:3px 6px;font-size:12px;width:70px;text-align:center;">
+    <input type="number" id="esal-${idx}" value="${e.salida!=null?e.salida:''}" step="0.01" placeholder="Salida $" style="background:var(--bg4);border:1px solid var(--blue);border-radius:6px;color:var(--blue);padding:3px 6px;font-size:12px;width:70px;text-align:center;">
     <input type="number" id="ev-${idx}" value="${e.dist}" step="0.5" style="background:var(--bg4);border:1px solid var(--blue);border-radius:6px;color:var(--text);padding:3px 6px;font-size:12px;width:60px;text-align:center;">
     <input type="number" id="es-${idx}" value="${e.spread||''}" step="0.01" placeholder="Spread" style="background:var(--bg4);border:1px solid var(--blue);border-radius:6px;color:var(--purple);padding:3px 6px;font-size:12px;width:60px;text-align:center;">
     <button onclick="saveStrikeEdit('${ticker}',${idx})" style="background:var(--green);border:none;border-radius:6px;color:#001a0e;padding:3px 10px;font-size:12px;font-weight:700;cursor:pointer;">✓</button>
@@ -4805,7 +4820,12 @@ function saveStrikeEdit(ticker,idx){
   const spread=parseFloat(document.getElementById('es-'+idx)?.value)||null;
   const _ventaRaw=parseFloat(document.getElementById('ew-'+idx)?.value);
   const venta=isNaN(_ventaRaw)?null:_ventaRaw;
-  if(!log[idx])return;log[idx].day=day;log[idx].dist=dist;log[idx].costo=costo;log[idx].venta=venta;log[idx].spread=spread;
+  const _entradaRaw=parseFloat(document.getElementById('een-'+idx)?.value);
+  const entrada=isNaN(_entradaRaw)?null:_entradaRaw;
+  const _salidaRaw=parseFloat(document.getElementById('esal-'+idx)?.value);
+  const salida=isNaN(_salidaRaw)?null:_salidaRaw;
+  if(!log[idx])return;log[idx].day=day;log[idx].dist=dist;log[idx].costo=costo;log[idx].venta=venta;
+  log[idx].entrada=entrada;log[idx].salida=salida;log[idx].spread=spread;
   // preserve original time when editing
   try{localStorage.setItem(key,JSON.stringify(log));}catch(e){}
   renderStrikeLog();updateCardAverages();
@@ -4825,9 +4845,19 @@ function renderStrikeLog(){
     // ya capturado y el nuevo precio de venta.
     const _gain=_strikeGainPct(e.costo,e.venta);
     const _gainHTML=_gain!=null
-      ?`<span style="font-family:var(--mono);font-size:13px;font-weight:700;color:${_gain>=0?'var(--green)':'var(--red)'};min-width:70px;text-align:right;" title="Venta $${e.venta.toFixed(2)} vs Costo $${(e.costo||0).toFixed(2)}">${_gain>=0?'+':''}${_gain.toFixed(1)}%</span>`
+      ?`<span style="font-family:var(--mono);font-size:13px;font-weight:700;color:${_gain>=0?'var(--green)':'var(--red)'};min-width:60px;text-align:right;" title="Venta $${e.venta.toFixed(2)} vs Costo $${(e.costo||0).toFixed(2)}">${_gain>=0?'+':''}${_gain.toFixed(1)}%</span>`
+      :'<span style="min-width:60px;"></span>';
+    // Entrada/Salida = precio de la ACCIÓN (no de la opción). Diferencia en $
+    // = salida - entrada -- mide cuánto corre el precio al salir de la banda
+    // de Bollinger, para calibrar el timing de salida.
+    const _diff=_strikeDiffDollars(e.entrada,e.salida);
+    const _entradaSalidaHTML=(e.entrada!=null||e.salida!=null)
+      ?`<span style="font-family:var(--mono);font-size:11px;color:var(--blue);min-width:110px;" title="Precio de la acción: entrada → salida">${e.entrada!=null?'$'+e.entrada.toFixed(2):'—'} → ${e.salida!=null?'$'+e.salida.toFixed(2):'—'}</span>`
+      :'<span style="min-width:110px;"></span>';
+    const _diffHTML=_diff!=null
+      ?`<span style="font-family:var(--mono);font-size:13px;font-weight:700;color:${_diff>=0?'var(--green)':'var(--red)'};min-width:70px;text-align:right;" title="Diferencia de la acción entre entrada y salida">${_diff>=0?'+':''}$${_diff.toFixed(2)}</span>`
       :'<span style="min-width:70px;"></span>';
-    return`<div style="display:flex;align-items:center;gap:6px;padding:7px 0;border-bottom:1px solid var(--border);font-size:13px;flex-wrap:wrap;" id="sentry-${i}">
+    return`<div style="display:flex;align-items:center;gap:14px;padding:7px 0;border-bottom:1px solid var(--border);font-size:13px;flex-wrap:wrap;" id="sentry-${i}">
     <span style="min-width:72px;color:var(--text);font-weight:600;">${e.day}</span>
     <span style="font-size:11px;color:var(--text3);min-width:76px;">${e.date||''}</span>
     <span style="font-size:11px;color:var(--blue);min-width:58px;font-family:var(--mono);">${e.time||''}</span>
@@ -4835,6 +4865,8 @@ function renderStrikeLog(){
     <span style="font-family:var(--mono);font-weight:700;color:${_strikeColor};min-width:28px;text-align:right;">${e.dist}</span>
     ${e.spread!=null?`<span style="font-family:var(--mono);font-size:11px;color:var(--purple);min-width:44px;" title="Spread Bid/Ask">Δ$${e.spread.toFixed(2)}</span>`:'<span style="min-width:44px;"></span>'}
     ${_gainHTML}
+    ${_entradaSalidaHTML}
+    ${_diffHTML}
     <button onclick="editStrikeEntry('${_strikeTicker}',${i})" style="background:none;border:none;color:var(--blue);cursor:pointer;font-size:12px;padding:0 4px;">✏️</button>
     <button onclick="deleteStrikeEntry('${_strikeTicker}',${i})" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:12px;padding:0 4px;">✕</button>
   </div>`;
@@ -9282,7 +9314,7 @@ async function updateFuturesSemaphore(){
 
 <!-- Strike Log Modal -->
 <div id="strikeModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:1000;align-items:center;justify-content:center;padding:16px;">
-  <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:var(--rl);width:100%;max-width:680px;max-height:90vh;overflow-y:auto;display:flex;flex-direction:column;">
+  <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:var(--rl);width:100%;max-width:920px;max-height:90vh;overflow-y:auto;display:flex;flex-direction:column;">
     <!-- Header -->
     <div style="padding:14px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
       <div style="display:flex;align-items:center;gap:10px;">
@@ -9344,15 +9376,22 @@ async function updateFuturesSemaphore(){
       </button>
     </div>
     <!-- Add entry row -->
-    <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+    <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
       <select id="strikeDay" class="inp" style="flex:1.5;min-width:100px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--text);padding:6px 8px;font-size:13px;outline:none;">
         <option>Lunes</option><option>Martes</option><option>Miércoles</option><option>Jueves</option><option>Viernes</option>
       </select>
       <input type="number" id="strikeCosto" placeholder="Costo $" min="0" step="0.01"
+        title="Costo de la opción (compra)"
         style="flex:1;min-width:80px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--yellow);padding:6px 8px;font-size:13px;font-family:var(--mono);outline:none;text-align:center;">
       <input type="number" id="strikeVenta" placeholder="Venta $" min="0" step="0.01"
-        title="Precio de venta al cerrar la posición — se usa para calcular el % de ganancia (TOS no lo da directo)"
+        title="Precio de venta de la opción al cerrar la posición — se usa para calcular el % de ganancia (TOS no lo da directo)"
         style="flex:1;min-width:80px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--green);padding:6px 8px;font-size:13px;font-family:var(--mono);outline:none;text-align:center;">
+      <input type="number" id="strikeEntrada" placeholder="Entrada $" min="0" step="0.01"
+        title="Precio de la ACCIÓN (no de la opción) al momento de comprar"
+        style="flex:1;min-width:80px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--blue);padding:6px 8px;font-size:13px;font-family:var(--mono);outline:none;text-align:center;">
+      <input type="number" id="strikeSalida" placeholder="Salida $" min="0" step="0.01"
+        title="Precio de la ACCIÓN (no de la opción) al momento de vender — sirve para medir cuánto corre el precio saliendo de Bollinger"
+        style="flex:1;min-width:80px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--blue);padding:6px 8px;font-size:13px;font-family:var(--mono);outline:none;text-align:center;">
       <input type="number" id="strikeDist" placeholder="Lugares" min="-50" max="100" step="0.5"
         style="flex:1;min-width:70px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--text);padding:6px 8px;font-size:13px;font-family:var(--mono);outline:none;text-align:center;">
       <input type="number" id="strikeSpread" placeholder="Spread" min="0" step="0.01"

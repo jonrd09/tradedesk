@@ -4948,25 +4948,25 @@ function renderStrikeLog(){
     // | Spread | % Ganancia | Diferencia $ | editar/borrar. Ancho fijo en
     // cada columna (aunque esté vacía) para que la grilla quede alineada con
     // los inputs de arriba en vez de "saltar" cuando falta un dato.
-    const _ventaHTML=`<span style="font-family:var(--mono);font-size:12px;color:var(--green);min-width:60px;">${e.venta!=null?'$'+e.venta.toFixed(2):'—'}</span>`;
-    const _entradaHTML=`<span style="font-family:var(--mono);font-size:12px;color:var(--blue);min-width:70px;">${e.entrada!=null?'$'+e.entrada.toFixed(2):'—'}</span>`;
-    const _salidaHTML=`<span style="font-family:var(--mono);font-size:12px;color:var(--blue);min-width:70px;">${e.salida!=null?'$'+e.salida.toFixed(2):'—'}</span>`;
-    const _gainHTML=`<span style="font-family:var(--mono);font-size:13px;font-weight:700;color:${_gain!=null?(_gain>=0?'var(--green)':'var(--red)'):'var(--text3)'};min-width:60px;text-align:right;" title="Venta vs Costo">${_gain!=null?(_gain>=0?'+':'')+_gain.toFixed(1)+'%':'—'}</span>`;
-    const _diffHTML=`<span style="font-family:var(--mono);font-size:13px;font-weight:700;color:${_diff!=null?(_diff>=0?'var(--green)':'var(--red)'):'var(--text3)'};min-width:70px;text-align:right;" title="Diferencia de la acción entre entrada y salida">${_diff!=null?(_diff>=0?'+':'')+'$'+_diff.toFixed(2):'—'}</span>`;
-    return`<div style="display:flex;align-items:center;gap:9px;padding:7px 0;border-bottom:1px solid var(--border);font-size:13px;flex-wrap:nowrap;overflow-x:auto;" id="sentry-${i}">
-    <span style="min-width:72px;color:var(--text);font-weight:600;">${e.day}</span>
-    <span style="font-size:11px;color:var(--text3);min-width:76px;">${e.date||''}</span>
-    <span style="font-size:11px;color:var(--blue);min-width:58px;font-family:var(--mono);">${e.time||''}</span>
-    <span style="font-family:var(--mono);font-size:12px;color:var(--yellow);min-width:60px;">$${(e.costo||0).toFixed(2)}</span>
+    const _ventaHTML=`<span style="font-family:var(--mono);font-size:14px;color:var(--green);min-width:64px;">${e.venta!=null?'$'+e.venta.toFixed(2):'—'}</span>`;
+    const _entradaHTML=`<span style="font-family:var(--mono);font-size:14px;color:var(--blue);min-width:74px;">${e.entrada!=null?'$'+e.entrada.toFixed(2):'—'}</span>`;
+    const _salidaHTML=`<span style="font-family:var(--mono);font-size:14px;color:var(--blue);min-width:74px;">${e.salida!=null?'$'+e.salida.toFixed(2):'—'}</span>`;
+    const _gainHTML=`<span style="font-family:var(--mono);font-size:15px;font-weight:700;color:${_gain!=null?(_gain>=0?'var(--green)':'var(--red)'):'var(--text3)'};min-width:64px;text-align:right;" title="Venta vs Costo">${_gain!=null?(_gain>=0?'+':'')+_gain.toFixed(1)+'%':'—'}</span>`;
+    const _diffHTML=`<span style="font-family:var(--mono);font-size:15px;font-weight:700;color:${_diff!=null?(_diff>=0?'var(--green)':'var(--red)'):'var(--text3)'};min-width:74px;text-align:right;" title="Diferencia de la acción entre entrada y salida">${_diff!=null?(_diff>=0?'+':'')+'$'+_diff.toFixed(2):'—'}</span>`;
+    return`<div style="display:flex;align-items:center;gap:9px;padding:8px 0;border-bottom:1px solid var(--border);font-size:15px;flex-wrap:nowrap;overflow-x:auto;" id="sentry-${i}">
+    <span style="min-width:76px;color:var(--text);font-weight:600;font-size:15px;">${e.day}</span>
+    <span style="font-size:13px;color:var(--text3);min-width:80px;">${e.date||''}</span>
+    <span style="font-size:13px;color:var(--blue);min-width:62px;font-family:var(--mono);">${e.time||''}</span>
+    <span style="font-family:var(--mono);font-size:14px;color:var(--yellow);min-width:64px;">$${(e.costo||0).toFixed(2)}</span>
     ${_ventaHTML}
     ${_entradaHTML}
     ${_salidaHTML}
-    <span style="font-family:var(--mono);font-weight:700;color:${_strikeColor};min-width:50px;text-align:right;">${e.dist}</span>
-    <span style="font-family:var(--mono);font-size:11px;color:var(--purple);min-width:60px;" title="Spread Bid/Ask">${e.spread!=null?'Δ$'+e.spread.toFixed(2):'—'}</span>
+    <span style="font-family:var(--mono);font-weight:700;font-size:15px;color:${_strikeColor};min-width:52px;text-align:right;">${e.dist}</span>
+    <span style="font-family:var(--mono);font-size:13px;color:var(--purple);min-width:64px;" title="Spread Bid/Ask">${e.spread!=null?'Δ$'+e.spread.toFixed(2):'—'}</span>
     ${_gainHTML}
     ${_diffHTML}
-    <button onclick="editStrikeEntry('${_strikeTicker}',${i})" style="background:none;border:none;color:var(--blue);cursor:pointer;font-size:12px;padding:0 4px;">✏️</button>
-    <button onclick="deleteStrikeEntry('${_strikeTicker}',${i})" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:12px;padding:0 4px;">✕</button>
+    <button onclick="editStrikeEntry('${_strikeTicker}',${i})" style="background:none;border:none;color:var(--blue);cursor:pointer;font-size:13px;padding:0 4px;">✏️</button>
+    <button onclick="deleteStrikeEntry('${_strikeTicker}',${i})" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:13px;padding:0 4px;">✕</button>
   </div>`;
   }).join('');
   // Promedios por día
@@ -4978,12 +4978,23 @@ function renderStrikeLog(){
   }).join('');
   const all=log.map(e=>e.dist);
   const gAvg=(all.reduce((a,b)=>a+b,0)/all.length).toFixed(1);
-  const avgGlbHTML=`<span style="font-size:13px;color:var(--text)">Promedio global: <strong style="font-size:15px;font-family:var(--mono);color:${_strikeColor}">${gAvg>0?'+':''}${gAvg}</strong> · ${log.length} registro${log.length>1?'s':''}</span>`;
+  const avgGlbHTML=`<span style="font-size:13px;color:var(--text)">Promedio global: <strong style="font-size:15px;font-family:var(--mono);color:${_strikeColor}">${gAvg>0?'+':''}${gAvg}</strong> Lugares</span>`;
+  // Promedio de cuántos $ corre el precio de la ACCIÓN entre entrada y salida
+  // (a partir de la Diferencia $ de cada fila) -- solo cuenta filas donde
+  // ambos datos (entrada y salida) fueron capturados.
+  const diffs=log.map(e=>_strikeDiffDollars(e.entrada,e.salida)).filter(d=>d!=null);
+  const diffAvg=diffs.length?(diffs.reduce((a,b)=>a+b,0)/diffs.length):null;
+  const diffAvgHTML=diffAvg!=null
+    ?`<span style="font-size:13px;color:var(--text)">Promedio Diferencia $: <strong style="font-size:15px;font-family:var(--mono);color:${diffAvg>=0?'var(--green)':'var(--red)'}">${diffAvg>=0?'+':''}$${diffAvg.toFixed(2)}</strong></span>`
+    :`<span style="font-size:13px;color:var(--text3);">Promedio Diferencia $: —</span>`;
   area.innerHTML=`
     <div id="strikeLogList" style="padding:0 16px;">${listHTML}</div>
-    <div id="strikeAvgBox" style="padding:12px 16px;border-top:1px solid var(--border);margin-top:4px;">
-      <div id="strikeAvgDetail" style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:8px;">${avgDetHTML}</div>
-      <div id="strikeAvgGlobal">${avgGlbHTML}</div>
+    <div id="strikeAvgBox" style="padding:12px 16px;border-top:1px solid var(--border);margin-top:4px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <div id="strikeAvgDetail" style="display:flex;gap:16px;flex-wrap:wrap;">${avgDetHTML}</div>
+        <div id="strikeAvgGlobal">${avgGlbHTML}</div>
+      </div>
+      <div id="strikeDiffAvgBox" style="text-align:right;">${diffAvgHTML}</div>
     </div>`;
 }
 function updateCardAverages(){

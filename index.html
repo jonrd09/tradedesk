@@ -4985,8 +4985,8 @@ function renderStrikeLog(){
   const diffs=log.map(e=>_strikeDiffDollars(e.entrada,e.salida)).filter(d=>d!=null);
   const diffAvg=diffs.length?(diffs.reduce((a,b)=>a+b,0)/diffs.length):null;
   const diffAvgHTML=diffAvg!=null
-    ?`<span style="font-size:13px;color:var(--text)">Promedio Diferencia $: <strong style="font-size:15px;font-family:var(--mono);color:${diffAvg>=0?'var(--green)':'var(--red)'}">${diffAvg>=0?'+':''}$${diffAvg.toFixed(2)}</strong></span>`
-    :`<span style="font-size:13px;color:var(--text3);">Promedio Diferencia $: —</span>`;
+    ?`<span style="font-size:13px;color:var(--text)">Movimiento $: <strong style="font-size:15px;font-family:var(--mono);color:${diffAvg>=0?'var(--green)':'var(--red)'}">${diffAvg>=0?'+':''}$${diffAvg.toFixed(2)}</strong></span>`
+    :`<span style="font-size:13px;color:var(--text3);">Movimiento $: —</span>`;
   area.innerHTML=`
     <div id="strikeLogList" style="padding:0 16px;">${listHTML}</div>
     <div id="strikeAvgBox" style="padding:12px 16px;border-top:1px solid var(--border);margin-top:4px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">

@@ -8504,29 +8504,35 @@ function applyViewerMode(){
   addLog('debug','Viewer','👁 Modo Visualización activo');
 }
 
-function promptViewerUnlock(){
+async function promptViewerUnlock(){
   const hint=localStorage.getItem('tdp_viewer_hint')||'';
   const pw=prompt(
-    '🔓 Ingresa la contraseña de administrador para desbloquear la edición.'+(hint?`\n\nPista: ${hint}`:'')
+    '🔓 Ingresa el PIN de administrador (⚙️ → PIN) para desbloquear la edición.'+(hint?`\n\nPista: ${hint}`:'')
   );
   if(!pw)return;
-  // Hash simple del password para comparar — el admin lo configura en el export
-  const _savedHash=localStorage.getItem('tdp_viewer_pw_hash');
-  if(!_savedHash){
-    // No hay hash configurado — usar contraseña maestra hardcoded de emergencia
-    // (el admin debe configurar una contraseña al exportar; esto es el fallback)
-    // A-3: contraseña de emergencia hardcodeada eliminada (era visible en el HTML).
-    // Para desbloquear, configura un PIN real desde ⚙️ → PIN en la PC principal
-    // y expórtalo con el .tdpconfig. Sin PIN configurado, no hay desbloqueo remoto.
-    alert('❌ No hay contraseña de desbloqueo configurada.\n\nConfigura un PIN desde ⚙️ → PIN en la PC principal y exporta el .tdpconfig nuevamente.');
+  // FIX: antes esto comparaba contra 'tdp_viewer_pw_hash', una clave que
+  // ninguna función de la app llegaba a escribir (bug real — el desbloqueo
+  // remoto nunca podía funcionar). El PIN real ('app_pin') SÍ viaja cifrado
+  // dentro del .tdpconfig y se restaura en esta PC al importar, así que
+  // validamos contra ese mismo PIN usando la misma cascada de formatos que
+  // usa el resto de la app (PBKDF2 actual, SHA-256 intermedio, o XOR legacy).
+  const stored=getStoredPin();
+  if(!stored){
+    alert('❌ No hay PIN configurado en esta copia de la plataforma.\n\nConfigura o resetea el PIN desde ⚙️ → PIN en la PC principal y vuelve a exportar el .tdpconfig.');
     return;
   }
-  // Comparar hash
-  const _inputHash=[...pw].reduce((h,c)=>(Math.imul(31,h)+c.charCodeAt(0))|0,0).toString(16);
-  if(_inputHash===_savedHash){
+  let ok=false;
+  if(_isSHA256Pin(stored)){
+    ok=await _verifySHA256Pin(pw,stored);
+  }else if(_isLegacyPin(stored)){
+    ok=(_legacyDecode(stored)===pw);
+  }else{
+    ok=await _verifyPin(pw,stored);
+  }
+  if(ok){
     _disableViewerMode();
   }else{
-    alert('❌ Contraseña incorrecta.');
+    alert('❌ PIN incorrecto.');
   }
 }
 function _disableViewerMode(){

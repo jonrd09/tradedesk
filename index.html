@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- TradeDeskPro v5 | build:20260702_momentum_gate | B1:_wsSessionCandle_per15min B2:BB-REGRESO_strategy B3:intentoBull_loose B4:bbCallTrigger_connected B5:dedup_distVars B6:setup_gate_bbw B7:stochPutOk_noFloor A1:bbSessionOk_isMarketHours A2:schwabToken_firstTicker M1:momentumToLower_gate M2:bbwExpandActive M3:aviso_stricter M4:intento_volOk M5:unified_setup_card M6:bbwSqueezeBreakout M7:multiTF_regreso -->
+<!-- TradeDeskPro v5 | build:20260805_bbmtf_confluence | B1:_wsSessionCandle_per15min B2:BB-REGRESO_strategy B3:intentoBull_loose B4:bbCallTrigger_connected B5:dedup_distVars B6:setup_gate_bbw B7:stochPutOk_noFloor A1:bbSessionOk_isMarketHours A2:schwabToken_firstTicker M1:momentumToLower_gate M2:bbwExpandActive M3:aviso_stricter M4:intento_volOk M5:unified_setup_card M6:bbwSqueezeBreakout M7:multiTF_regreso M8:BB-MTF_panel_replaces_noticias -->
 <html lang="es">
 <head>
 <meta charset="UTF-8">
@@ -51,6 +51,8 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
 .sig-hdr{padding:10px 14px;display:flex;align-items:center;justify-content:space-between;}
 .sig-call{background:linear-gradient(135deg,rgba(0,123,69,.9),rgba(0,168,90,.9));}
 .sig-put{background:linear-gradient(135deg,rgba(139,26,42,.9),rgba(192,35,58,.9));}
+.mtf-hdr{background:linear-gradient(135deg,rgba(91,33,182,.92),rgba(167,139,250,.92));}
+.mtf-card{border:1px solid rgba(167,139,250,.35);}
 .sig-body{background:var(--bg3);padding:10px 14px;}
 .sig-req{display:flex;align-items:flex-start;gap:8px;padding:5px 0;font-size:13px;border-bottom:1px solid var(--border);}
 .sig-req:last-child{border-bottom:none;}
@@ -166,6 +168,13 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
     ⟳ —:——
   </button>
 
+  <!-- News — abre modal con las noticias (antes vivía fijo en el panel izquierdo) -->
+  <button id="newsBtn" onclick="openNewsModal()"
+    title="Noticias"
+    style="background:rgba(61,139,255,.1);border:1px solid rgba(61,139,255,.3);border-radius:20px;color:var(--blue);padding:4px 12px;font-size:11px;font-weight:700;cursor:pointer;font-family:var(--sans);white-space:nowrap;">
+    📰 News
+  </button>
+
   <!-- clock only — market state visible en panel central -->
   <span class="clock" id="clockEl">—</span>
 
@@ -207,27 +216,22 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
 <aside class="left-panel" style="display:flex;flex-direction:column;overflow:hidden;">
   <!-- Header -->
   <div style="padding:10px 12px;border-bottom:1px solid var(--border);flex-shrink:0;">
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
-      <div style="display:flex;align-items:center;gap:6px;">
-        <button id="tabNoticias" onclick="switchNewsTab('noticias')"
-          style="font-size:13px;font-weight:700;color:#fff;background:none;border:none;cursor:pointer;padding:2px 6px;border-bottom:2px solid #fff;">
-          📰 Noticias
-        </button>
-        <button id="tabInsiders" onclick="switchNewsTab('insiders')"
-          style="font-size:13px;font-weight:700;color:var(--text3);background:none;border:none;cursor:pointer;padding:2px 6px;border-bottom:2px solid transparent;position:relative;">
-          🔴 Insiders
-          <span id="insiderBadge" style="display:none;position:absolute;top:-4px;right:-4px;width:8px;height:8px;background:var(--red);border-radius:50%;"></span>
-        </button>
-      </div>
-      <div style="display:flex;gap:4px;flex-wrap:wrap;" id="newsTickerBtns">
-        <!-- populated by renderNewsTickerButtons() -->
-      </div>
+    <div style="display:flex;align-items:center;gap:6px;">
+      <button id="tabMultiTF" onclick="switchNewsTab('multitf')"
+        style="font-size:13px;font-weight:700;color:#fff;background:none;border:none;cursor:pointer;padding:2px 6px;border-bottom:2px solid var(--purple);">
+        🟣 Multi-TF
+      </button>
+      <button id="tabInsiders" onclick="switchNewsTab('insiders')"
+        style="font-size:13px;font-weight:700;color:var(--text3);background:none;border:none;cursor:pointer;padding:2px 6px;border-bottom:2px solid transparent;position:relative;">
+        🔴 Insiders
+        <span id="insiderBadge" style="display:none;position:absolute;top:-4px;right:-4px;width:8px;height:8px;background:var(--red);border-radius:50%;"></span>
+      </button>
     </div>
   </div>
-  <!-- News feed -->
-  <div id="newsArea" style="flex:1;overflow-y:auto;padding:8px 10px;">
+  <!-- BB-MTF confluence feed — reemplaza el panel de Noticias -->
+  <div id="mtfArea" style="flex:1;overflow-y:auto;padding:8px 10px;">
     <div style="text-align:center;padding:20px;color:var(--text3);font-size:12px;">
-      Selecciona un ticker para ver noticias
+      ⟳ Calculando confluencia Multi-TF…
     </div>
   </div>
   <!-- Insider feed (hidden by default) -->
@@ -340,6 +344,26 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
 
 <!-- MODALS -->
 
+<!-- News modal — antes vivía fijo en el panel izquierdo, ahora se abre desde el botón 📰 News del topbar -->
+<div id="newsModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:1400;align-items:center;justify-content:center;padding:16px;">
+  <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:var(--rl);width:480px;max-width:95vw;max-height:85vh;display:flex;flex-direction:column;overflow:hidden;">
+    <div style="padding:12px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
+      <div style="font-size:15px;font-weight:700;color:#fff;">📰 Noticias</div>
+      <button onclick="closeNewsModal()" style="background:var(--bg4);border:1px solid var(--border2);border-radius:50%;width:26px;height:26px;color:var(--text2);cursor:pointer;">✕</button>
+    </div>
+    <div style="padding:10px 14px;border-bottom:1px solid var(--border);flex-shrink:0;">
+      <div style="display:flex;gap:4px;flex-wrap:wrap;" id="newsTickerBtns">
+        <!-- populated by renderNewsTickerButtons() -->
+      </div>
+    </div>
+    <div id="newsArea" style="flex:1;overflow-y:auto;padding:8px 10px;">
+      <div style="text-align:center;padding:20px;color:var(--text3);font-size:12px;">
+        Selecciona un ticker para ver noticias
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 // ═══════════════════════════════════════════════════════════════
 // IMMEDIATE KEY RESTORE
@@ -375,6 +399,7 @@ let _debugMode=false; // shows all signals regardless of % threshold
 // Persiste el tiempo de primera detección de cada señal — clave: sym_code_type
 const _sigDetectedAt={};
 const _pinnedSignals={}; // señales fijadas en el panel — persisten hasta que el trader las cierra con X
+let _lastMTFSignals=[]; // BB-MTF — confluencia 15m+1H+Día del último ciclo, panel violeta (reemplaza Noticias)
 let currentTicker='GOOG';
 let _insiderData=[];
 let _insiderSort={col:'shares',dir:-1};
@@ -2028,6 +2053,7 @@ async function _buildSignalsCore(){
   // ───────────────────────────────────────────────────────────────────────────
 
   const all=[];
+  const _mtfActiveSignals=[]; // BB-MTF — confluencia 15m+1H+Día, se renderiza aparte (panel violeta)
   // Check market hours — skip after hours (low volume, unreliable signals)
   const _etSig=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
   const _sigMins=_etSig.getHours()*60+_etSig.getMinutes();
@@ -2691,6 +2717,72 @@ async function _buildSignalsCore(){
     const bbwAboveMedian=lBBW15>=_bbwMedian;
     const _bbwPct25=_bbwHistory.length?_bbwHistory[Math.floor(_bbwHistory.length*0.25)]||lBBW15:lBBW15;
 
+    // ════════════════════════════════════════════════════════════════════════
+    // BB-MTF — Confluencia Multi-Temporalidad (15m + 1H + Día)
+    // Detecta cuando el ticker está "expuesto" en Bollinger (precio fuera de
+    // banda) CON alta volatilidad (BBW por sobre su propia mediana histórica)
+    // simultáneamente en las 3 temporalidades y en la MISMA dirección.
+    // Es una señal de mayor convicción que BB-A/BB-B (solo 15m) porque el
+    // movimiento se confirma en marcos de tiempo más grandes, no solo ruido
+    // intradía. Se muestra aparte (panel violeta), no en Señales Activas.
+    // ════════════════════════════════════════════════════════════════════════
+    // ── 1H: BBW + mediana histórica (no existía hasta ahora) ─────────────────
+    const lBBW1h=lUp1h&&lLow1h&&lMA20_1h?(lUp1h-lLow1h)/lMA20_1h*100:0;
+    const _bbw1hHistory=c1h.map((_,i)=>{
+      const up=bb1h.upper[i],lo=bb1h.lower[i],mid=bb1h.mid[i];
+      return (mid&&up!=null&&lo!=null)?(up-lo)/mid*100:null;
+    }).filter(v=>v!=null).slice(-22).sort((a,b)=>a-b);
+    const _bbw1hMedian=_bbw1hHistory.length?_bbw1hHistory[Math.floor(_bbw1hHistory.length*0.5)]||lBBW1h:lBBW1h;
+    const bbw1hAboveMedian=lBBW1h>=_bbw1hMedian;
+    const piercingUpper1h=lH1h>lUp1h&&lP1h>lUp1h; // close 1H estrictamente fuera de la banda superior
+    const piercingLower1h=lL1h<lLow1h&&lP1h<lLow1h; // close 1H estrictamente fuera de la banda inferior
+
+    // ── Diario: Bollinger completo + BBW (no existía hasta ahora, solo había MA) ─
+    const bbD=bollinger(cD,20,2);
+    const lUpD=bbD.upper.filter(v=>v!=null).slice(-1)[0]||cD[nD-1];
+    const lLowD=bbD.lower.filter(v=>v!=null).slice(-1)[0]||cD[nD-1];
+    const lBBWD=lUpD&&lLowD&&lMA20D?(lUpD-lLowD)/lMA20D*100:0;
+    const _bbwDHistory=cD.map((_,i)=>{
+      const up=bbD.upper[i],lo=bbD.lower[i],mid=bbD.mid[i];
+      return (mid&&up!=null&&lo!=null)?(up-lo)/mid*100:null;
+    }).filter(v=>v!=null).slice(-22).sort((a,b)=>a-b);
+    const _bbwDMedian=_bbwDHistory.length?_bbwDHistory[Math.floor(_bbwDHistory.length*0.5)]||lBBWD:lBBWD;
+    const bbwDAboveMedian=lBBWD>=_bbwDMedian;
+    const lHD=hD[nD-1],lLD=lD_arr[nD-1],lCD=cD[nD-1];
+    const piercingUpperD=lHD>lUpD&&lCD>lUpD;
+    const piercingLowerD=lLD<lLowD&&lCD<lLowD;
+
+    // ── "Expuesta" por temporalidad = precio fuera de banda Y BBW expandido ──
+    const mtfExpCall15=piercingUpper&&bbwAboveMedian;
+    const mtfExpPut15=piercingLower&&bbwAboveMedian;
+    const mtfExpCall1h=piercingUpper1h&&bbw1hAboveMedian;
+    const mtfExpPut1h=piercingLower1h&&bbw1hAboveMedian;
+    const mtfExpCallD=piercingUpperD&&bbwDAboveMedian;
+    const mtfExpPutD=piercingLowerD&&bbwDAboveMedian;
+
+    // ── Confluencia real: las 3 temporalidades expuestas en la MISMA dirección ─
+    const mtfConfluenceCall=mtfExpCall15&&mtfExpCall1h&&mtfExpCallD;
+    const mtfConfluencePut=mtfExpPut15&&mtfExpPut1h&&mtfExpPutD;
+
+    if(mtfConfluenceCall){
+      _mtfActiveSignals.push({...meta,code:'BB-MTF',name:'Confluencia Multi-TF — CALL',type:'call',isMTF:true,
+        _timeET:(()=>{const _e=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));return _e.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true});})(),
+        reqs:[
+        {ok:true,tf:'15m',text:`Fuera de banda superior 15m — BBW ${lBBW15.toFixed(1)}% ≥ mediana ${_bbwMedian.toFixed(1)}%`},
+        {ok:true,tf:'1H', text:`Fuera de banda superior 1H — BBW ${lBBW1h.toFixed(1)}% ≥ mediana ${_bbw1hMedian.toFixed(1)}%`},
+        {ok:true,tf:'D',  text:`Fuera de banda superior Diario — BBW ${lBBWD.toFixed(1)}% ≥ mediana ${_bbwDMedian.toFixed(1)}%`},
+      ]});
+    }
+    if(mtfConfluencePut){
+      _mtfActiveSignals.push({...meta,code:'BB-MTF',name:'Confluencia Multi-TF — PUT',type:'put',isMTF:true,
+        _timeET:(()=>{const _e=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));return _e.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true});})(),
+        reqs:[
+        {ok:true,tf:'15m',text:`Fuera de banda inferior 15m — BBW ${lBBW15.toFixed(1)}% ≥ mediana ${_bbwMedian.toFixed(1)}%`},
+        {ok:true,tf:'1H', text:`Fuera de banda inferior 1H — BBW ${lBBW1h.toFixed(1)}% ≥ mediana ${_bbw1hMedian.toFixed(1)}%`},
+        {ok:true,tf:'D',  text:`Fuera de banda inferior Diario — BBW ${lBBWD.toFixed(1)}% ≥ mediana ${_bbwDMedian.toFixed(1)}%`},
+      ]});
+    }
+
     // Gate puro BB: BBW abierto + precio tocando/cruzando banda + sesión activa
     // bbwAboveMedian es OBLIGATORIO — sin expansión real no hay señal
     const bbPureGateCall = lBBW15>=1.0 && bbCallTrigger && _bbSessionOk && bbwAboveMedian;
@@ -3112,6 +3204,11 @@ async function _buildSignalsCore(){
     area.innerHTML=`<div style="text-align:center;padding:30px;color:var(--text2);font-size:13px;"><div style="font-size:28px;margin-bottom:10px">⚠️</div><div style="font-weight:600;color:var(--red);">Error en señales</div><div style="font-size:12px;margin-top:8px;color:var(--text3);">${_sigErr.message}</div></div>`;
     clearTimeout(_sigTimeout);return;
   }finally{clearTimeout(_sigTimeout);}
+
+  // BB-MTF — persistir globalmente y refrescar el panel violeta (reemplaza Noticias)
+  // independiente de si hay o no señales normales, para que siempre refleje el ciclo actual.
+  _lastMTFSignals=_mtfActiveSignals;
+  renderMultiTFPanel(_mtfActiveSignals);
 
   if(all.length===0&&!_testMode){
     area.innerHTML='<div style="text-align:center;padding:30px;color:var(--text2);font-size:13px;"><div style="font-size:28px;margin-bottom:10px">🔗</div><div style="font-weight:600;color:var(--yellow);">Sin datos disponibles</div><div style="font-size:12px;margin-top:8px;color:var(--text3);">Verifica la conexión con Schwab</div></div>';
@@ -4044,6 +4141,58 @@ function renderNewsTickerButtons(){
 }
 
 // ═══════════════════════════════════════════════════════════════
+// BB-MTF — Panel de Confluencia Multi-Temporalidad (violeta)
+// Ocupa el espacio que antes tenía el panel de Noticias. Se refresca en cada
+// ciclo de buildSignals() vía _lastMTFSignals (ver _buildSignalsCore).
+// ═══════════════════════════════════════════════════════════════
+function renderMultiTFPanel(sigs){
+  const area=document.getElementById('mtfArea');
+  if(!area)return;
+  sigs=sigs||_lastMTFSignals||[];
+  if(!sigs.length){
+    area.innerHTML=`<div style="text-align:center;padding:24px 12px;color:var(--text3);font-size:12px;">
+      <div style="font-size:24px;margin-bottom:8px;">🟣</div>
+      Sin confluencia Multi-TF activa<br>
+      <span style="font-size:10px;">Esperando que 15m + 1H + Día coincidan en exposición Bollinger</span>
+    </div>`;
+    return;
+  }
+  area.innerHTML=sigs.map(s=>{
+    const dirLabel=s.type==='call'?'🚀 CALL':'🔻 PUT';
+    const col=getTickerColor(s.sym);
+    return `<div class="sig-card mtf-card" style="margin-bottom:8px;">
+      <div class="sig-hdr mtf-hdr">
+        <div style="display:flex;align-items:center;gap:6px;">
+          <span style="width:8px;height:8px;border-radius:50%;background:${col};display:inline-block;"></span>
+          <span style="font-weight:700;font-family:var(--mono);color:#fff;">${s.sym}</span>
+          <span style="font-size:12px;color:rgba(255,255,255,.9);">${dirLabel}</span>
+        </div>
+        <span class="badge" style="background:rgba(0,0,0,.25);">MULTI-TF</span>
+      </div>
+      <div class="sig-body" style="background:var(--bg3);">
+        ${s.reqs.map(r=>`<div class="sig-req"><span style="color:var(--purple);">●</span><span>${r.text}</span></div>`).join('')}
+        <div style="font-size:11px;color:var(--text3);margin-top:6px;">💰 $${(s.price||0).toFixed(2)} · ${s._timeET||''}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ── News modal — abierto desde el botón 📰 News del topbar ───────────────
+function openNewsModal(){
+  const m=document.getElementById('newsModal');
+  if(!m)return;
+  m.style.display='flex';
+  // Poblar botones de tickers si aún no se han renderizado
+  renderNewsTickerButtons();
+  // Si no hay ninguna noticia cargada todavía, cargar "ALL" por defecto
+  if(!_newsActive)loadNews('ALL');
+}
+function closeNewsModal(){
+  const m=document.getElementById('newsModal');
+  if(m)m.style.display='none';
+}
+
+// ═══════════════════════════════════════════════════════════════
 // LOG PANEL
 // ═══════════════════════════════════════════════════════════════
 let _logPanelFilter='all';
@@ -4111,32 +4260,27 @@ function clearLogs(){
 }
 
 // ═══════════════════════════════════════════════════════════════
-// NOTICIAS + INSIDERS — tabs y filtros
+// MULTI-TF + INSIDERS — tabs del panel izquierdo (Noticias se movió a modal)
 // ═══════════════════════════════════════════════════════════════
-let _newsTab='noticias';
+let _newsTab='multitf';
 
 function switchNewsTab(tab){
   _newsTab=tab;
-  const tN=document.getElementById('tabNoticias');
+  const tN=document.getElementById('tabMultiTF');
   const tI=document.getElementById('tabInsiders');
-  const nA=document.getElementById('newsArea');
+  const nA=document.getElementById('mtfArea');
   const iA=document.getElementById('insiderArea');
-  if(tab==='noticias'){
-    if(tN){tN.style.color='#fff';tN.style.borderBottomColor='#fff';}
+  if(tab==='multitf'){
+    if(tN){tN.style.color='#fff';tN.style.borderBottomColor='var(--purple)';}
     if(tI){tI.style.color='var(--text3)';tI.style.borderBottomColor='transparent';}
     if(nA)nA.style.display='block';
     if(iA)iA.style.display='none';
-    // Mostrar ticker buttons
-    const btns=document.getElementById('newsTickerBtns');
-    if(btns)btns.style.display='flex';
+    renderMultiTFPanel();
   }else{
     if(tN){tN.style.color='var(--text3)';tN.style.borderBottomColor='transparent';}
     if(tI){tI.style.color='#ff4d6d';tI.style.borderBottomColor='#ff4d6d';}
     if(nA)nA.style.display='none';
     if(iA)iA.style.display='block';
-    // Ocultar ticker buttons (no aplican a insiders)
-    const btns=document.getElementById('newsTickerBtns');
-    if(btns)btns.style.display='none';
     // Limpiar badge
     const badge=document.getElementById('insiderBadge');
     if(badge){badge.style.display='none';badge.classList.remove('insider-blink');}

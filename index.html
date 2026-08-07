@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- TradeDeskPro v5 | build:20260805_bbmtf_confluence | B1:_wsSessionCandle_per15min B2:BB-REGRESO_strategy B3:intentoBull_loose B4:bbCallTrigger_connected B5:dedup_distVars B6:setup_gate_bbw B7:stochPutOk_noFloor A1:bbSessionOk_isMarketHours A2:schwabToken_firstTicker M1:momentumToLower_gate M2:bbwExpandActive M3:aviso_stricter M4:intento_volOk M5:unified_setup_card M6:bbwSqueezeBreakout M7:multiTF_regreso M8:BB-MTF_panel_replaces_noticias -->
+<!-- TradeDeskPro v5 | build:20260805_breakout_quality_gate | B1:_wsSessionCandle_per15min B2:BB-REGRESO_strategy B3:intentoBull_loose B4:bbCallTrigger_connected B5:dedup_distVars B6:setup_gate_bbw B7:stochPutOk_noFloor A1:bbSessionOk_isMarketHours A2:schwabToken_firstTicker M1:momentumToLower_gate M2:bbwExpandActive M3:aviso_stricter M4:intento_volOk M5:unified_setup_card M6:bbwSqueezeBreakout M7:multiTF_regreso M8:BB-MTF_panel_replaces_noticias M9:setup_levels_removed M10:atr_velocity_gate M11:piercing_only_trigger -->
 <html lang="es">
 <head>
 <meta charset="UTF-8">
@@ -1651,6 +1651,52 @@ function rsi(a,n=14){
   for(let i=1;i<a.length;i++){const d=a[i]-a[i-1];if(i<=n){g+=d>0?d:0;l+=d<0?-d:0;}else{g=(g*(n-1)+(d>0?d:0))/n;l=(l*(n-1)+(d<0?-d:0))/n;}if(i>=n)r.push(l===0?100:100-100/(1+g/l));}
   return r;
 }
+
+// ── ATR (Average True Range) — volatilidad EN DÓLARES ────────────────────────
+// Devuelve el ATR de las últimas `n` velas en dólares del subyacente.
+// A diferencia del BBW (que es un %), el ATR responde directo a la pregunta
+// del trader: "¿cuántos dólares se mueve esta acción por vela?".
+// True Range = max(high-low, |high-closePrev|, |low-closePrev|) — incluye gaps.
+function atr(highs,lows,closes,n=14){
+  if(!highs||highs.length<2)return 0;
+  const tr=[];
+  for(let i=1;i<closes.length;i++){
+    const h=highs[i],l=lows[i],pc=closes[i-1];
+    if(!Number.isFinite(h)||!Number.isFinite(l)||!Number.isFinite(pc))continue;
+    tr.push(Math.max(h-l,Math.abs(h-pc),Math.abs(l-pc)));
+  }
+  if(!tr.length)return 0;
+  const slice=tr.slice(-n);
+  return slice.reduce((s,v)=>s+v,0)/slice.length;
+}
+
+// ── Percentil de un valor dentro de su propia historia ───────────────────────
+// Devuelve 0-100: qué porcentaje de los valores históricos son MENORES que `val`.
+// Se usa para el BBW: percentil 60 significa "el ancho de banda actual es mayor
+// que el 60% de los anchos de las últimas N velas" — a diferencia de comparar
+// contra la mediana (percentil 50), que se cumple la mitad del tiempo por
+// definición estadística y por eso nunca detectaba mercados sin volatilidad.
+function pctRank(arr,val){
+  const clean=(arr||[]).filter(v=>Number.isFinite(v));
+  if(!clean.length)return 0;
+  const below=clean.filter(v=>v<val).length;
+  return below/clean.length*100;
+}
+
+// ── Movimiento mínimo esperado en dólares (configurable) ─────────────────────
+// El trader calibra este número con la columna "Diferencia $" del Strike Log:
+// cuántos dólares necesita que recorra el subyacente para que la opción rinda.
+// Bajo este umbral, la ruptura de banda no se notifica aunque sea técnicamente
+// válida — el activo está demasiado "dormido" para que valga la pena entrar.
+const _MIN_MOVE_DEFAULT=2.0;
+function getMinMoveDollars(){
+  const v=parseFloat(localStorage.getItem('tdp_min_move_dollars'));
+  return Number.isFinite(v)&&v>0?v:_MIN_MOVE_DEFAULT;
+}
+function setMinMoveDollars(v){
+  const n=parseFloat(v);
+  if(Number.isFinite(n)&&n>0){try{localStorage.setItem('tdp_min_move_dollars',String(n));}catch(e){}}
+}
 // M-2: genCandles — función de test para generar velas aleatorias.
 // Verificación (auditoría): grep confirma que esta función NUNCA se llama
 // en el path de producción — solo existe como utilidad de debug.
@@ -2346,6 +2392,7 @@ async function _buildSignalsCore(){
     // F4: Volumen activo
     const volLabel=avgVol15_10>0?` (${(lVol15/avgVol15_10*100).toFixed(0)}% del promedio)`:'';
 
+
     // ════════════════════════════════════════════════════════════════════════
     // SETUP — Sistema de alerta de 3 niveles antes de la ruptura
     // ════════════════════════════════════════════════════════════════════════
@@ -2384,6 +2431,100 @@ async function _buildSignalsCore(){
     const _candleHigh=(_wsIsToday&&_wsC.high>lH15)?_wsC.high:lH15;
     const _candleLow=(_wsIsToday&&_wsC.low<lL15)?_wsC.low:lL15;
     const _candleClose=(_wsIsToday&&_wsC.close>0)?_wsC.close:lP15;
+
+    // ════════════════════════════════════════════════════════════════════════
+    // CALIDAD DE RUPTURA — velocidad × volatilidad × tamaño de vela
+    // (auditoría 2026-08-05, caso GOOG PUT 1:15 PM con 4 alertas seguidas)
+    // ════════════════════════════════════════════════════════════════════════
+    // Diagnóstico del caso GOOG: el precio llevaba ~3h lateral entre $355-$360
+    // con las bandas cerradas, y aun así disparaba alertas cada vez que una vela
+    // se acercaba a la banda inferior. El filtro que debía impedirlo era
+    // `bbwAboveMedian` (BBW por encima de su mediana de 22 velas), pero ese
+    // filtro es estructuralmente incapaz de detectar "no hay volatilidad":
+    // en un régimen comprimido la mediana también está comprimida, así que
+    // "por encima de la mediana" se cumple ~50% del tiempo POR DEFINICIÓN.
+    //
+    // Las cuatro medidas nuevas que sí distinguen ruptura real de drift lateral:
+    //
+    //  1. ATR EN DÓLARES — cuánto se mueve el activo por vela, en la unidad que
+    //     de verdad le importa al trader (y que ya registra en Diferencia $ del
+    //     Strike Log). Normalizar por ATR hace que los umbrales funcionen igual
+    //     en GOOG a $356 que en PLTR a $180, sin constantes arbitrarias por ticker.
+    //
+    //  2. VELOCIDAD (movimiento / ATR) — cuántos ATR recorrió el precio en las
+    //     últimas 2 velas. Una ruptura real recorre ≥0.7 ATR en 30min; el drift
+    //     lateral de GOOG recorría ~0.2 ATR. Es la medida que separa "el precio
+    //     llegó a la banda con fuerza" de "el precio se dejó caer hasta la banda".
+    //
+    //  3. APERTURA REAL DE BANDAS — banda superior SUBIENDO y banda inferior
+    //     BAJANDO al mismo tiempo. Esto es expansión de volatilidad de verdad.
+    //     Si ambas bandas se mueven en la misma dirección, eso es una tendencia
+    //     con volatilidad constante, no una expansión — y el BBW puede subir
+    //     igual, por eso el chequeo de BBW solo no bastaba.
+    //
+    //  4. VELA GRANDE — el evento que el trader quiere ver: cuerpo dominante
+    //     que cierra fuera de la banda, no una mecha que la toca y se devuelve.
+    // ════════════════════════════════════════════════════════════════════════
+
+    // ── 1. ATR en dólares (14 velas de 15min) ────────────────────────────────
+    const _atr15=atr(h15,l15,c15,14);
+    // Recorrido DIRECCIONAL esperado en la próxima hora.
+    // No se usa ATR×4 (las 4 velas de una hora) porque eso asumiría un movimiento
+    // perfectamente monótono, sin un solo retroceso — irreal incluso en breakouts
+    // fuertes, y deja pasar activos dormidos: GOOG lateral con ATR $0.77 daría
+    // $3.08 de "potencial" y superaría el mínimo de $2 sin merecerlo.
+    // Se usa ATR×2 (escalamiento √4 del recorrido neto), que es el recorrido neto
+    // típico de una continuación direccional de 1h y sí distingue activo vivo de
+    // activo dormido: exige ATR ≥ $1.00 para un mínimo de $2.
+    const _potencial1h=_atr15*2;
+    const _minMove=getMinMoveDollars();
+    const _potencialOk=_potencial1h>=_minMove;
+
+    // ── 2. Velocidad del precio normalizada por ATR ──────────────────────────
+    // Movimiento absoluto de las últimas 2 velas (30min) medido en ATRs.
+    const _mov2velas=n15>=3?Math.abs(lP15-c15[n15-3]):0;
+    const _velATR=_atr15>0?_mov2velas/_atr15:0;
+    const _velocidadOk=_velATR>=0.7; // umbral moderado
+
+    // ── 3. Apertura real de bandas (superior sube Y inferior baja) ───────────
+    const _upPrev=bb15.upper.filter(v=>v!=null).slice(-3)[0];
+    const _loPrev=bb15.lower.filter(v=>v!=null).slice(-3)[0];
+    const _upperRising=_upPrev!=null&&lUp15>_upPrev;
+    const _lowerFalling=_loPrev!=null&&lLow15<_loPrev;
+    const _bandasAbriendo=_upperRising&&_lowerFalling;
+    // Percentil del BBW dentro de las últimas 40 velas — reemplaza a bbwAboveMedian.
+    // Percentil 60 = "más ancho que el 60% de las últimas 10 horas de mercado".
+    const _bbwHist40=c15.map((_,i)=>{
+      const up=bb15.upper[i],lo=bb15.lower[i],mid=bb15.mid[i];
+      return (mid&&up!=null&&lo!=null)?(up-lo)/mid*100:null;
+    }).filter(v=>v!=null).slice(-40);
+    const _bbwPctRank=pctRank(_bbwHist40,lBBW15);
+    const _bbwPctOk=_bbwPctRank>=60; // umbral moderado
+    // Volatilidad válida = bandas anchas respecto a su historia Y expandiéndose ahora
+    const _volatilidadReal=_bbwPctOk&&(_bandasAbriendo||(lBBW15-lBBW15_2)>=0.10);
+
+    // ── 4. Vela grande — cuerpo dominante, no mecha ──────────────────────────
+    const _bodies10=c15.slice(-11,-1).map((cl,i)=>Math.abs(cl-o15_arr[n15-11+i])).filter(v=>Number.isFinite(v));
+    const _avgBody10=_bodies10.length?_bodies10.reduce((a,b)=>a+b,0)/_bodies10.length:0;
+    const _bodyNow=Math.abs(_candleClose-lO15);
+    const _rangeNow=Math.max(_candleHigh-_candleLow,1e-9);
+    const _velaGrande=_avgBody10>0?_bodyNow>=_avgBody10*1.2:true; // cuerpo ≥1.2× promedio
+    const _cuerpoDominante=(_bodyNow/_rangeNow)>=0.5; // el cuerpo es ≥50% de la vela
+    // Cierre fuerte en la dirección de la ruptura (no rechazo con mecha larga)
+    const _cierreFuerteCall=((_candleClose-_candleLow)/_rangeNow)>=0.65;
+    const _cierreFuertePut =((_candleHigh-_candleClose)/_rangeNow)>=0.65;
+
+    // ── GATE DE CALIDAD unificado (dirección aparte) ─────────────────────────
+    // Todo lo que no depende de call/put. La dirección se añade en el gate final.
+    const _calidadBase=_volatilidadReal&&_velocidadOk&&_potencialOk&&_velaGrande&&_cuerpoDominante;
+    const _calidadCall=_calidadBase&&_cierreFuerteCall;
+    const _calidadPut =_calidadBase&&_cierreFuertePut;
+
+    // Etiquetas legibles para las tarjetas (evita recalcular en cada req)
+    const _lblATR=`ATR 15m $${_atr15.toFixed(2)} → recorrido esperado 1h $${_potencial1h.toFixed(2)}`;
+    const _lblVel=`Velocidad ${_velATR.toFixed(2)} ATR en 30min ($${_mov2velas.toFixed(2)})`;
+    const _lblBBW=`BBW ${lBBW15.toFixed(2)}% — percentil ${_bbwPctRank.toFixed(0)} de las últimas 40 velas`;
+    const _lblBody=_avgBody10>0?`Cuerpo $${_bodyNow.toFixed(2)} vs promedio $${_avgBody10.toFixed(2)} (${(_bodyNow/_avgBody10).toFixed(1)}×)`:`Cuerpo $${_bodyNow.toFixed(2)}`;
 
     // Distancia del HIGH/LOW de la vela a la banda (negativo = ya la tocó/cruzó)
     const distHighToUpper=(lUp15-_candleHigh)/lP15*100;  // <0 → el high ya pasó la banda
@@ -2492,50 +2633,23 @@ async function _buildSignalsCore(){
     const acercBear=!intentoBear&&!setupBear&&approachingLower1&&_basePutConds&&_bbwAccelStrict;
 
     // ════════════════════════════════════════════════════════════════════════
-    // SETUP UNIFICADO — UN SOLO AVISO por dirección
-    // Colapsa los 3 niveles en una tarjeta para que el trader entre a verificar.
-    // Prioridad: INTENTO (wick tocó) > PRE-RUPTURA (close cerca) > AVISO (se acerca)
-    // Code siempre = 'SETUP'. El nombre refleja cuál nivel disparó.
+    // SETUP / ACERCÁNDOSE — ELIMINADOS (2026-08-05)
     // ════════════════════════════════════════════════════════════════════════
-
-    // ── CALL (hacia banda superior) ───────────────────────────────────────────
-    // SETUP CALL — no mostrar si ya hay BB-A activo para este ticker (señal más fuerte ya presente)
-    // Nivel 2 (Intento/wick) eliminado — demasiado recurrente
-    const _bbAActiveCall=all.some(s=>s.sym===sym&&s.code==='BB-A'&&s.type==='call');
-    if(_bbSessionOk&&(setupBull||acercBull)&&!_bbAActiveCall){
-      const _lvl=setupBull?3:1;
-      const _nm=_lvl===3?'🎯 Setup — Banda Superior (precio cerca)':'📡 Setup — Banda Superior (acercándose)';
-      const _trigLine=`Close a ${distClosToUpper.toFixed(2)}% de banda superior $${lUp15.toFixed(2)}`;
-      all.push({...meta,code:'SETUP',name:_nm,type:'call',isSetup:true,_setupLevel:_lvl,reqs:[
-        {ok:true,          tf:'15m',text:_trigLine},
-        {ok:_bbwExpandActive||lBBW15>=1.8, tf:'15m',text:_bbwExpandActive?`BBW expandiéndose: +${(lBBW15-lBBW15_2).toFixed(2)}% en 30min`:lBBW15>=1.8?`Bandas abiertas (BBW ${lBBW15.toFixed(2)}%)`:(`BBW estático (${lBBW15.toFixed(2)}%, Δ${(lBBW15-lBBW15_2).toFixed(2)}%/30min)`)},
-        {ok:_mom2of3Upper, tf:'15m',text:`Momentum: ${_v3bull.map(v=>v?'🟢':'🔴').join(' ')} — ${_v3bull.filter(Boolean).length}/3 velas alcistas`},
-        {ok:_velocityToUpper,tf:'15m',text:`Velocidad hacia banda: Δ${(_dUp2ago-distClosToUpper).toFixed(2)}% en 30min`},
-        {ok:lP15>lMA20_15, tf:'15m',text:`MA20 alineada — precio sobre $${lMA20_15.toFixed(2)}`},
-        {ok:align1hBull,   tf:'1H', text:`1H confirma dirección alcista`},
-        {ok:stochCallOk||stochCallCross,tf:'15m',text:`Stochastics${stochCallCross?' 🔔 CRUCE':''} apoyando (%K ${lK15.toFixed(0)} > %D ${lD15.toFixed(0)})`},
-        {ok:_momentumWindow,tf:'⏰',text:_momentumWindow?`✅ Ventana óptima 9:30–11:00 AM`:`ℹ️ ${Math.floor(_mNow/60)}:${String(_mNow%60).padStart(2,'0')} ET — fuera de ventana, confirmar`},
-      ]});
-    }
-
-    // SETUP PUT — no mostrar si ya hay BB-B activo para este ticker (señal más fuerte ya presente)
-    // Nivel 2 (Intento/wick) eliminado — demasiado recurrente
-    const _bbBActivePut=all.some(s=>s.sym===sym&&s.code==='BB-B'&&s.type==='put');
-    if(_bbSessionOk&&(setupBear||acercBear)&&!_bbBActivePut){
-      const _lvl=setupBear?3:1;
-      const _nm=_lvl===3?'🎯 Setup — Banda Inferior (precio cerca)':'📡 Setup — Banda Inferior (acercándose)';
-      const _trigLine=`Close a ${distClosToLower.toFixed(2)}% de banda inferior $${lLow15.toFixed(2)}`;
-      all.push({...meta,code:'SETUP',name:_nm,type:'put',isSetup:true,_setupLevel:_lvl,reqs:[
-        {ok:true,          tf:'15m',text:_trigLine},
-        {ok:_bbwExpandActive||lBBW15>=1.8, tf:'15m',text:_bbwExpandActive?`BBW expandiéndose: +${(lBBW15-lBBW15_2).toFixed(2)}% en 30min`:lBBW15>=1.8?`Bandas abiertas (BBW ${lBBW15.toFixed(2)}%)`:(`BBW estático (${lBBW15.toFixed(2)}%, Δ${(lBBW15-lBBW15_2).toFixed(2)}%/30min)`)},
-        {ok:_mom2of3Lower, tf:'15m',text:`Momentum: ${_v3bull.map(v=>v?'🟢':'🔴').join(' ')} — ${_v3bull.filter(v=>!v).length}/3 velas bajistas`},
-        {ok:_velocityToLower,tf:'15m',text:`Velocidad hacia banda: Δ${(_dLow2ago-distClosToLower).toFixed(2)}% en 30min`},
-        {ok:lP15<lMA20_15, tf:'15m',text:`MA20 alineada — precio bajo $${lMA20_15.toFixed(2)}`},
-        {ok:align1hBear,   tf:'1H', text:`1H confirma dirección bajista`},
-        {ok:stochPutOk||stochPutCross,tf:'15m',text:`Stochastics${stochPutCross?' 🔔 CRUCE':''} apoyando (%K ${lK15.toFixed(0)} < %D ${lD15.toFixed(0)})`},
-        {ok:_momentumWindow,tf:'⏰',text:_momentumWindow?`✅ Ventana óptima 9:30–11:00 AM`:`ℹ️ ${Math.floor(_mNow/60)}:${String(_mNow%60).padStart(2,'0')} ET — fuera de ventana, confirmar`},
-      ]});
-    }
+    // Antes existían 3 niveles de aviso previo a la ruptura (AVISO nivel 1,
+    // INTENTO nivel 2, PRE-RUPTURA nivel 3) que generaban tarjeta + alerta de
+    // Telegram cada vez que una vela se ACERCABA a la banda. Eso producía
+    // hasta 4 mensajes por el mismo evento (ver caso GOOG PUT del 2026-08-05:
+    // ACERCÁNDOSE 1:15 → BB Breakout 77% 1:15 → SETUP 1:18 → 88% 1:18), y la
+    // mayoría llegaba en mercado lateral sin volatilidad real.
+    //
+    // Decisión del trader: la única señal que interesa es la VELA GRANDE
+    // rompiendo la banda con volatilidad y velocidad reales. Los niveles
+    // previos se eliminaron por completo — ni tarjeta ni Telegram.
+    //
+    // Las variables intentoBull/setupBull/acercBull y sus pares Bear siguen
+    // calculándose arriba porque _momentumToUpper/_momentumToLower alimentan
+    // el scoring de otras estrategias, pero ya no generan ninguna señal.
+    // ════════════════════════════════════════════════════════════════════════
 
     // ════════════════════════════════════════════════════════════════════════
     // ESTRATEGIA 1 — BB BREAKOUT 15MIN
@@ -2601,13 +2715,16 @@ async function _buildSignalsCore(){
     // la banda con close adentro, eso es INTENTO (Nivel 2) — que ya existe.
     const piercingUpper=_candleHigh>lUp15&&_candleClose>lUp15;   // close estrictamente fuera
     const piercingLower=_candleLow<lLow15&&_candleClose<lLow15;  // close estrictamente fuera
-    // FIX B4 (2026-07-02): bbCallTrigger/bbPutTrigger eran código muerto — declarados pero
-    // BB-A/BB-B usaban solo piercingUpper/Lower. Se conectan ahora al gate bbPureGateCall/Put.
-    // "BB-A/BB-B disparan en AMBOS casos: acercándose O perforando" — como decía el comentario
-    // pero no se cumplía. approachingUpper (HIGH a <0.3% de la banda, close adentro) activa BB-A
-    // en modo "entrada temprana" antes de que el close salga de la banda.
-    const bbCallTrigger=approachingUpper||piercingUpper;
-    const bbPutTrigger=approachingLower||piercingLower;
+    // FIX CRÍTICO (2026-08-05): bbCallTrigger/bbPutTrigger incluían `approaching`,
+    // así que BB-A/BB-B — la señal llamada "BB Breakout" — se disparaba cuando el
+    // precio apenas se ACERCABA a 0.3% de la banda, sin haberla roto. Ese fue el
+    // origen del mensaje "GOOG · PUT · 77% — BB Breakout" del 2026-08-05 a la
+    // 1:15 PM, con el precio todavía dentro de las bandas y en mercado lateral.
+    //
+    // Un mensaje que dice "Breakout" tiene que corresponder a una ruptura real.
+    // Ahora el trigger exige `piercing`: el CLOSE estrictamente fuera de la banda.
+    const bbCallTrigger=piercingUpper;
+    const bbPutTrigger=piercingLower;
 
     // Pesos del modelo ponderado
     const W={bollinger:60,medias:25,volumen:5,estocastico:5,hlines:5};
@@ -2783,10 +2900,26 @@ async function _buildSignalsCore(){
       ]});
     }
 
-    // Gate puro BB: BBW abierto + precio tocando/cruzando banda + sesión activa
-    // bbwAboveMedian es OBLIGATORIO — sin expansión real no hay señal
-    const bbPureGateCall = lBBW15>=1.0 && bbCallTrigger && _bbSessionOk && bbwAboveMedian;
-    const bbPureGatePut  = lBBW15>=1.0 && bbPutTrigger  && _bbSessionOk && bbwAboveMedian;
+    // ════════════════════════════════════════════════════════════════════════
+    // GATE BB — ruptura real + calidad (velocidad × volatilidad × vela grande)
+    // ════════════════════════════════════════════════════════════════════════
+    // El gate anterior era: BBW≥1.0% + trigger + sesión + bbwAboveMedian.
+    // Los tres primeros dejaban pasar el drift lateral y el cuarto era inútil
+    // (ver comentario del bloque CALIDAD DE RUPTURA: "por encima de la mediana"
+    // se cumple ~50% del tiempo por definición, incluso con las bandas cerradas).
+    //
+    // El gate nuevo exige, además de la ruptura confirmada (close fuera de banda):
+    //   • _volatilidadReal → BBW en percentil ≥60 de las últimas 40 velas Y
+    //     bandas abriéndose (superior sube + inferior baja, o BBW +0.10 en 30min)
+    //   • _velocidadOk    → el precio recorrió ≥0.7 ATR en las últimas 2 velas
+    //   • _potencialOk    → recorrido esperado 1h (ATR×4) ≥ mínimo en $ configurado
+    //   • _velaGrande     → cuerpo ≥1.2× el promedio de las últimas 10 velas
+    //   • _cuerpoDominante→ el cuerpo es ≥50% del rango (no es una mecha)
+    //   • cierre fuerte en la dirección de la ruptura (no rechazo)
+    //
+    // bbwAboveMedian se conserva solo como BONUS de score (+15), ya no como gate.
+    const bbPureGateCall = bbCallTrigger && _bbSessionOk && _calidadCall;
+    const bbPureGatePut  = bbPutTrigger  && _bbSessionOk && _calidadPut;
 
     // Pesos — Bollinger ocupa 50 puntos base (siempre se suman si el gate pasó)
     const _WBB={
@@ -2834,9 +2967,12 @@ async function _buildSignalsCore(){
         weighted:true,score,threshold:65,
         _scoreQuality:score>=BB_SCORE_STRONG?'strong':score>=BB_SCORE_MODERATE?'moderate':'weak',
         reqs:[
-        // ── GATE PURO BB (siempre ✅ cuando llegamos aquí) ──
-        {ok:lBBW15>=1.0,    tf:'15m',weight:'BB',text:`Expansión BB: bandas abiertas (BBW ${lBBW15.toFixed(1)}%)`},
-        {ok:piercingUpper,  tf:'15m',weight:'BB',text:(()=>{const _d=(_candleClose-lUp15)/lP15*100;return _d>=0?`✅ Precio FUERA de banda superior: $${_candleClose.toFixed(2)} > $${lUp15.toFixed(2)} (+${_d.toFixed(2)}%)`:`⚡ High cruzó banda superior — close a ${Math.abs(_d).toFixed(2)}% adentro`;})()},
+        // ── GATE DE RUPTURA + CALIDAD (siempre ✅ cuando llegamos aquí) ──
+        {ok:piercingUpper,  tf:'15m',weight:'BB',text:(()=>{const _d=(_candleClose-lUp15)/lP15*100;return `✅ Vela FUERA de banda superior: $${_candleClose.toFixed(2)} > $${lUp15.toFixed(2)} (+${_d.toFixed(2)}%)`;})()},
+        {ok:_velaGrande&&_cuerpoDominante,tf:'15m',weight:'GATE',text:`🕯 Vela grande — ${_lblBody}, cuerpo ${(_bodyNow/_rangeNow*100).toFixed(0)}% del rango`},
+        {ok:_velocidadOk,   tf:'15m',weight:'GATE',text:`⚡ ${_lblVel}`},
+        {ok:_volatilidadReal,tf:'15m',weight:'GATE',text:`📊 ${_lblBBW}${_bandasAbriendo?' · bandas abriéndose (sup↑ inf↓)':''}`},
+        {ok:_potencialOk,   tf:'15m',weight:'GATE',text:`💵 ${_lblATR} — mínimo requerido $${_minMove.toFixed(2)}`},
         // ── BONUS BB (suman confianza) ──
         {ok:bbwAboveMedian, tf:'15m',weight:'BB+',text:`BBW sobre mediana histórica — expansión real, no ruido (${lBBW15.toFixed(2)}% vs med. ${_bbwMedian.toFixed(2)}%)`},
         {ok:_bbwSqueezeBreakout,tf:'15m',weight:'+12%',text:_bbwSqueezeBreakout?`🔥 RUPTURA DE SQUEEZE — baja vol (${lBBW15_2.toFixed(2)}% ≤ pct25 ${_bbwPct25.toFixed(2)}%) → expansión ahora. Movimiento fuerte probable`:`Sin squeeze previo (${lBBW15_2.toFixed(2)}% vs pct25 ${_bbwPct25.toFixed(2)}%)`},
@@ -2865,8 +3001,11 @@ async function _buildSignalsCore(){
         weighted:true,score,threshold:65,
         _scoreQuality:score>=BB_SCORE_STRONG?'strong':score>=BB_SCORE_MODERATE?'moderate':'weak',
         reqs:[
-        {ok:lBBW15>=1.0,    tf:'15m',weight:'BB',text:`Expansión BB: bandas abiertas (BBW ${lBBW15.toFixed(1)}%)`},
-        {ok:piercingLower,  tf:'15m',weight:'BB',text:(()=>{const _d=(lLow15-_candleClose)/lP15*100;return _d>=0?`✅ Precio FUERA de banda inferior: $${_candleClose.toFixed(2)} < $${lLow15.toFixed(2)} (-${_d.toFixed(2)}%)`:`⚡ Low cruzó banda inferior — close a ${Math.abs(_d).toFixed(2)}% adentro`;})()},
+        {ok:piercingLower,  tf:'15m',weight:'BB',text:(()=>{const _d=(lLow15-_candleClose)/lP15*100;return `✅ Vela FUERA de banda inferior: $${_candleClose.toFixed(2)} < $${lLow15.toFixed(2)} (-${_d.toFixed(2)}%)`;})()},
+        {ok:_velaGrande&&_cuerpoDominante,tf:'15m',weight:'GATE',text:`🕯 Vela grande — ${_lblBody}, cuerpo ${(_bodyNow/_rangeNow*100).toFixed(0)}% del rango`},
+        {ok:_velocidadOk,   tf:'15m',weight:'GATE',text:`⚡ ${_lblVel}`},
+        {ok:_volatilidadReal,tf:'15m',weight:'GATE',text:`📊 ${_lblBBW}${_bandasAbriendo?' · bandas abriéndose (sup↑ inf↓)':''}`},
+        {ok:_potencialOk,   tf:'15m',weight:'GATE',text:`💵 ${_lblATR} — mínimo requerido $${_minMove.toFixed(2)}`},
         {ok:bbwAboveMedian, tf:'15m',weight:'BB+',text:`BBW sobre mediana histórica — expansión real (${lBBW15.toFixed(2)}% vs med. ${_bbwMedian.toFixed(2)}%)`},
         {ok:_bbwSqueezeBreakout,tf:'15m',weight:'+12%',text:_bbwSqueezeBreakout?`🔥 RUPTURA DE SQUEEZE — baja vol (${lBBW15_2.toFixed(2)}% ≤ pct25 ${_bbwPct25.toFixed(2)}%) → expansión ahora. Movimiento fuerte probable`:`Sin squeeze previo (${lBBW15_2.toFixed(2)}% vs pct25 ${_bbwPct25.toFixed(2)}%)`},
         {ok:bigBodyPut,     tf:'15m',weight:'+10%',text:`Cuerpo vela ${bigBodyPut?'✅':'⚠️'} ${candleBody15.toFixed(2)}% — ${bigBodyPut?'momentum confirmado':'breakout de wick (válido, menos confianza)'}`},
@@ -3336,44 +3475,14 @@ async function _buildSignalsCore(){
       addLog('warn','Telegram',`${s.sym} ${s.code} — Telegram BLOQUEADO: precio sin confirmar por Finnhub ($${s.price.toFixed(2)}) ⚠`);
     }
 
-    // Send Telegram SETUP/INTENTO/AVISO notification (solo si precio confirmado)
-    if(s.isSetup&&_priceConfirmed){
-      const _etSetup=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
-      const _today=_etSetup.toLocaleDateString('es-PR');
-      const _level=s._setupLevel||3;
-      // FIX (auditoría 2026-06-30): dedup por hora ET para no spamear el
-      // mismo estado cada 3 minutos, pero sí avisar si escala de nivel.
-      // La clave incluye el nivel para que si pasa de AVISO → INTENTO → SETUP
-      // en la misma hora, cada escalada dispare un aviso nuevo.
-      const _setupKey=`tg_sent_setup_${s.sym}_${s.code}_${_level}_${_today}_${_etSetup.getHours()}`;
-      if(!localStorage.getItem(_setupKey)){
-        localStorage.setItem(_setupKey,'1');
-        const time=_etSetup.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true});
-        const _sDir=s.type==='call'?'CALL':'PUT';
-        const _sEmoji=s.type==='call'?'🚀':'🔻';
-        let msg='';
-        if(_level===2){
-          msg=`🔥 *${s.sym} · ${_sDir} · INTENTO*\n`+
-            `Vela tocando la banda de Bollinger ahora mismo\n`+
-            `🕐 ${time} ET\n\n`+
-            `⚡ Prepárate — si el cierre confirma es señal completa`;
-        }else if(_level===3){
-          msg=`⚡ *${s.sym} · ${_sDir} · SETUP*\n`+
-            `Close a 0.3% de la banda — ruptura inminente\n`+
-            `🕐 ${time} ET`;
-        }else{
-          msg=`📡 *${s.sym} · ${_sDir} · ACERCÁNDOSE*\n`+
-            `BBW acelerando — precio apuntando a la banda\n`+
-            `🕐 ${time} ET`;
-        }
-        const _tok=getTgToken(),_chat=getTgChat();
-        if(_tok&&_chat){
-          sendTelegram(msg,_tok,_chat).then(_ok=>{
-            if(!_ok)addLog('error','Telegram',`${s.sym} ${s.code} L${_level} — Telegram no se pudo enviar`);
-          });
-        }
-      }
-    }
+    // ── Bloque Telegram de SETUP/INTENTO/ACERCÁNDOSE: ELIMINADO (2026-08-05) ──
+    // Este bloque enviaba un mensaje descriptivo por cada nivel de aviso previo,
+    // ADEMÁS del mensaje con porcentaje que manda notifySignal() más abajo. Por
+    // eso un mismo evento producía dos mensajes ("⚡ SETUP — ruptura inminente"
+    // + "🔻 PUT · 88% — Setup Banda Inferior"), y la clave de dedup incluía el
+    // nivel, así que cada escalada AVISO→SETUP mandaba dos mensajes más.
+    // Con los niveles previos eliminados, Telegram solo recibe rupturas reales.
+
     // Send Telegram notification for new signals
     // SOLO si precio confirmado por Finnhub — evita enviar precios incorrectos de Schwab
     const _etNow=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
@@ -3973,7 +4082,26 @@ const STRAT_META=[
 function _renderStratTab(){
   const list=document.getElementById('stratList');
   if(!list)return;
-  list.innerHTML=STRAT_META.map(s=>{
+  // ── Filtro global de movimiento mínimo en dólares ──────────────────────────
+  // Bloquea la señal cuando el activo está demasiado "dormido" para que la
+  // opción rinda, aunque técnicamente rompa la banda de Bollinger.
+  // El potencial se estima como ATR(15min) × 4 velas ≈ recorrido de 1 hora.
+  const _mm=getMinMoveDollars();
+  const _mmHtml=`<div style="background:var(--bg3);border:1px solid var(--purple);border-radius:var(--r);padding:12px 14px;margin-bottom:10px;">
+    <div style="font-size:13px;font-weight:700;color:#fff;margin-bottom:4px;">💵 Movimiento mínimo esperado</div>
+    <div style="font-size:11px;color:#fff;opacity:.75;margin-bottom:8px;line-height:1.5;">
+      Solo avisa si el activo puede recorrer al menos estos dólares en la próxima hora
+      (estimado como ATR de 15min × 2). Calíbralo con la columna <b>Diferencia $</b> de tu Strike Log.
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;">
+      <span style="font-family:var(--mono);font-weight:700;color:var(--purple);font-size:16px;">$</span>
+      <input type="number" id="cfgMinMove" value="${_mm}" min="0.25" max="50" step="0.25"
+        style="background:var(--bg4);border:1px solid var(--purple);border-radius:var(--r);color:#fff;padding:6px 10px;font-size:14px;font-family:var(--mono);width:90px;outline:none;text-align:center;font-weight:700;"
+        onchange="setMinMoveDollars(this.value);_showMinMoveMsg();buildSignals();">
+      <span id="cfgMinMoveMsg" style="font-size:11px;color:var(--text3);"></span>
+    </div>
+  </div>`;
+  list.innerHTML=_mmHtml+STRAT_META.map(s=>{
     const on=_stratEnabled(s.code);
     const dirColor=s.code.endsWith('-B')||s.code.endsWith('-C')||s.name.includes('PUT')?'var(--red)':'var(--green)';
     return`<div style="background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);padding:12px 14px;display:flex;align-items:center;gap:12px;">
@@ -3994,6 +4122,13 @@ function _renderStratTab(){
       </label>
     </div>`;
   }).join('');
+}
+function _showMinMoveMsg(){
+  const el=document.getElementById('cfgMinMoveMsg');
+  if(!el)return;
+  el.textContent=`✅ Guardado — mínimo $${getMinMoveDollars().toFixed(2)}`;
+  el.style.color='var(--green)';
+  setTimeout(()=>{if(el)el.textContent='';},2500);
 }
 function _toggleStrat(code){
   const newVal=!_stratEnabled(code);

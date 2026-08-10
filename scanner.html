@@ -2358,17 +2358,23 @@ function fmtDate(ts){
    RENDER GRÁFICO DE VELAS CON ZONAS
 ══════════════════════════════════════ */
 function renderLiqChart(sym,hist,zones,price){
+  // FIX: destruir cualquier chart existente en el canvas antes de crear uno nuevo
+  const existing=Chart.getChart('liqChart');
+  if(existing){existing.destroy();}
+  if(liqChart){try{liqChart.destroy();}catch(e){} liqChart=null;}
+
   const ctx=document.getElementById('liqChart').getContext('2d');
-  if(liqChart){liqChart.destroy();liqChart=null;}
 
   const labels=hist.map(x=>fmtDate(x.t));
   const bodyData=hist.map(x=>[Math.min(x.o,x.c),Math.max(x.o,x.c)]);
   const bodyColors=hist.map(x=>x.c>=x.o?'rgba(10,140,94,0.75)':'rgba(214,48,49,0.75)');
   const borderColors=hist.map(x=>x.c>=x.o?'#0a8c5e':'#d63031');
 
-  // Líneas horizontales de zonas
-  const eqlZones=zones.filter(z=>z.type==='EQL');
-  const fvgZones=zones.filter(z=>z.type==='FVG');
+  // Solo zonas que están dentro del rango de precio visible (±15%)
+  const priceRange={min:price*0.85,max:price*1.15};
+  const eqlZones=zones.filter(z=>z.type==='EQL'&&z.level>=priceRange.min&&z.level<=priceRange.max);
+  const fvgZones=zones.filter(z=>z.type==='FVG'&&z.levelLow>=priceRange.min&&z.levelHigh<=priceRange.max)
+    .slice(0,5); // máximo 5 FVGs para no colapsar el gráfico
 
   // Plugins para dibujar líneas de zonas y velas
   const zonesPlugin={
@@ -2463,7 +2469,13 @@ function renderLiqChart(sym,hist,zones,price){
       },
       scales:{
         x:{ticks:{color:'#a0aab8',font:{size:9},maxTicksLimit:12,maxRotation:0},grid:{color:'rgba(0,0,0,.04)'}},
-        y:{ticks:{color:'#a0aab8',font:{size:10,family:'JetBrains Mono'},callback:v=>'$'+v.toFixed(0)},grid:{color:'rgba(0,0,0,.05)'}}
+        y:{
+          // FIX: fijar el rango del eje Y basado en los datos OHLC, no en las zonas
+          min:Math.min(...hist.map(x=>x.l))*0.985,
+          max:Math.max(...hist.map(x=>x.h))*1.015,
+          ticks:{color:'#a0aab8',font:{size:10,family:'JetBrains Mono'},callback:v=>'$'+v.toFixed(0)},
+          grid:{color:'rgba(0,0,0,.05)'}
+        }
       }
     },
     plugins:[zonesPlugin]

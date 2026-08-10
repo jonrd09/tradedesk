@@ -2291,62 +2291,76 @@ async function getLiqCurrentPrice(sym){
 ══════════════════════════════════════ */
 function detectZones(hist,price){
   const zones=[];
-  // 1. EQUAL LOWS
-  for(let i=2;i<hist.length;i++){
-    for(let j=0;j<i;j++){
-      const lo1=hist[j].l, lo2=hist[i].l;
+
+  // ── 1. EQUAL LOWS ─────────────────────────────────────────────
+  // Solo buscar en las últimas 30 velas (más reciente = más relevante)
+  const recent=hist.slice(-30);
+  for(let i=2;i<recent.length;i++){
+    for(let j=Math.max(0,i-15);j<i;j++){ // ventana máx 15 velas atrás
+      const lo1=recent[j].l, lo2=recent[i].l;
       if(lo1<=0||lo2<=0) continue;
       const diff=Math.abs(lo1-lo2)/lo1;
       if(diff<=EQ_TOL){
         const level=(lo1+lo2)/2;
-        // evitar duplicados: si ya hay una zona igual lows dentro del 0.3%
-        const dup=zones.find(z=>z.type==='EQL'&&Math.abs(z.level-level)/level<0.003);
+        // Evitar duplicados dentro del 0.8%
+        const dup=zones.find(z=>z.type==='EQL'&&Math.abs(z.level-level)/level<0.008);
         if(!dup){
           const dist=((price-level)/level)*100;
-          zones.push({
-            type:'EQL',
-            level,
-            label:`Equal Low`,
-            idxA:j, idxB:i,
-            dist,        // % distancia del precio actual (positivo = precio encima)
-            near:Math.abs(dist)<=NEAR_PCT*100,
-            strength: i-j<=10?'fuerte':'normal', // más reciente = más fuerte
-            dates:[fmtDate(hist[j].t),fmtDate(hist[i].t)]
-          });
+          // Solo zonas debajo del precio actual (soporte) o muy cerca (±3%)
+          if(dist>=-1&&dist<=20){
+            zones.push({
+              type:'EQL',level,
+              label:'Equal Low',
+              idxA:hist.length-30+j,
+              idxB:hist.length-30+i,
+              dist,
+              near:dist>=0&&dist<=NEAR_PCT*100,
+              strength:i-j<=7?'fuerte':'normal',
+              dates:[fmtDate(recent[j].t),fmtDate(recent[i].t)]
+            });
+          }
         }
       }
     }
   }
-  // 2. FVG ALCISTAS (bullish imbalance)
-  for(let i=0;i<hist.length-2;i++){
-    const fvgLow=hist[i].h;   // top of candle 1
-    const fvgHigh=hist[i+2].l; // bottom of candle 3
+  // Mantener solo los 4 Equal Lows más cercanos al precio
+  const eqls=zones.filter(z=>z.type==='EQL')
+    .sort((a,b)=>a.dist-b.dist)
+    .slice(0,4);
+
+  // ── 2. FVG ALCISTAS ───────────────────────────────────────────
+  // Solo en las últimas 20 velas, y solo los 3 más recientes no llenados
+  const fvgCandidates=[];
+  const recentFvg=hist.slice(-20);
+  for(let i=0;i<recentFvg.length-2;i++){
+    const fvgLow=recentFvg[i].h;
+    const fvgHigh=recentFvg[i+2].l;
     if(fvgHigh>fvgLow){
       const midLevel=(fvgLow+fvgHigh)/2;
-      // Solo FVGs que aún no han sido llenados (precio actual encima del gap)
-      if(price>fvgLow){
+      const gapPct=((fvgHigh-fvgLow)/fvgLow)*100;
+      // Gap mínimo 0.5%, precio encima del gap (aún no llenado)
+      if(gapPct>=0.5&&price>fvgHigh){
         const dist=((price-midLevel)/midLevel)*100;
-        const gapPct=((fvgHigh-fvgLow)/fvgLow)*100;
-        if(gapPct>=0.3){ // gap mínimo 0.3% para filtrar ruido
-          zones.push({
-            type:'FVG',
-            level:midLevel,
-            levelLow:fvgLow,
-            levelHigh:fvgHigh,
-            label:`FVG alcista`,
-            idx:i,
+        if(dist>=0&&dist<=25){
+          fvgCandidates.push({
+            type:'FVG',level:midLevel,
+            levelLow:fvgLow,levelHigh:fvgHigh,
+            label:'FVG alcista',
+            idx:hist.length-20+i,
             dist,
-            near:Math.abs(dist)<=NEAR_PCT*100,
+            near:dist<=NEAR_PCT*100,
             gapPct:gapPct.toFixed(2),
-            dates:[fmtDate(hist[i].t),fmtDate(hist[i+2].t)]
+            dates:[fmtDate(recentFvg[i].t),fmtDate(recentFvg[i+2].t)]
           });
         }
       }
     }
   }
-  // Ordenar por distancia ascendente (los más cercanos primero)
-  zones.sort((a,b)=>Math.abs(a.dist)-Math.abs(b.dist));
-  return zones;
+  // Solo los 3 FVGs más cercanos
+  const fvgs=fvgCandidates.sort((a,b)=>a.dist-b.dist).slice(0,3);
+
+  const all=[...eqls,...fvgs].sort((a,b)=>a.dist-b.dist);
+  return all;
 }
 
 function fmtDate(ts){

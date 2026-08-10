@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- TradeDeskPro v5 | build:20260805_breakout_quality_gate | B1:_wsSessionCandle_per15min B2:BB-REGRESO_strategy B3:intentoBull_loose B4:bbCallTrigger_connected B5:dedup_distVars B6:setup_gate_bbw B7:stochPutOk_noFloor A1:bbSessionOk_isMarketHours A2:schwabToken_firstTicker M1:momentumToLower_gate M2:bbwExpandActive M3:aviso_stricter M4:intento_volOk M5:unified_setup_card M6:bbwSqueezeBreakout M7:multiTF_regreso M8:BB-MTF_panel_replaces_noticias M9:setup_levels_removed M10:atr_velocity_gate M11:piercing_only_trigger -->
+<!-- TradeDeskPro v5 | build:20260806_relative_minmove_diag | B1:_wsSessionCandle_per15min B2:BB-REGRESO_strategy B3:intentoBull_loose B4:bbCallTrigger_connected B5:dedup_distVars B6:setup_gate_bbw B7:stochPutOk_noFloor A1:bbSessionOk_isMarketHours A2:schwabToken_firstTicker M1:momentumToLower_gate M2:bbwExpandActive M3:aviso_stricter M4:intento_volOk M5:unified_setup_card M6:bbwSqueezeBreakout M7:multiTF_regreso M8:BB-MTF_panel_replaces_noticias M9:setup_levels_removed M10:atr_velocity_gate M11:piercing_only_trigger M12:score_base60_no_double_filter M13:minmove_pct_of_price M14:casi_senal_diag -->
 <html lang="es">
 <head>
 <meta charset="UTF-8">
@@ -180,7 +180,8 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
 
   <!-- Log button — solo visible en Debug ON -->
   <button id="logBtn" onclick="openLogPanel()"
-    style="display:none;background:rgba(59,169,255,.15);border:1px solid rgba(59,169,255,.4);border-radius:20px;color:var(--blue);padding:4px 14px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--sans);white-space:nowrap;">
+    title="Logs y casi-señales (rupturas bloqueadas por el filtro)"
+    style="background:rgba(59,169,255,.15);border:1px solid rgba(59,169,255,.4);border-radius:20px;color:var(--blue);padding:4px 14px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--sans);white-space:nowrap;">
     📋 Logs
   </button>
 
@@ -1683,19 +1684,65 @@ function pctRank(arr,val){
   return below/clean.length*100;
 }
 
-// ── Movimiento mínimo esperado en dólares (configurable) ─────────────────────
-// El trader calibra este número con la columna "Diferencia $" del Strike Log:
-// cuántos dólares necesita que recorra el subyacente para que la opción rinda.
-// Bajo este umbral, la ruptura de banda no se notifica aunque sea técnicamente
-// válida — el activo está demasiado "dormido" para que valga la pena entrar.
-const _MIN_MOVE_DEFAULT=2.0;
-function getMinMoveDollars(){
-  const v=parseFloat(localStorage.getItem('tdp_min_move_dollars'));
-  return Number.isFinite(v)&&v>0?v:_MIN_MOVE_DEFAULT;
+// ── Movimiento mínimo esperado del subyacente ────────────────────────────────
+// FIX (2026-08-06): la primera versión usaba un valor FIJO de $2 para todos los
+// tickers, y eso resultó estar sesgado de forma severa contra los activos de
+// precio bajo. $2 de potencial equivale a exigir ATR(15min) ≥ $1.00, que en %
+// del precio significa cosas radicalmente distintas:
+//
+//   SPY  $650 → 0.15% de ATR  (trivial, pasa casi siempre)
+//   GOOG $356 → 0.28% de ATR  (moderado)
+//   NVDA $180 → 0.56% de ATR  (casi imposible — bloqueado de facto)
+//
+// Un ATR de 15min típico ronda 0.15%–0.30%, así que PLTR/NVDA/AAPL quedaban
+// silenciados permanentemente mientras SPY/QQQ pasaban sin filtro real. Por eso
+// el 2026-08-05 solo llegó GOOG: cayó justo en la franja intermedia.
+//
+// Ahora el mínimo se deriva del PRECIO (default 0.50% del precio), así se ajusta
+// solo a cada activo y a los cambios de precio, y se puede sobrescribir con un
+// valor fijo en dólares por ticker cuando el trader quiera controlar alguno.
+//
+//   0.50% de $650 (SPY)  = $3.25
+//   0.50% de $356 (GOOG) = $1.78
+//   0.50% de $180 (PLTR) = $0.90
+//
+// Por qué 0.50% y no 0.25%: el gate exige potencial (ATR×2) ≥ mínimo, así que el
+// % configurado se traduce en un requisito de ATR de la MITAD de ese valor
+// (ATR/precio ≥ pct/2). Con 0.25% se exigía apenas 0.125% de ATR — más permisivo
+// que cualquier mercado real, incluido el GOOG lateral que originó todo esto.
+// Con 0.50% se exige 0.25% de ATR, que es el extremo activo del rango típico
+// (0.15%–0.30%) y filtra igual de parejo en SPY que en PLTR.
+//
+// Referencia para calibrar: la columna "Diferencia $" del Strike Log.
+const _MIN_MOVE_PCT_DEFAULT=0.50; // % del precio del subyacente
+function getMinMovePct(){
+  const v=parseFloat(localStorage.getItem('tdp_min_move_pct'));
+  return Number.isFinite(v)&&v>0?v:_MIN_MOVE_PCT_DEFAULT;
 }
-function setMinMoveDollars(v){
+function setMinMovePct(v){
   const n=parseFloat(v);
-  if(Number.isFinite(n)&&n>0){try{localStorage.setItem('tdp_min_move_dollars',String(n));}catch(e){}}
+  if(Number.isFinite(n)&&n>0){try{localStorage.setItem('tdp_min_move_pct',String(n));}catch(e){}}
+}
+// Overrides por ticker, en dólares absolutos: { GOOG: 1.25, PLTR: 0.60, ... }
+function getMinMoveOverrides(){
+  try{
+    const o=JSON.parse(localStorage.getItem('tdp_min_move_ovr')||'{}');
+    return (o&&typeof o==='object')?o:{};
+  }catch(e){return {};}
+}
+function setMinMoveOverride(sym,v){
+  try{
+    const o=getMinMoveOverrides();
+    const n=parseFloat(v);
+    if(Number.isFinite(n)&&n>0)o[sym]=n; else delete o[sym]; // vacío = volver a automático
+    localStorage.setItem('tdp_min_move_ovr',JSON.stringify(o));
+  }catch(e){}
+}
+// Mínimo efectivo para un ticker: override manual si existe, si no % del precio.
+function getMinMove(sym,price){
+  const ov=getMinMoveOverrides()[sym];
+  if(Number.isFinite(ov)&&ov>0)return ov;
+  return (Number.isFinite(price)&&price>0)?price*getMinMovePct()/100:0;
 }
 // M-2: genCandles — función de test para generar velas aleatorias.
 // Verificación (auditoría): grep confirma que esta función NUNCA se llama
@@ -2475,9 +2522,11 @@ async function _buildSignalsCore(){
     // $3.08 de "potencial" y superaría el mínimo de $2 sin merecerlo.
     // Se usa ATR×2 (escalamiento √4 del recorrido neto), que es el recorrido neto
     // típico de una continuación direccional de 1h y sí distingue activo vivo de
-    // activo dormido: exige ATR ≥ $1.00 para un mínimo de $2.
+    // activo dormido.
     const _potencial1h=_atr15*2;
-    const _minMove=getMinMoveDollars();
+    // Mínimo relativo al precio del ticker (ver getMinMove) — NO un valor fijo:
+    // un umbral plano en dólares silenciaba por completo los activos de precio bajo.
+    const _minMove=getMinMove(sym,lP15);
     const _potencialOk=_potencial1h>=_minMove;
 
     // ── 2. Velocidad del precio normalizada por ATR ──────────────────────────
@@ -2706,6 +2755,10 @@ async function _buildSignalsCore(){
     // approachingUpper/Lower ya usa distHighToUpper/distLowToLower — sin cambios de lógica.
     // approachingUpper: el HIGH de la vela está dentro del 0.3% de la banda superior
     // pero NO la ha cruzado todavía (el close sigue adentro)
+    // ⚠ approachingUpper/approachingLower quedaron SIN USO desde el 2026-08-05.
+    // Se conservan solo como referencia de la definición de "acercamiento" (HIGH a
+    // <0.3% de la banda con el close todavía adentro). NO deben volver a conectarse
+    // a ningún gate de señal: ese OR era la causa de los avisos por acercamiento.
     const approachingUpper=_candleHigh<=lUp15&&distHighToUpper>=0&&distHighToUpper<0.3&&_candleClose<lUp15;
     const approachingLower=_candleLow>=lLow15&&distLowToLower>=0&&distLowToLower<0.3&&_candleClose>lLow15;
     // A-2 FIX: piercing ahora exige el close FUERA de la banda (sin tolerancia).
@@ -2731,12 +2784,15 @@ async function _buildSignalsCore(){
     // A-1 FIX: umbrales reales de calidad para BB-A/BB-B.
     // SCORE_THRESHOLD=70 era código muerto — declarado pero nunca usado.
     // Ahora los umbrales se usan en el render de tarjetas para comunicar calidad real:
-    //   score ≥ 70 → señal fuerte (color pleno, badge "BREAKOUT")
-    //   score 50–69 → señal moderada (color atenuado, badge "VIGILAR")
-    //   score < 50 → breakout detectado pero contexto débil (badge "DÉBIL")
+    //   score ≥ 80 → señal fuerte (color pleno, badge "BREAKOUT")
+    //   score 68–79 → señal moderada (color atenuado, badge "VIGILAR")
+    //   score < 68 → ruptura válida pero contexto flojo (badge "DÉBIL")
     // El gate ya garantiza que el evento ocurrió — el score dice cuánto respaldo tiene.
-    const BB_SCORE_STRONG=70;   // señal fuerte — contexto confirma la ruptura
-    const BB_SCORE_MODERATE=50; // señal moderada — ruptura real, contexto mixto
+    // Recalibrado el 2026-08-06 a la escala nueva: el gate aporta 60 de base y los
+    // bonos suman hasta 40, así que 70/50 quedaban por debajo del piso y TODA señal
+    // se marcaba como "fuerte". Ahora 60 = ruptura mínima, 100 = todo alineado.
+    const BB_SCORE_STRONG=80;   // señal fuerte — contexto confirma la ruptura
+    const BB_SCORE_MODERATE=68; // señal moderada — ruptura real, contexto mixto
 
     // ── M-04: HLINES GUARD — niveles técnicos del día anterior como filtro activo ──
     // getLevels() lee los valores manuales ingresados en el panel de strikes.
@@ -2812,16 +2868,18 @@ async function _buildSignalsCore(){
     // ════════════════════════════════════════════════════════════════════════
     // BB-A / BB-B — Pure Bollinger Breakout (simplificado)
     // ════════════════════════════════════════════════════════════════════════
-    // Gate puro: SOLO condiciones de Bollinger.
-    // - BBW >= 1.0% (bajado de 1.5% — PLTR/QQQ tienen bandas más estrechas)
-    // - FIX B4: bbCallTrigger (approachingUpper OR piercingUpper) — ahora conectado.
-    //   approachingUpper = HIGH a <0.3% de la banda, close aún adentro (entrada temprana)
-    //   piercingUpper    = close ya fuera de la banda (ruptura confirmada)
+    // Gate (actualizado 2026-08-05/06 — el comentario anterior describía el gate
+    // viejo y quedó obsoleto):
+    // - bbCallTrigger = piercingUpper SOLAMENTE → el CLOSE tiene que estar
+    //   estrictamente FUERA de la banda. Un acercamiento NUNCA dispara.
+    //   (Antes era `approachingUpper || piercingUpper`, y ese OR es exactamente
+    //   lo que generaba mensajes "BB Breakout" con el precio dentro de la banda.)
+    // - _calidadCall/_calidadPut → vela grande + velocidad en ATR + volatilidad
+    //   real + potencial mínimo relativo al precio (ver bloque CALIDAD DE RUPTURA).
     // - Sesión regular abierta (_bbSessionOk)
     //
-    // TODO lo demás (cuerpo, volumen, MAs, estocástico) son BONUS que suben el
-    // score pero NO bloquean la señal. Si el precio sale de la banda con BBW
-    // expandiendo, eso ES el evento — el resto da contexto de confianza.
+    // El resto (volumen, MAs, estocástico, squeeze) son BONUS que suben el score
+    // de 60 a 100 como etiqueta de confianza, pero NO bloquean ni habilitan nada.
     // ════════════════════════════════════════════════════════════════════════
     // ── BBW histórico — percentiles para gate y scoring ─────────────────────
     // Calculado ANTES del gate porque bbwAboveMedian es condición obligatoria
@@ -2912,27 +2970,65 @@ async function _buildSignalsCore(){
     //   • _volatilidadReal → BBW en percentil ≥60 de las últimas 40 velas Y
     //     bandas abriéndose (superior sube + inferior baja, o BBW +0.10 en 30min)
     //   • _velocidadOk    → el precio recorrió ≥0.7 ATR en las últimas 2 velas
-    //   • _potencialOk    → recorrido esperado 1h (ATR×4) ≥ mínimo en $ configurado
+    //   • _potencialOk    → recorrido esperado 1h (ATR×2) ≥ mínimo relativo al precio
     //   • _velaGrande     → cuerpo ≥1.2× el promedio de las últimas 10 velas
     //   • _cuerpoDominante→ el cuerpo es ≥50% del rango (no es una mecha)
     //   • cierre fuerte en la dirección de la ruptura (no rechazo)
     //
-    // bbwAboveMedian se conserva solo como BONUS de score (+15), ya no como gate.
+    // bbwAboveMedian se conserva solo como BONUS de score, ya no como gate.
     const bbPureGateCall = bbCallTrigger && _bbSessionOk && _calidadCall;
     const bbPureGatePut  = bbPutTrigger  && _bbSessionOk && _calidadPut;
 
-    // Pesos — Bollinger ocupa 50 puntos base (siempre se suman si el gate pasó)
+    // ── Pesos del score ──────────────────────────────────────────────────────
+    // FIX (2026-08-06) — DOBLE FILTRADO: antes el gate aportaba solo 35 puntos de
+    // base (bb_expansion 15 + bb_pierce 20) contra un umbral de 65, así que una
+    // ruptura tenía que sumar 30 puntos MÁS en bonos de contexto (volumen >130%,
+    // MA20>MA40 en 1H *y* Diario, niveles manuales configurados) para llegar a
+    // notificarse. Ese umbral de 65 estaba calibrado para el gate VIEJO, que era
+    // flojo; con el gate de calidad nuevo se volvió un segundo filtro redundante
+    // que descartaba en silencio rupturas legítimas y limpias.
+    //
+    // Ahora el gate de calidad ES la señal y vale 60 puntos — si pasó, se notifica.
+    // Los bonos suben el score de 60 a 100 como ETIQUETA de confianza, no como
+    // requisito: 60 = ruptura válida mínima, 100 = todo el contexto alineado.
     const _WBB={
-      bb_expansion: 15,
-      bb_pierce:    20,
-      bb_bbwAboveMedian: 15,
-      bb_body:      10,
-      bb_volume:    10,
-      ctx_media:     8,
-      ctx_ma_cross:  8,
-      ctx_stoch:     7,
-      ctx_hlines:    7,
+      bb_gate:      60, // el gate completo: ruptura + vela grande + velocidad + volatilidad + potencial
+      bb_bbwAboveMedian: 8,
+      bb_squeeze:    8,
+      bb_body:       6,
+      bb_volume:     6,
+      ctx_media:     4,
+      ctx_ma_cross:  4,
+      ctx_stoch:     2,
+      ctx_hlines:    2,
     };  // total: 100
+
+    // ════════════════════════════════════════════════════════════════════════
+    // DIAGNÓSTICO DE CASI-SEÑALES
+    // ════════════════════════════════════════════════════════════════════════
+    // Registra toda ruptura de banda que el gate bloqueó, con el número EXACTO
+    // que falló. Así la calibración se hace con datos reales del mercado del
+    // trader en vez de estimaciones. Visible en el panel de Logs (📋 Logs) con
+    // el filtro "🎯 Casi-señal".
+    (function _diagCasiSenal(){
+      if(!piercingUpper&&!piercingLower)return; // no hubo ruptura, nada que explicar
+      if(bbPureGateCall||bbPureGatePut)return;  // la señal SÍ pasó, no es casi-señal
+      const _dir=piercingUpper?'CALL':'PUT';
+      const _f=[];
+      if(!_bbSessionOk)_f.push('sesión no válida (fuera de horario o sin vela real de hoy)');
+      if(!_volatilidadReal){
+        _f.push(`volatilidad insuficiente — BBW ${lBBW15.toFixed(2)}% en percentil ${_bbwPctRank.toFixed(0)} (requiere ≥60)`+
+          (_bandasAbriendo?'':` y las bandas no se están abriendo (Δ${(lBBW15-lBBW15_2).toFixed(2)}%/30min, requiere ≥0.10)`));
+      }
+      if(!_velocidadOk)_f.push(`velocidad baja — ${_velATR.toFixed(2)} ATR en 30min (requiere ≥0.70) · movió $${_mov2velas.toFixed(2)}`);
+      if(!_potencialOk)_f.push(`potencial corto — $${_potencial1h.toFixed(2)} esperado en 1h (requiere ≥$${_minMove.toFixed(2)}) · ATR $${_atr15.toFixed(2)}`);
+      if(!_velaGrande)_f.push(`cuerpo chico — $${_bodyNow.toFixed(2)} (requiere ≥$${(_avgBody10*1.2).toFixed(2)} = 1.2× el promedio de $${_avgBody10.toFixed(2)})`);
+      if(!_cuerpoDominante)_f.push(`mecha dominante — el cuerpo es ${(_bodyNow/_rangeNow*100).toFixed(0)}% del rango (requiere ≥50%)`);
+      if(piercingUpper&&!_cierreFuerteCall)_f.push(`cierre débil — cerró en el ${((_candleClose-_candleLow)/_rangeNow*100).toFixed(0)}% superior de la vela (requiere ≥65%)`);
+      if(piercingLower&&!_cierreFuertePut)_f.push(`cierre débil — cerró en el ${((_candleHigh-_candleClose)/_rangeNow*100).toFixed(0)}% inferior de la vela (requiere ≥65%)`);
+      if(!_f.length)return;
+      addLog('warn','Casi-señal',`${sym} ${_dir} rompió la banda pero se bloqueó (${_f.length} razón${_f.length>1?'es':''})`,_f.join(' · '));
+    })();
 
     // M-05 — bloque original eliminado (movido arriba)
 
@@ -2952,19 +3048,20 @@ async function _buildSignalsCore(){
     const _bbwSqueezeBreakout=_bbwWasSqueezed&&_bbwExpandActive; // squeeze → expansión
 
     if(_stratEnabled('BB-A')&&bbPureGateCall){
-      // Score base: las 3 condiciones BB siempre pasan cuando llegamos aquí
-      let score=_WBB.bb_expansion+_WBB.bb_pierce; // 35 base
-      if(bbwAboveMedian)       score+=_WBB.bb_bbwAboveMedian; // +15 expansión real vs lateral
-      if(_bbwSqueezeBreakout)  score+=12; // +12 🔥 volatilidad cíclica — rompe squeeze
-      if(bigBodyCall)          score+=_WBB.bb_body;     // +10 cuerpo confirmando
-      if(volOverLine)          score+=_WBB.bb_volume;   // +10 volumen
-      if(mediaUp)              score+=_WBB.ctx_media;   // +8
-      if(maCallCross)          score+=_WBB.ctx_ma_cross;// +8
-      if(stochCallDir)         score+=_WBB.ctx_stoch;   // +7
-      if(_hlCallOk)            score+=_WBB.ctx_hlines;  // +7
+      // Gate de calidad aprobado = 60 puntos. Los bonos suben de 60 a 100 como
+      // etiqueta de confianza, NO como requisito (ver comentario de _WBB).
+      let score=_WBB.bb_gate; // 60 base
+      if(bbwAboveMedian)       score+=_WBB.bb_bbwAboveMedian;
+      if(_bbwSqueezeBreakout)  score+=_WBB.bb_squeeze; // 🔥 volatilidad cíclica — rompe squeeze
+      if(bigBodyCall)          score+=_WBB.bb_body;
+      if(volOverLine)          score+=_WBB.bb_volume;
+      if(mediaUp)              score+=_WBB.ctx_media;
+      if(maCallCross)          score+=_WBB.ctx_ma_cross;
+      if(stochCallDir)         score+=_WBB.ctx_stoch;
+      if(_hlCallOk)            score+=_WBB.ctx_hlines;
 
       all.push({...meta,code:'BB-A',name:'BB Breakout — CALL',type:'call',
-        weighted:true,score,threshold:65,
+        weighted:true,score,threshold:60,
         _scoreQuality:score>=BB_SCORE_STRONG?'strong':score>=BB_SCORE_MODERATE?'moderate':'weak',
         reqs:[
         // ── GATE DE RUPTURA + CALIDAD (siempre ✅ cuando llegamos aquí) ──
@@ -2987,9 +3084,9 @@ async function _buildSignalsCore(){
     }
 
     if(_stratEnabled('BB-B')&&bbPureGatePut){
-      let score=_WBB.bb_expansion+_WBB.bb_pierce;
+      let score=_WBB.bb_gate; // 60 base — el gate de calidad ES la señal
       if(bbwAboveMedian)      score+=_WBB.bb_bbwAboveMedian;
-      if(_bbwSqueezeBreakout) score+=12; // +12 🔥 volatilidad cíclica — rompe squeeze
+      if(_bbwSqueezeBreakout) score+=_WBB.bb_squeeze; // 🔥 volatilidad cíclica — rompe squeeze
       if(bigBodyPut)          score+=_WBB.bb_body;
       if(volOverLine)         score+=_WBB.bb_volume;
       if(mediaDn)             score+=_WBB.ctx_media;
@@ -2998,7 +3095,7 @@ async function _buildSignalsCore(){
       if(_hlPutOk)            score+=_WBB.ctx_hlines;
 
       all.push({...meta,code:'BB-B',name:'BB Breakout — PUT',type:'put',
-        weighted:true,score,threshold:65,
+        weighted:true,score,threshold:60,
         _scoreQuality:score>=BB_SCORE_STRONG?'strong':score>=BB_SCORE_MODERATE?'moderate':'weak',
         reqs:[
         {ok:piercingLower,  tf:'15m',weight:'BB',text:(()=>{const _d=(lLow15-_candleClose)/lP15*100;return `✅ Vela FUERA de banda inferior: $${_candleClose.toFixed(2)} < $${lLow15.toFixed(2)} (-${_d.toFixed(2)}%)`;})()},
@@ -4082,24 +4179,46 @@ const STRAT_META=[
 function _renderStratTab(){
   const list=document.getElementById('stratList');
   if(!list)return;
-  // ── Filtro global de movimiento mínimo en dólares ──────────────────────────
-  // Bloquea la señal cuando el activo está demasiado "dormido" para que la
-  // opción rinda, aunque técnicamente rompa la banda de Bollinger.
-  // El potencial se estima como ATR(15min) × 4 velas ≈ recorrido de 1 hora.
-  const _mm=getMinMoveDollars();
+  // ── Movimiento mínimo esperado: % automático + overrides por ticker ────────
+  // Bloquea la señal cuando el activo está demasiado "dormido" para que la opción
+  // rinda, aunque técnicamente rompa la banda. El % automático evita el sesgo del
+  // valor plano en dólares, que silenciaba los tickers de precio bajo.
+  const _mmPct=getMinMovePct();
+  const _mmOvr=getMinMoveOverrides();
+  const _mmRows=_signalTickers.filter((v,i,a)=>a.indexOf(v)===i).map(sym=>{
+    const px=(_livePrices[sym]&&_livePrices[sym].price)||0;
+    const auto=px>0?px*_mmPct/100:0;
+    const ov=_mmOvr[sym];
+    const eff=Number.isFinite(ov)&&ov>0?ov:auto;
+    return `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--border);">
+      <span style="font-family:var(--mono);font-size:11px;font-weight:700;color:${getTickerColor(sym)};min-width:48px;">${sym}</span>
+      <span style="font-size:10px;color:var(--text3);min-width:120px;">${px>0?`$${px.toFixed(2)} → auto $${auto.toFixed(2)}`:'sin precio aún'}</span>
+      <input type="number" placeholder="auto" value="${Number.isFinite(ov)&&ov>0?ov:''}" min="0.05" max="50" step="0.05"
+        style="background:var(--bg4);border:1px solid var(--border2);border-radius:6px;color:#fff;padding:3px 6px;font-size:11px;font-family:var(--mono);width:70px;outline:none;text-align:center;"
+        onchange="setMinMoveOverride('${sym}',this.value);_renderStratTab();buildSignals();">
+      <span style="font-size:10px;color:var(--purple);font-weight:700;">usa $${eff.toFixed(2)}</span>
+    </div>`;
+  }).join('');
   const _mmHtml=`<div style="background:var(--bg3);border:1px solid var(--purple);border-radius:var(--r);padding:12px 14px;margin-bottom:10px;">
     <div style="font-size:13px;font-weight:700;color:#fff;margin-bottom:4px;">💵 Movimiento mínimo esperado</div>
     <div style="font-size:11px;color:#fff;opacity:.75;margin-bottom:8px;line-height:1.5;">
-      Solo avisa si el activo puede recorrer al menos estos dólares en la próxima hora
-      (estimado como ATR de 15min × 2). Calíbralo con la columna <b>Diferencia $</b> de tu Strike Log.
+      Solo avisa si el activo puede recorrer ese monto en la próxima hora (estimado como ATR de 15min × 2).
+      El mínimo se calcula como un <b>% del precio</b> para que pese igual en SPY que en PLTR —
+      un valor fijo en dólares silenciaba los tickers de precio bajo.
+      Calíbralo con la columna <b>Diferencia $</b> de tu Strike Log.
     </div>
-    <div style="display:flex;align-items:center;gap:8px;">
-      <span style="font-family:var(--mono);font-weight:700;color:var(--purple);font-size:16px;">$</span>
-      <input type="number" id="cfgMinMove" value="${_mm}" min="0.25" max="50" step="0.25"
-        style="background:var(--bg4);border:1px solid var(--purple);border-radius:var(--r);color:#fff;padding:6px 10px;font-size:14px;font-family:var(--mono);width:90px;outline:none;text-align:center;font-weight:700;"
-        onchange="setMinMoveDollars(this.value);_showMinMoveMsg();buildSignals();">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+      <span style="font-size:11px;color:var(--text3);">% del precio:</span>
+      <input type="number" id="cfgMinMovePct" value="${_mmPct}" min="0.05" max="3" step="0.05"
+        style="background:var(--bg4);border:1px solid var(--purple);border-radius:var(--r);color:#fff;padding:6px 10px;font-size:14px;font-family:var(--mono);width:80px;outline:none;text-align:center;font-weight:700;"
+        onchange="setMinMovePct(this.value);_renderStratTab();buildSignals();">
+      <span style="font-family:var(--mono);font-weight:700;color:var(--purple);font-size:13px;">%</span>
       <span id="cfgMinMoveMsg" style="font-size:11px;color:var(--text3);"></span>
     </div>
+    <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;">
+      Override por ticker (deja vacío para automático)
+    </div>
+    ${_mmRows||'<div style="font-size:11px;color:var(--text3);">Sin tickers configurados</div>'}
   </div>`;
   list.innerHTML=_mmHtml+STRAT_META.map(s=>{
     const on=_stratEnabled(s.code);
@@ -4126,7 +4245,7 @@ function _renderStratTab(){
 function _showMinMoveMsg(){
   const el=document.getElementById('cfgMinMoveMsg');
   if(!el)return;
-  el.textContent=`✅ Guardado — mínimo $${getMinMoveDollars().toFixed(2)}`;
+  el.textContent=`✅ Guardado — ${getMinMovePct()}% del precio`;
   el.style.color='var(--green)';
   setTimeout(()=>{if(el)el.textContent='';},2500);
 }
@@ -4337,7 +4456,7 @@ function openLogPanel(){
 }
 function filterLogsPanel(f){
   _logPanelFilter=f;
-  ['all','error','warn','debug','schwab'].forEach(k=>{
+  ['all','error','warn','debug','schwab','casi'].forEach(k=>{
     const el=document.getElementById('lf-'+k);
     if(el)el.classList.toggle('active',k===f);
   });
@@ -4350,6 +4469,7 @@ function renderLogPanel(){
   const logs=(_logs||[]).slice().reverse(); // newest first
   const filtered=logs.filter(l=>{
     if(_logPanelFilter==='all')return true;
+    if(_logPanelFilter==='casi')return(l.category||'')==='Casi-señal';
     if(_logPanelFilter==='schwab')return(l.category||'').toLowerCase().includes('schwab');
     if(_logPanelFilter==='debug')return l.level==='debug';
     return l.level===_logPanelFilter;
@@ -5548,7 +5668,7 @@ async function runDebugMode(){
     btn.style.background='rgba(167,139,250,.15)';
     btn.style.borderColor='rgba(167,139,250,.5)';
     btn.style.color='var(--purple)';
-    if(logBtn)logBtn.style.display='none';
+    // logBtn se mantiene visible siempre — es el acceso a las casi-señales
     await buildSignals();
   }
 }
@@ -10308,6 +10428,7 @@ async function updateFuturesSemaphore(){
       <button class="cfg-tab active" id="lf-all"   onclick="filterLogsPanel('all')"  >Todos</button>
       <button class="cfg-tab"        id="lf-error" onclick="filterLogsPanel('error')" style="color:var(--red);">❌ Errores</button>
       <button class="cfg-tab"        id="lf-warn"  onclick="filterLogsPanel('warn')"  style="color:var(--yellow);">⚠ Avisos</button>
+      <button class="cfg-tab"        id="lf-casi"  onclick="filterLogsPanel('casi')"  style="color:var(--purple);">🎯 Casi-señal</button>
       <button class="cfg-tab"        id="lf-debug" onclick="filterLogsPanel('debug')" style="color:var(--blue);">🔍 Debug</button>
       <button class="cfg-tab"        id="lf-schwab" onclick="filterLogsPanel('schwab')">📡 Schwab</button>
     </div>

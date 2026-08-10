@@ -280,6 +280,7 @@ body.window-active .window-banner{animation:pulse-banner 2s infinite;}
   <button class="nt" onclick="goPanel('riesgo',this)">Riesgo & Sizing</button>
   <button class="nt" onclick="goPanel('journal',this)">Trade Journal</button>
   <button class="nt" onclick="goPanel('indicadores',this)">Indicadores</button>
+  <button class="nt" onclick="goPanel('liquidez',this);initLiquidez()">Liquidez 💧</button>
 </div>
 
 <div class="main">
@@ -610,6 +611,83 @@ body.window-active .window-banner{animation:pulse-banner 2s infinite;}
   <div class="card" style="margin-top:12px;">
     <div class="ctitle">Gráfico — <span id="ind-chart-sym" style="color:var(--green);">—</span></div>
     <div class="cw" style="height:200px;"><canvas id="indChart" role="img" aria-label="Precio histórico ETF"></canvas></div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════
+     PANEL LIQUIDEZ
+════════════════════════════════════ -->
+<div id="p-liquidez" class="panel">
+  <div class="sh">
+    <div class="sh-eye">Swing Trading · 50 días diarios</div>
+    <div class="sh-title">Zonas de Liquidez</div>
+    <div class="sh-sub">Equal Lows y Fair Value Gaps alcistas · Oportunidades de entrada para 2–5 días</div>
+  </div>
+
+  <!-- ESTADO GENERAL: resumen de todas las acciones -->
+  <div id="liq-summary" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px;">
+    <div style="color:var(--muted);font-size:12px;grid-column:1/-1;text-align:center;padding:20px;">Abre el panel para cargar zonas de liquidez</div>
+  </div>
+
+  <!-- ALERTA ZONA CERCANA -->
+  <div id="liq-alert-bar" style="display:none;background:linear-gradient(90deg,#064e35,#0a7a52);color:#fff;border-radius:10px;padding:11px 16px;margin-bottom:14px;font-size:12px;font-family:var(--mono);font-weight:600;"></div>
+
+  <!-- SELECTOR + BOTON -->
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;align-items:center;">
+    <div style="font-size:11px;font-weight:600;color:var(--muted);font-family:var(--mono);text-transform:uppercase;letter-spacing:.06em;">Ticker:</div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;" id="liq-ticker-btns"></div>
+    <button class="btn-ghost" style="margin-left:auto;font-size:11px;padding:5px 12px;" onclick="refreshAllLiq()">↻ Actualizar todo</button>
+  </div>
+
+  <!-- CONTENIDO PRINCIPAL: gráfico + tabla -->
+  <div style="display:grid;grid-template-columns:1fr 340px;gap:14px;align-items:start;">
+
+    <!-- GRÁFICO DE VELAS CON ZONAS -->
+    <div class="card" style="padding:1rem;">
+      <div class="ctitle">
+        Velas diarias — <span id="liq-chart-sym" style="color:var(--green);font-weight:700;">—</span>
+        <span id="liq-price-lbl" style="margin-left:8px;font-size:12px;font-family:var(--mono);color:var(--text);"></span>
+        <span id="liq-signal-badge" style="margin-left:auto;"></span>
+      </div>
+      <div class="cw" style="height:320px;">
+        <canvas id="liqChart" role="img" aria-label="Velas diarias con zonas de liquidez"></canvas>
+      </div>
+      <div style="display:flex;gap:16px;margin-top:8px;font-size:10px;font-family:var(--mono);color:var(--muted);">
+        <span style="display:flex;align-items:center;gap:4px;"><span style="width:20px;height:2px;background:#1a6fc4;display:inline-block;border-radius:1px;"></span>Equal Low</span>
+        <span style="display:flex;align-items:center;gap:4px;"><span style="width:20px;height:2px;background:rgba(103,65,217,0.8);display:inline-block;border-radius:1px;"></span>FVG alcista</span>
+        <span style="display:flex;align-items:center;gap:4px;"><span style="width:20px;height:2px;background:#0a8c5e;border-top:1.5px dashed #0a8c5e;display:inline-block;"></span>Precio actual</span>
+      </div>
+    </div>
+
+    <!-- TABLA DE ZONAS -->
+    <div class="card" style="padding:1rem;">
+      <div class="ctitle">Zonas detectadas <span id="liq-zone-count" style="margin-left:auto;font-size:10px;color:var(--muted);font-weight:400;"></span></div>
+      <div id="liq-zones-table">
+        <div style="color:var(--muted);font-size:12px;padding:8px 0;">Selecciona un ticker</div>
+      </div>
+
+      <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px;">
+        <div class="ctitle" style="margin-bottom:8px;">¿Cómo leerlo?</div>
+        <div style="font-size:11px;color:var(--muted);line-height:1.8;">
+          🔵 <strong>Equal Low</strong> — precio tocó el mismo mínimo 2+ veces. Stops acumulados debajo. Si el precio barre el nivel y <em>rebota</em>, es entrada.<br><br>
+          🟣 <strong>FVG alcista</strong> — gap entre velas que el mercado no llenó. Actúa como imán — el precio tiende a volver antes de subir.<br><br>
+          🟢 <strong>CERCA</strong> — precio actual está dentro del 1.5% de la zona.
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- TABLA RESUMEN TODAS LAS ACCIONES -->
+  <div class="card" style="margin-top:14px;overflow-x:auto;">
+    <div class="ctitle">Resumen — todas las acciones <span style="margin-left:auto;font-size:10px;color:var(--muted);font-weight:400;">ordenado por oportunidad más cercana</span></div>
+    <div id="liq-all-table">
+      <div style="color:var(--muted);font-size:12px;padding:12px 0;text-align:center;">Cargando zonas...</div>
+    </div>
+  </div>
+
+  <div class="disc" style="margin-top:14px;">
+    <strong>Metodología:</strong> Equal Lows = dos Lows diarios dentro del 0.5% de tolerancia en los últimos 50 días · FVG alcista = gap entre High(vela N) y Low(vela N+2) no cubierto por vela N+1 · Datos: Yahoo Finance vía proxy CORS · No es asesoría financiera.
   </div>
 </div>
 
@@ -2101,8 +2179,443 @@ function goPanel(id,btn){
 }
 
 /* ══════════════════════════════════════
-   AUTO-INIT
+   PANEL LIQUIDEZ — Equal Lows + FVG alcistas
+   Tickers fijos · 50 días diarios · Yahoo Finance
 ══════════════════════════════════════ */
+const LIQ_TICKERS=['AAPL','COIN','NVDA','GOOG','META','PLTR','AVGO','MSFT','ORCL','AMZN','AMD','TSLA'];
+const EQ_TOL=0.005;   // 0.5% tolerancia para equal lows/highs
+const NEAR_PCT=0.015; // 1.5% = "cerca" del precio actual
+let liqCache={};      // {sym: {hist, zones, price, ts}}
+let liqChart=null;
+let curLiqSym='NVDA';
+let liqInited=false;
+
+function initLiquidez(){
+  if(liqInited) return;
+  liqInited=true;
+  buildLiqTickerBtns();
+  loadAllLiqSummary();
+}
+
+function buildLiqTickerBtns(){
+  document.getElementById('liq-ticker-btns').innerHTML=
+    LIQ_TICKERS.map(t=>
+      `<button class="btn-ghost ${t===curLiqSym?'sel':''}" style="font-size:11px;padding:4px 10px;" onclick="selectLiqTicker('${t}')">${t}</button>`
+    ).join('');
+}
+
+async function selectLiqTicker(sym){
+  curLiqSym=sym;
+  buildLiqTickerBtns();
+  await loadLiqTicker(sym);
+}
+
+/* ── Cargar y analizar un ticker ── */
+async function loadLiqTicker(sym){
+  document.getElementById('liq-chart-sym').textContent=sym;
+  document.getElementById('liq-price-lbl').textContent='';
+  document.getElementById('liq-signal-badge').innerHTML='<span class="spin"></span>';
+  document.getElementById('liq-zones-table').innerHTML='<span class="spin"></span> Analizando zonas...';
+
+  try{
+    const hist=await getLiqHistory(sym);
+    const price=await getLiqCurrentPrice(sym);
+    const zones=detectZones(hist,price);
+    liqCache[sym]={hist,zones,price,ts:Date.now()};
+    renderLiqChart(sym,hist,zones,price);
+    renderLiqZonesTable(sym,zones,price);
+    renderLiqAlertBar(sym,zones,price);
+    document.getElementById('liq-price-lbl').textContent=`$${price.toFixed(2)}`;
+    document.getElementById('liq-zone-count').textContent=`${zones.length} zonas`;
+  }catch(e){
+    document.getElementById('liq-zones-table').innerHTML=
+      `<div class="err">Error: ${esc(e.message)}</div>`;
+    document.getElementById('liq-signal-badge').innerHTML='';
+  }
+}
+
+/* ── Historial Yahoo Finance 50 días ── */
+async function getLiqHistory(sym){
+  const ck='liq_'+sym;
+  if(liqCache[ck]&&(Date.now()-liqCache[ck].ts<600000)) return liqCache[ck].hist;
+  const now=Math.floor(Date.now()/1000),from=now-86400*70;
+  const yahooUrl=`https://query1.finance.yahoo.com/v8/finance/chart/${sym}?interval=1d&period1=${from}&period2=${now}`;
+  const proxies=[
+    `https://corsproxy.io/?${encodeURIComponent(yahooUrl)}`,
+    `https://api.allorigins.win/get?url=${encodeURIComponent(yahooUrl)}`,
+    `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(yahooUrl)}`,
+  ];
+  for(const proxy of proxies){
+    try{
+      const _t=new Promise((_,rej)=>setTimeout(()=>rej(new Error('to')),9000));
+      const r=await Promise.race([fetch(proxy,{mode:'cors',cache:'no-cache'}),_t]);
+      if(!r.ok) continue;
+      const raw=await r.text();
+      let parsed;
+      try{const w=JSON.parse(raw);parsed=w.contents?JSON.parse(w.contents):w;}
+      catch(ex){parsed=JSON.parse(raw);}
+      const result=parsed?.chart?.result?.[0];
+      if(!result) continue;
+      const q0=result.indicators.quote[0];
+      const data=result.timestamp.map((t,i)=>({
+        t,
+        o:q0.open?.[i]??null, h:q0.high?.[i]??null,
+        l:q0.low?.[i]??null,  c:q0.close?.[i]??null,
+        v:q0.volume?.[i]??0
+      })).filter(x=>x.c!=null&&x.h!=null&&x.l!=null).slice(-50);
+      if(data.length<10) continue;
+      return data;
+    }catch(ex){}
+  }
+  throw new Error('Sin datos para '+sym+' — proxies CORS no disponibles');
+}
+
+/* ── Precio actual: usar liveQ si es ETF, si no Finnhub o último cierre ── */
+async function getLiqCurrentPrice(sym){
+  if(liveQ[sym]?.c) return liveQ[sym].c;
+  // intentar Finnhub si hay key
+  if(APIKEY){
+    try{
+      const d=await fh(`/quote?symbol=${encodeURIComponent(sym)}`);
+      if(d&&d.c&&d.c>0) return d.c;
+      if(d&&d.pc&&d.pc>0) return d.pc;
+    }catch(ex){}
+  }
+  // fallback: último cierre del histórico
+  const hist=liqCache['liq_'+sym]?.hist??await getLiqHistory(sym);
+  return hist[hist.length-1].c;
+}
+
+/* ══════════════════════════════════════
+   DETECCIÓN DE ZONAS
+══════════════════════════════════════ */
+function detectZones(hist,price){
+  const zones=[];
+  // 1. EQUAL LOWS
+  for(let i=2;i<hist.length;i++){
+    for(let j=0;j<i;j++){
+      const lo1=hist[j].l, lo2=hist[i].l;
+      if(lo1<=0||lo2<=0) continue;
+      const diff=Math.abs(lo1-lo2)/lo1;
+      if(diff<=EQ_TOL){
+        const level=(lo1+lo2)/2;
+        // evitar duplicados: si ya hay una zona igual lows dentro del 0.3%
+        const dup=zones.find(z=>z.type==='EQL'&&Math.abs(z.level-level)/level<0.003);
+        if(!dup){
+          const dist=((price-level)/level)*100;
+          zones.push({
+            type:'EQL',
+            level,
+            label:`Equal Low`,
+            idxA:j, idxB:i,
+            dist,        // % distancia del precio actual (positivo = precio encima)
+            near:Math.abs(dist)<=NEAR_PCT*100,
+            strength: i-j<=10?'fuerte':'normal', // más reciente = más fuerte
+            dates:[fmtDate(hist[j].t),fmtDate(hist[i].t)]
+          });
+        }
+      }
+    }
+  }
+  // 2. FVG ALCISTAS (bullish imbalance)
+  for(let i=0;i<hist.length-2;i++){
+    const fvgLow=hist[i].h;   // top of candle 1
+    const fvgHigh=hist[i+2].l; // bottom of candle 3
+    if(fvgHigh>fvgLow){
+      const midLevel=(fvgLow+fvgHigh)/2;
+      // Solo FVGs que aún no han sido llenados (precio actual encima del gap)
+      if(price>fvgLow){
+        const dist=((price-midLevel)/midLevel)*100;
+        const gapPct=((fvgHigh-fvgLow)/fvgLow)*100;
+        if(gapPct>=0.3){ // gap mínimo 0.3% para filtrar ruido
+          zones.push({
+            type:'FVG',
+            level:midLevel,
+            levelLow:fvgLow,
+            levelHigh:fvgHigh,
+            label:`FVG alcista`,
+            idx:i,
+            dist,
+            near:Math.abs(dist)<=NEAR_PCT*100,
+            gapPct:gapPct.toFixed(2),
+            dates:[fmtDate(hist[i].t),fmtDate(hist[i+2].t)]
+          });
+        }
+      }
+    }
+  }
+  // Ordenar por distancia ascendente (los más cercanos primero)
+  zones.sort((a,b)=>Math.abs(a.dist)-Math.abs(b.dist));
+  return zones;
+}
+
+function fmtDate(ts){
+  const d=new Date(ts*1000);
+  return d.toLocaleDateString('es',{month:'short',day:'numeric'});
+}
+
+/* ══════════════════════════════════════
+   RENDER GRÁFICO DE VELAS CON ZONAS
+══════════════════════════════════════ */
+function renderLiqChart(sym,hist,zones,price){
+  const ctx=document.getElementById('liqChart').getContext('2d');
+  if(liqChart){liqChart.destroy();liqChart=null;}
+
+  const labels=hist.map(x=>fmtDate(x.t));
+  const bodyData=hist.map(x=>[Math.min(x.o,x.c),Math.max(x.o,x.c)]);
+  const bodyColors=hist.map(x=>x.c>=x.o?'rgba(10,140,94,0.75)':'rgba(214,48,49,0.75)');
+  const borderColors=hist.map(x=>x.c>=x.o?'#0a8c5e':'#d63031');
+
+  // Líneas horizontales de zonas
+  const eqlZones=zones.filter(z=>z.type==='EQL');
+  const fvgZones=zones.filter(z=>z.type==='FVG');
+
+  // Plugins para dibujar líneas de zonas y velas
+  const zonesPlugin={
+    id:'zonesPlugin',
+    afterDraw(chart){
+      const{ctx:c,scales:{x,y}}=chart;
+      c.save();
+
+      // Equal Low lines — azul
+      eqlZones.forEach(z=>{
+        const yP=y.getPixelForValue(z.level);
+        c.strokeStyle=z.near?'#1a6fc4':'rgba(26,111,196,0.5)';
+        c.lineWidth=z.near?2:1;
+        c.setLineDash(z.near?[]:[4,3]);
+        c.beginPath();c.moveTo(x.left,yP);c.lineTo(x.right,yP);c.stroke();
+        c.setLineDash([]);
+        c.fillStyle=z.near?'#1a6fc4':'rgba(26,111,196,0.6)';
+        c.font=`${z.near?'bold ':''} 9px JetBrains Mono,monospace`;
+        c.textAlign='left';
+        c.fillText(`EQL $${z.level.toFixed(2)}`,x.left+4,yP-3);
+      });
+
+      // FVG zones — relleno morado
+      fvgZones.forEach(z=>{
+        const yH=y.getPixelForValue(z.levelHigh);
+        const yL=y.getPixelForValue(z.levelLow);
+        c.fillStyle=z.near?'rgba(103,65,217,0.18)':'rgba(103,65,217,0.08)';
+        c.fillRect(x.left,yH,x.right-x.left,yL-yH);
+        c.strokeStyle=z.near?'rgba(103,65,217,0.8)':'rgba(103,65,217,0.3)';
+        c.lineWidth=1;c.setLineDash([]);
+        c.strokeRect(x.left,yH,x.right-x.left,yL-yH);
+        c.fillStyle='rgba(103,65,217,0.8)';
+        c.font='9px JetBrains Mono,monospace';
+        c.textAlign='left';
+        c.fillText(`FVG $${z.levelLow.toFixed(2)}-$${z.levelHigh.toFixed(2)}`,x.left+4,yH-3);
+      });
+
+      // Precio actual — línea verde punteada
+      const yP=y.getPixelForValue(price);
+      c.strokeStyle='#0a8c5e';c.lineWidth=1.5;c.setLineDash([4,3]);
+      c.beginPath();c.moveTo(x.left,yP);c.lineTo(x.right,yP);c.stroke();
+      c.setLineDash([]);
+      c.fillStyle='#0a8c5e';c.font='bold 10px JetBrains Mono,monospace';
+      c.textAlign='right';
+      c.fillText('$'+price.toFixed(2),x.right-4,yP-4);
+
+      // Mechas
+      hist.forEach((candle,i)=>{
+        if(!candle.h||!candle.l) return;
+        const xP=x.getPixelForIndex(i);
+        const yH=y.getPixelForValue(candle.h),yL=y.getPixelForValue(candle.l);
+        const yO=y.getPixelForValue(candle.o),yC=y.getPixelForValue(candle.c);
+        const bTop=Math.min(yO,yC),bBot=Math.max(yO,yC);
+        c.strokeStyle=candle.c>=candle.o?'#0a8c5e':'#d63031';c.lineWidth=1;
+        c.beginPath();c.moveTo(xP,yH);c.lineTo(xP,bTop);c.stroke();
+        c.beginPath();c.moveTo(xP,bBot);c.lineTo(xP,yL);c.stroke();
+      });
+
+      c.restore();
+    }
+  };
+
+  liqChart=new Chart(ctx,{
+    type:'bar',
+    data:{
+      labels,
+      datasets:[{
+        label:'Vela',data:bodyData,
+        backgroundColor:bodyColors,borderColor:borderColors,
+        borderWidth:1,borderSkipped:false
+      }]
+    },
+    options:{
+      responsive:true,maintainAspectRatio:false,animation:{duration:0},
+      interaction:{intersect:false,mode:'index'},
+      plugins:{
+        legend:{display:false},
+        tooltip:{
+          backgroundColor:'#fff',borderColor:'rgba(0,0,0,.12)',borderWidth:1,
+          titleColor:'#6b7a90',bodyColor:'#1a2130',
+          callbacks:{
+            title:items=>labels[items[0].dataIndex],
+            label:item=>{
+              const c=hist[item.dataIndex];if(!c) return '';
+              return[
+                `C: $${c.c?.toFixed(2)}  A: $${c.o?.toFixed(2)}`,
+                `H: $${c.h?.toFixed(2)}  L: $${c.l?.toFixed(2)}`
+              ];
+            }
+          }
+        }
+      },
+      scales:{
+        x:{ticks:{color:'#a0aab8',font:{size:9},maxTicksLimit:12,maxRotation:0},grid:{color:'rgba(0,0,0,.04)'}},
+        y:{ticks:{color:'#a0aab8',font:{size:10,family:'JetBrains Mono'},callback:v=>'$'+v.toFixed(0)},grid:{color:'rgba(0,0,0,.05)'}}
+      }
+    },
+    plugins:[zonesPlugin]
+  });
+
+  // Badge de señal
+  const nearZones=zones.filter(z=>z.near);
+  const badge=document.getElementById('liq-signal-badge');
+  if(nearZones.length>0){
+    badge.innerHTML=`<span style="font-size:10px;font-family:var(--mono);font-weight:700;padding:2px 8px;border-radius:20px;background:var(--gd);color:var(--green);border:1px solid var(--gb);">🎯 ${nearZones.length} zona${nearZones.length>1?'s':''} cercana${nearZones.length>1?'s':''}</span>`;
+  } else {
+    badge.innerHTML='';
+  }
+}
+
+/* ══════════════════════════════════════
+   RENDER TABLA DE ZONAS
+══════════════════════════════════════ */
+function renderLiqZonesTable(sym,zones,price){
+  const el=document.getElementById('liq-zones-table');
+  if(!zones.length){
+    el.innerHTML='<div style="color:var(--muted);font-size:12px;padding:8px 0;">Sin zonas detectadas en los últimos 50 días.</div>';
+    return;
+  }
+  let html='<table class="tbl"><tr><th>Tipo</th><th>Nivel</th><th>Distancia</th><th>Estado</th><th>Fechas</th></tr>';
+  zones.slice(0,12).forEach(z=>{
+    const distStr=(z.dist>=0?'+':'')+z.dist.toFixed(2)+'%';
+    const distColor=z.dist>=0?'var(--green)':'var(--red)';
+    const typeColor=z.type==='EQL'?'#1a6fc4':'#6741d9';
+    const typeBg=z.type==='EQL'?'rgba(26,111,196,0.08)':'rgba(103,65,217,0.08)';
+    const typeBorder=z.type==='EQL'?'rgba(26,111,196,0.25)':'rgba(103,65,217,0.25)';
+    const nearBadge=z.near?`<span style="font-size:9px;font-weight:700;padding:1px 5px;border-radius:8px;background:var(--gd);color:var(--green);border:1px solid var(--gb);">🎯 CERCA</span>`:'';
+    html+=`<tr>
+      <td><span style="font-size:10px;font-family:var(--mono);font-weight:700;padding:2px 7px;border-radius:20px;background:${typeBg};color:${typeColor};border:1px solid ${typeBorder};">${z.type==='EQL'?'Equal Low':'FVG'}</span></td>
+      <td style="font-family:var(--mono);font-weight:600;">$${z.level.toFixed(2)}</td>
+      <td style="font-family:var(--mono);color:${distColor};font-weight:600;">${distStr}</td>
+      <td>${nearBadge||`<span style="font-size:10px;color:var(--muted);">${z.dist>0?'precio encima':'precio debajo'}</span>`}</td>
+      <td style="font-size:10px;color:var(--muted);">${z.dates.join(' · ')}</td>
+    </tr>`;
+  });
+  html+='</table>';
+  el.innerHTML=html;
+}
+
+/* ── Alert bar ── */
+function renderLiqAlertBar(sym,zones,price){
+  const bar=document.getElementById('liq-alert-bar');
+  const near=zones.filter(z=>z.near&&z.dist>0&&z.dist<NEAR_PCT*100); // precio encima pero cerca
+  if(near.length){
+    bar.style.display='block';
+    const msgs=near.map(z=>`${sym} está a ${z.dist.toFixed(2)}% de un ${z.type==='EQL'?'Equal Low':'FVG'} en $${z.level.toFixed(2)}`);
+    bar.textContent='🎯 '+msgs.join(' · ');
+  } else {
+    bar.style.display='none';
+  }
+}
+
+/* ══════════════════════════════════════
+   RESUMEN DE TODAS LAS ACCIONES
+══════════════════════════════════════ */
+async function loadAllLiqSummary(){
+  const summaryEl=document.getElementById('liq-summary');
+  const tableEl=document.getElementById('liq-all-table');
+
+  // Skeletons
+  summaryEl.innerHTML=LIQ_TICKERS.map(t=>
+    `<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:10px;text-align:center;cursor:pointer;" onclick="selectLiqTicker('${t}')">
+      <div style="font-size:13px;font-weight:700;font-family:var(--mono);">${t}</div>
+      <div class="skel" style="width:60px;height:10px;border-radius:3px;margin:6px auto 0;"></div>
+    </div>`
+  ).join('');
+
+  tableEl.innerHTML='<div style="color:var(--muted);font-size:12px;padding:12px 0;text-align:center;"><span class="spin"></span> Analizando los 12 tickers...</div>';
+
+  const results=[];
+  for(const sym of LIQ_TICKERS){
+    try{
+      const hist=await getLiqHistory(sym);
+      const price=await getLiqCurrentPrice(sym);
+      const zones=detectZones(hist,price);
+      liqCache[sym]={hist,zones,price,ts:Date.now()};
+      results.push({sym,price,zones,nearCount:zones.filter(z=>z.near).length});
+    }catch(ex){
+      results.push({sym,price:0,zones:[],nearCount:0,error:ex.message});
+    }
+    await new Promise(r=>setTimeout(r,200));
+  }
+
+  // Render summary cards
+  summaryEl.innerHTML=results.map(r=>{
+    const color=r.nearCount>0?'var(--green)':r.error?'var(--red)':'var(--muted)';
+    const bg=r.nearCount>0?'var(--gd)':r.error?'var(--rd)':'var(--bg2)';
+    const border=r.nearCount>0?'var(--gb)':r.error?'var(--rb)':'var(--border)';
+    return `<div style="background:${bg};border:1px solid ${border};border-radius:10px;padding:10px;text-align:center;cursor:pointer;transition:all .15s;" onclick="selectLiqTicker('${r.sym}')" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform=''">
+      <div style="font-size:13px;font-weight:700;font-family:var(--mono);color:var(--text);">${r.sym}</div>
+      <div style="font-size:11px;font-family:var(--mono);color:var(--muted);margin-top:2px;">${r.price>0?'$'+r.price.toFixed(2):'—'}</div>
+      <div style="font-size:10px;font-weight:700;color:${color};margin-top:5px;">${r.nearCount>0?`🎯 ${r.nearCount} zona${r.nearCount>1?'s':''}`:r.error?'error':'sin alertas'}</div>
+    </div>`;
+  }).join('');
+
+  // Render resumen table
+  const withZones=results.filter(r=>r.zones.length>0&&!r.error);
+  const allNearZones=[];
+  withZones.forEach(r=>{
+    r.zones.filter(z=>z.near).forEach(z=>{
+      allNearZones.push({sym:r.sym,price:r.price,...z});
+    });
+  });
+  allNearZones.sort((a,b)=>Math.abs(a.dist)-Math.abs(b.dist));
+
+  if(!allNearZones.length){
+    tableEl.innerHTML='<div style="color:var(--muted);font-size:12px;padding:12px 0;text-align:center;">Sin zonas cercanas al precio actual en ningún ticker.</div>';
+  } else {
+    let html='<table class="tbl"><tr><th>Ticker</th><th>Tipo</th><th>Nivel</th><th>Precio act.</th><th>Distancia</th><th>Fechas</th></tr>';
+    allNearZones.slice(0,20).forEach(z=>{
+      const typeColor=z.type==='EQL'?'#1a6fc4':'#6741d9';
+      const typeBg=z.type==='EQL'?'rgba(26,111,196,0.08)':'rgba(103,65,217,0.08)';
+      const distColor=z.dist>=0?'var(--green)':'var(--red)';
+      html+=`<tr style="cursor:pointer;" onclick="selectLiqTicker('${z.sym}')">
+        <td style="font-family:var(--mono);font-weight:700;">${z.sym}</td>
+        <td><span style="font-size:10px;font-family:var(--mono);font-weight:700;padding:2px 7px;border-radius:20px;background:${typeBg};color:${typeColor};border:1px solid ${typeColor}22;">${z.type==='EQL'?'Equal Low':'FVG'}</span></td>
+        <td style="font-family:var(--mono);font-weight:600;">$${z.level.toFixed(2)}</td>
+        <td style="font-family:var(--mono);">$${z.price.toFixed(2)}</td>
+        <td style="font-family:var(--mono);font-weight:600;color:${distColor};">${(z.dist>=0?'+':'')+z.dist.toFixed(2)}%</td>
+        <td style="font-size:10px;color:var(--muted);">${z.dates.join(' · ')}</td>
+      </tr>`;
+    });
+    html+='</table>';
+    tableEl.innerHTML=html;
+  }
+
+  // Cargar el primer ticker por defecto
+  if(liqCache[curLiqSym]){
+    const c=liqCache[curLiqSym];
+    renderLiqChart(curLiqSym,c.hist,c.zones,c.price);
+    renderLiqZonesTable(curLiqSym,c.zones,c.price);
+    renderLiqAlertBar(curLiqSym,c.zones,c.price);
+    document.getElementById('liq-chart-sym').textContent=curLiqSym;
+    document.getElementById('liq-price-lbl').textContent='$'+c.price.toFixed(2);
+    document.getElementById('liq-zone-count').textContent=c.zones.length+' zonas';
+  }
+}
+
+async function refreshAllLiq(){
+  liqCache={};
+  liqInited=false;
+  initLiquidez();
+}
+
+/* ══════════════════════════════════════*/
+
+
 (function(){
   updateMarketBadge();
   setInterval(updateMarketBadge,30000);

@@ -5240,9 +5240,20 @@ function _strikeGainPct(costo,venta){
 // Diferencia en $ del precio de la ACCIÓN (no de la opción) entre entrada y
 // salida -- sirve para medir cuántos dólares corre el precio al salir de la
 // banda de Bollinger, y así calibrar el timing de salida.
+//
+// FIX (2026-08-11): antes devolvía `salida - entrada` con signo, lo que hacía que
+// TODO trade de PUT apareciera en rojo y en negativo — en un put el precio de la
+// acción BAJA, así que la resta da negativo justo cuando el trade fue ganador
+// (caso real: GOOG put del 08/11, entrada $350.56 → salida $348.91 = -$1.65
+// mostrado en rojo, cuando la operación cerró en +22.9%).
+//
+// Esta columna NO es P&L: es la MAGNITUD del recorrido de la acción, y se usa
+// para calibrar cuántos dólares necesita moverse el subyacente (es la referencia
+// del "movimiento mínimo esperado" del gate de señales). Por eso ahora devuelve
+// valor absoluto — el signo no aporta nada y confundía calls con puts.
 function _strikeDiffDollars(entrada,salida){
   if(entrada==null||salida==null||!isFinite(entrada)||!isFinite(salida))return null;
-  return salida-entrada;
+  return Math.abs(salida-entrada);
 }
 function addStrikeEntry(){
   const day=document.getElementById('strikeDay').value;
@@ -5351,7 +5362,11 @@ function renderStrikeLog(){
     const _entradaHTML=`<span style="font-family:var(--mono);font-size:14px;color:var(--blue);min-width:74px;">${e.entrada!=null?'$'+e.entrada.toFixed(2):'—'}</span>`;
     const _salidaHTML=`<span style="font-family:var(--mono);font-size:14px;color:var(--blue);min-width:74px;">${e.salida!=null?'$'+e.salida.toFixed(2):'—'}</span>`;
     const _gainHTML=`<span style="font-family:var(--mono);font-size:15px;font-weight:700;color:${_gain!=null?(_gain>=0?'var(--green)':'var(--red)'):'var(--text3)'};min-width:64px;text-align:right;" title="Venta vs Costo">${_gain!=null?(_gain>=0?'+':'')+_gain.toFixed(1)+'%':'—'}</span>`;
-    const _diffHTML=`<span style="font-family:var(--mono);font-size:15px;font-weight:700;color:${_diff!=null?(_diff>=0?'var(--green)':'var(--red)'):'var(--text3)'};min-width:74px;text-align:right;" title="Diferencia de la acción entre entrada y salida">${_diff!=null?(_diff>=0?'+':'')+'$'+_diff.toFixed(2):'—'}</span>`;
+    // Diferencia $ = magnitud del recorrido de la ACCIÓN, sin signo (ver
+    // _strikeDiffDollars). Se pinta en azul como Entrada/Salida — son las tres
+    // columnas que hablan del subyacente. El verde/rojo queda reservado para el
+    // % de ganancia, que sí es P&L de la opción.
+    const _diffHTML=`<span style="font-family:var(--mono);font-size:15px;font-weight:700;color:${_diff!=null?'var(--blue)':'var(--text3)'};min-width:74px;text-align:right;" title="Cuánto recorrió la acción entre entrada y salida (magnitud, sin dirección)">${_diff!=null?'$'+_diff.toFixed(2):'—'}</span>`;
     return`<div style="display:flex;align-items:center;gap:9px;padding:8px 0;border-bottom:1px solid var(--border);font-size:15px;flex-wrap:nowrap;overflow-x:auto;" id="sentry-${i}">
     <span style="min-width:76px;color:var(--text);font-weight:600;font-size:15px;">${e.day}</span>
     <span style="font-size:13px;color:var(--text3);min-width:80px;">${e.date||''}</span>
@@ -5383,8 +5398,10 @@ function renderStrikeLog(){
   // ambos datos (entrada y salida) fueron capturados.
   const diffs=log.map(e=>_strikeDiffDollars(e.entrada,e.salida)).filter(d=>d!=null);
   const diffAvg=diffs.length?(diffs.reduce((a,b)=>a+b,0)/diffs.length):null;
+  // Promedio de magnitudes (sin signo) — es el número con el que se calibra el
+  // "movimiento mínimo esperado" del gate de señales en Configuración.
   const diffAvgHTML=diffAvg!=null
-    ?`<span style="font-size:13px;color:var(--text)">Movimiento $: <strong style="font-size:15px;font-family:var(--mono);color:${diffAvg>=0?'var(--green)':'var(--red)'}">${diffAvg>=0?'+':''}$${diffAvg.toFixed(2)}</strong></span>`
+    ?`<span style="font-size:13px;color:var(--text)" title="Promedio de cuánto recorre la acción entre entrada y salida — referencia para calibrar el movimiento mínimo esperado">Movimiento $: <strong style="font-size:15px;font-family:var(--mono);color:var(--blue)">$${diffAvg.toFixed(2)}</strong></span>`
     :`<span style="font-size:13px;color:var(--text3);">Movimiento $: —</span>`;
   area.innerHTML=`
     <div id="strikeLogList" style="padding:0 16px;">${listHTML}</div>

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- TradeDeskPro v5 | build:20260806_relative_minmove_diag | B1:_wsSessionCandle_per15min B2:BB-REGRESO_strategy B3:intentoBull_loose B4:bbCallTrigger_connected B5:dedup_distVars B6:setup_gate_bbw B7:stochPutOk_noFloor A1:bbSessionOk_isMarketHours A2:schwabToken_firstTicker M1:momentumToLower_gate M2:bbwExpandActive M3:aviso_stricter M4:intento_volOk M5:unified_setup_card M6:bbwSqueezeBreakout M7:multiTF_regreso M8:BB-MTF_panel_replaces_noticias M9:setup_levels_removed M10:atr_velocity_gate M11:piercing_only_trigger M12:score_base60_no_double_filter M13:minmove_pct_of_price M14:casi_senal_diag -->
+<!-- TradeDeskPro v5 | build:20260812_1h_from_15m_fix | B1:_wsSessionCandle_per15min B2:BB-REGRESO_strategy B3:intentoBull_loose B4:bbCallTrigger_connected B5:dedup_distVars B6:setup_gate_bbw B7:stochPutOk_noFloor A1:bbSessionOk_isMarketHours A2:schwabToken_firstTicker M1:momentumToLower_gate M2:bbwExpandActive M3:aviso_stricter M4:intento_volOk M5:unified_setup_card M6:bbwSqueezeBreakout M7:multiTF_regreso M8:BB-MTF_panel_replaces_noticias M9:setup_levels_removed M10:atr_velocity_gate M11:piercing_only_trigger M12:score_base60_no_double_filter M13:minmove_pct_of_price M14:casi_senal_diag M15:diferencia_abs M16:1h_derived_from_15m M17:meta_added -->
 <html lang="es">
 <head>
 <meta charset="UTF-8">
@@ -421,7 +421,7 @@ function getTickerColor(sym){return TICKER_COLORS[sym]||'#3ba9ff';}
 // Default configs
 const TICKER_DEFAULTS={
   main:['TSLA','GOOG','SPY'],
-  signal:['TSLA','GOOG','SPY','QQQ','AAPL','PLTR'],
+  signal:['TSLA','GOOG','SPY','QQQ','AAPL','PLTR','NVDA','COIN','META'],
 };
 
 // Load from localStorage or use defaults
@@ -975,14 +975,62 @@ async function fetchSchwabCandles(sym,freqType,freq,bars=50){
       }else{
         addLog('debug','Schwab',`${sym} ${_tfLabel} → ${sl.length} velas (sin datetime)`);
       }
-      // Attach datetime of last candle to result for downstream freshness checks
-      const _result={c:sl.map(v=>v.close),h:sl.map(v=>v.high),l:sl.map(v=>v.low),o:sl.map(v=>v.open),v:sl.map(v=>v.volume||0)};
+      // Attach datetime of last candle to result for downstream freshness checks.
+      // `t` (array de datetimes por vela) se agregó el 2026-08-12 para poder
+      // derivar velas de 1H agrupando las de 15min por hora ET — ver merge15to1h().
+      const _result={c:sl.map(v=>v.close),h:sl.map(v=>v.high),l:sl.map(v=>v.low),o:sl.map(v=>v.open),v:sl.map(v=>v.volume||0),t:sl.map(v=>v.datetime)};
       if(_lastC&&_lastC.datetime) _result._lastDatetime=_lastC.datetime;
       return _result;
     }catch(e){continue;}
   }
   addLog('warn','Schwab API',`${sym} ${freqType} → Sin datos`);
   return null;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// merge15to1h — construye velas de 1 HORA agrupando las de 15 minutos
+// ════════════════════════════════════════════════════════════════════════════
+// FIX CRÍTICO (2026-08-12): el endpoint de 30min de Schwab empezó a devolver
+// datos de 5 días atrás. Como Schwab NO soporta frequency=60, la plataforma
+// simulaba el 1H pidiendo 30min y fusionando pares — así que el 1H llegaba
+// obsoleto, el guard de frescura lo descartaba, y el ticker se saltaba COMPLETO
+// (`if(!ohlc1h||!ohlc15||!ohlcD) continue`). Resultado: cero señales en todos
+// los tickers, sin importar lo buena que fuera la ruptura. Los logs del
+// 2026-08-12 10:02 AM lo muestran para GOOG, META, QQQ y PLTR a la vez.
+//
+// Solución: derivar el 1H de las velas de 15min, que sí llegan frescas. Ventajas
+// además del arreglo: una llamada menos a Schwab por ticker, y el 1H queda
+// garantizado siempre que el 15min funcione (no hay dos puntos de falla).
+//
+// Agrupa por hora ET real (no en bloques fijos de 4) para que las velas queden
+// alineadas a los límites de hora como en cualquier plataforma de charting.
+function merge15to1h(o15){
+  if(!o15||!o15.t||!o15.t.length)return null;
+  const groups={};
+  const order=[];
+  for(let i=0;i<o15.c.length;i++){
+    const dt=o15.t[i];
+    if(!dt)continue;
+    const et=new Date(new Date(dt).toLocaleString('en-US',{timeZone:'America/New_York'}));
+    const key=`${et.getFullYear()}-${et.getMonth()}-${et.getDate()}-${et.getHours()}`;
+    if(!groups[key]){groups[key]={idx:[]};order.push(key);}
+    groups[key].idx.push(i);
+  }
+  if(!order.length)return null;
+  const out={c:[],h:[],l:[],o:[],v:[],t:[]};
+  for(const k of order){
+    const idx=groups[k].idx;
+    const first=idx[0],last=idx[idx.length-1];
+    out.o.push(o15.o[first]);
+    out.c.push(o15.c[last]);
+    out.h.push(Math.max(...idx.map(i=>o15.h[i])));
+    out.l.push(Math.min(...idx.map(i=>o15.l[i])));
+    out.v.push(idx.reduce((s,i)=>s+(o15.v[i]||0),0));
+    out.t.push(o15.t[last]);
+  }
+  out._lastDatetime=out.t[out.t.length-1];
+  out._derivedFrom15m=true; // marca para logs/diagnóstico
+  return out;
 }
 function updateSchwabStatus(){
   const token=localStorage.getItem('schwab_access_token')||'';
@@ -2192,12 +2240,32 @@ async function _buildSignalsCore(){
       }
       if(schwabToken){
         try{
-          // Sequential fetches — menos carga en Schwab, menos timeouts
-          const r1=await Promise.race([fetchSchwabCandles(sym,'minute',60,100),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),8000))]).catch(()=>null);
-          if(r1&&closes(r1).length>=10){ohlc1h=r1;dataLabel='📡 Schwab';}
-          await new Promise(r=>setTimeout(r,200));
-          const r2=await Promise.race([fetchSchwabCandles(sym,'minute',15,60),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),8000))]).catch(()=>null);
-          if(r2&&closes(r2).length>=5) ohlc15=r2;
+          // ── ORDEN CAMBIADO (2026-08-12) ──────────────────────────────────
+          // Antes se pedía 1H primero (vía 30min + merge de pares) y 15min después.
+          // El endpoint de 30min empezó a devolver datos de 5 días atrás, el guard
+          // de frescura lo descartaba, y como el 1H es obligatorio más abajo el
+          // ticker se saltaba entero → CERO señales en toda la plataforma.
+          // Ahora se pide 15min primero (que sí llega fresco) y el 1H se DERIVA
+          // de esas velas agrupándolas por hora ET. Ver merge15to1h().
+          // Se piden 260 velas de 15min (~10 días) para que el 1H derivado tenga
+          // ~65 velas, suficiente para MA40 y Bollinger(20) en esa temporalidad.
+          const r2=await Promise.race([fetchSchwabCandles(sym,'minute',15,260),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),8000))]).catch(()=>null);
+          if(r2&&closes(r2).length>=5){ohlc15=r2;dataLabel='📡 Schwab';}
+          // 1H derivado del 15min — sin llamada extra a Schwab
+          if(ohlc15){
+            const _m=merge15to1h(ohlc15);
+            if(_m&&_m.c.length>=10){
+              ohlc1h=_m;
+              addLog('debug','Schwab',`${sym} 1H derivado de 15min → ${_m.c.length} velas (evita el endpoint de 30min con datos viejos)`);
+            }
+          }
+          // Respaldo: si no se pudo derivar (poca historia de 15min), intentar el
+          // camino viejo de 30min. Si ese también trae datos viejos se descarta solo.
+          if(!ohlc1h){
+            await new Promise(r=>setTimeout(r,200));
+            const r1=await Promise.race([fetchSchwabCandles(sym,'minute',60,100),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),8000))]).catch(()=>null);
+            if(r1&&closes(r1).length>=10){ohlc1h=r1;dataLabel='📡 Schwab';}
+          }
           await new Promise(r=>setTimeout(r,200));
           const r3=await Promise.race([fetchSchwabCandles(sym,'D',1,90),new Promise((_,rej)=>setTimeout(()=>rej(new Error('t')),8000))]).catch(()=>null);
           if(r3&&closes(r3).length>=10) ohlcD=r3;

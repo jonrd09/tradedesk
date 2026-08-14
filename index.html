@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- TradeDeskPro v5 | build:20260814_strikelog_ledger | B1:_wsSessionCandle_per15min B2:BB-REGRESO_strategy B3:intentoBull_loose B4:bbCallTrigger_connected B5:dedup_distVars B6:setup_gate_bbw B7:stochPutOk_noFloor A1:bbSessionOk_isMarketHours A2:schwabToken_firstTicker M1:momentumToLower_gate M2:bbwExpandActive M3:aviso_stricter M4:intento_volOk M5:unified_setup_card M6:bbwSqueezeBreakout M7:multiTF_regreso M8:BB-MTF_panel_replaces_noticias M9:setup_levels_removed M10:atr_velocity_gate M11:piercing_only_trigger M12:score_base60_no_double_filter M13:minmove_pct_of_price M14:casi_senal_diag M15:diferencia_abs M16:1h_derived_from_15m M17:meta_added M18:cuenta_real_ledger M19:sheets_autosync M20:strikelog_is_ledger M21:exportStrikeLog_fixed M22:paper_entries_flagged M23:delete_confirm_and_refresh M24:comision_neta M25:panel_limpio M26:orden_cronologico M27:poda_local_5dias M28:probar_conexion -->
+<!-- TradeDeskPro v5 | build:20260814_strikelog_ledger | B1:_wsSessionCandle_per15min B2:BB-REGRESO_strategy B3:intentoBull_loose B4:bbCallTrigger_connected B5:dedup_distVars B6:setup_gate_bbw B7:stochPutOk_noFloor A1:bbSessionOk_isMarketHours A2:schwabToken_firstTicker M1:momentumToLower_gate M2:bbwExpandActive M3:aviso_stricter M4:intento_volOk M5:unified_setup_card M6:bbwSqueezeBreakout M7:multiTF_regreso M8:BB-MTF_panel_replaces_noticias M9:setup_levels_removed M10:atr_velocity_gate M11:piercing_only_trigger M12:score_base60_no_double_filter M13:minmove_pct_of_price M14:casi_senal_diag M15:diferencia_abs M16:1h_derived_from_15m M17:meta_added M18:cuenta_real_ledger M19:sheets_autosync M20:strikelog_is_ledger M21:exportStrikeLog_fixed M22:paper_entries_flagged M23:delete_confirm_and_refresh M24:comision_neta M25:panel_limpio M26:orden_cronologico M27:poda_local_5dias M28:probar_conexion M29:sin_lugares M30:log_ancho_scroll_unico M31:export_csv_robusto M32:config_ancho_tabs_visibles -->
 <html lang="es">
 <head>
 <meta charset="UTF-8">
@@ -90,7 +90,10 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
 .cfg-tab.active{color:#ff4d6d;border-bottom-color:#ff4d6d;}
 .cfg-section-title{font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px;}
 .cfg-label{font-size:11px;color:var(--text3);margin-bottom:4px;}
-.cfg-input{width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--text);padding:8px 10px;font-size:13px;font-family:var(--mono);outline:none;box-sizing:border-box;}
+/* max-width: con el modal ya en 1000px, una API key estirada de lado a lado se
+   lee peor que una caja de ancho normal. El tope solo afecta a los campos, no
+   al panel (el Historial sí usa todo el ancho). */
+.cfg-input{width:100%;max-width:680px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--text);padding:8px 10px;font-size:13px;font-family:var(--mono);outline:none;box-sizing:border-box;}
 .pin-modal{position:fixed;inset:0;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;z-index:1500;}
 .pin-box{background:var(--bg2);border:1px solid var(--border2);border-radius:var(--rl);padding:24px;width:300px;text-align:center;}
 .pin-dots{display:flex;gap:10px;justify-content:center;margin:16px 0;}
@@ -4734,8 +4737,7 @@ function _crMoney(v){return (v<0?'-$':'$')+Math.abs(v).toFixed(2);}
 //   • NO cuenten en el balance de la cuenta real (ya no contaban, por falta de qty)
 //   • NO muestren ⏳ ni pidan "ponle los contratos" — no son operaciones reales
 //   • NO se envíen nunca a Google Sheets
-//   • SÍ sigan alimentando los promedios de Lugares y Diferencia $, que es
-//     justo para lo que se registraron: calibrar la selección de strikes.
+//   • SÍ sigan visibles en el log como referencia histórica.
 // Una entrada nueva siempre trae qty e id, así que no hay falsos positivos.
 function _crMigrarPaper(){
   if(localStorage.getItem('tdp_paper_migrado')==='1')return;
@@ -4764,8 +4766,6 @@ function crBorrarPaper(){
   if(!n){alert('No quedan entradas de paper trading.');return;}
   if(!confirm(`¿Borrar ${n} entrada(s) de paper trading?\n\n`+
     `Se van de todos los tickers y NO se puede deshacer.\n\n`+
-    `Ojo: también salen de los promedios de Lugares y Diferencia $, que es la `+
-    `información con la que calibras a cuántos lugares comprar el strike. `+
     `Si solo te molesta verlas mezcladas, puedes dejarlas: ya están marcadas `+
     `como PAPER y no afectan el balance ni se envían a Sheets.`))return;
   let borradas=0;
@@ -4891,7 +4891,7 @@ function _crStrikeToRow(ticker,e){
     pnlDirecto:_strikePnlDollars(e),
     estrategia:'Strike Log',
     notas:[`Bruto $${(_strikePnlBruto(e)||0).toFixed(2)} − comisión $${_strikeComision(e).toFixed(2)}`,
-           e.dist!=null?`Lugares ${e.dist}`:'',e.spread!=null?`Spread $${(+e.spread).toFixed(2)}`:'',
+           e.spread!=null?`Spread $${(+e.spread).toFixed(2)}`:'',
            e.entrada!=null?`Entrada $${(+e.entrada).toFixed(2)}`:'',e.salida!=null?`Salida $${(+e.salida).toFixed(2)}`:'']
           .filter(Boolean).join(' · ')};
 }
@@ -5008,36 +5008,99 @@ async function crSyncPendientes(){
 // llamaba a una función que nunca se escribió, así que no hacía nada. Ahora que
 // el Strike Log es el libro de operaciones de la cuenta real, este respaldo
 // importa: exporta el ticker abierto con contratos y P&L en dólares.
-function exportStrikeLog(){
-  const key='strikelog_'+_strikeTicker;
-  let log=[];try{log=JSON.parse(localStorage.getItem(key)||'[]');}catch(e){}
-  if(!log.length){alert(`No hay operaciones registradas para ${_strikeTicker}.`);return;}
-  const head=['Ticker','Dia','Fecha','Hora','Tipo','Contratos','Costo $','Venta $',
-              'Costo total $','Venta total $','P&L bruto $','Comision $','P&L neto $','% Ganancia',
-              'Entrada $','Salida $','Diferencia $','Lugares','Spread','Enviado a Sheets'];
-  const esc=v=>`"${String(v==null?'':v).replace(/"/g,'""')}"`;
-  const lines=[head.join(',')];
-  log.forEach(e=>{
-    const pnl=_strikePnlDollars(e);
-    const ct=_strikeCostoDollars(e);
-    const gain=_strikeGainPct(e.costo,e.venta);
-    const diff=_strikeDiffDollars(e.entrada,e.salida);
-    lines.push([_strikeTicker,e.day,e.date||'',e.time||'',
-      e.tipo?String(e.tipo).toUpperCase():'',e.qty||'',
-      (+e.costo||0).toFixed(2), e.venta!=null?(+e.venta).toFixed(2):'',
-      ct!=null?ct.toFixed(2):'', (ct!=null&&pnl!=null)?(ct+pnl).toFixed(2):'',
-      (_strikePnlBruto(e)!=null)?_strikePnlBruto(e).toFixed(2):'', _strikeComision(e).toFixed(2),
-      pnl!=null?pnl.toFixed(2):'', gain!=null?gain.toFixed(2):'',
-      e.entrada!=null?(+e.entrada).toFixed(2):'', e.salida!=null?(+e.salida).toFixed(2):'',
-      diff!=null?diff.toFixed(2):'', e.dist, e.spread!=null?(+e.spread).toFixed(2):'',
-      e.synced===true?'si':'no'].map(esc).join(','));
-  });
-  const blob=new Blob(['\ufeff'+lines.join('\n')],{type:'text/csv;charset=utf-8'});
+//
+// SEGUNDA CORRECCI\u00d3N (2026-08-14): la descarga no sal\u00eda. El <a> se creaba en
+// memoria y se le hac\u00eda click SIN insertarlo en el documento, y acto seguido se
+// revocaba el objectURL en la misma vuelta del event loop. En ese orden el
+// navegador puede quedarse sin el blob antes de empezar a guardarlo, y el bot\u00f3n
+// parece muerto. Ahora: se inserta el <a>, se hace click, y el revoke va en un
+// setTimeout. Adem\u00e1s todo va dentro de try/catch \u2014 si algo falla el usuario ve
+// el motivo en vez de un bot\u00f3n que no responde.
+function _descargarCSV(nombre,lines){
+  const blob=new Blob(['\ufeff'+lines.join('\r\n')],{type:'text/csv;charset=utf-8;'});
+  const url=URL.createObjectURL(blob);
   const a=document.createElement('a');
-  a.href=URL.createObjectURL(blob);
-  a.download=`strikelog_${_strikeTicker}_${new Date().toISOString().slice(0,10)}.csv`;
-  a.click();URL.revokeObjectURL(a.href);
-  addLog('info','Strike Log',`Exportadas ${log.length} operaciones de ${_strikeTicker} a CSV`);
+  a.href=url;a.download=nombre;a.style.display='none';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(()=>{try{document.body.removeChild(a);URL.revokeObjectURL(url);}catch(e){}},1500);
+}
+function exportStrikeLog(){
+  try{
+    const key='strikelog_'+_strikeTicker;
+    let log=[];try{log=JSON.parse(localStorage.getItem(key)||'[]');}catch(e){}
+    if(!Array.isArray(log)||!log.length){
+      alert(`No hay operaciones registradas para ${_strikeTicker}.`);return;
+    }
+    const head=['Ticker','Dia','Fecha','Hora','Tipo','Contratos','Costo $','Venta $',
+                'Costo total $','Venta total $','P&L bruto $','Comision $','P&L neto $','% Ganancia',
+                'Entrada $','Salida $','Movimiento $','Spread','Origen','Enviado a Sheets'];
+    const esc=v=>`"${String(v==null?'':v).replace(/"/g,'""')}"`;
+    const lines=[head.map(esc).join(',')];
+    log.forEach(e=>{
+      const pnl=_strikePnlDollars(e);
+      const bruto=_strikePnlBruto(e);
+      const ct=_strikeCostoDollars(e);
+      const gain=_strikeGainPct(e.costo,e.venta);
+      const diff=_strikeDiffDollars(e.entrada,e.salida);
+      lines.push([_strikeTicker,e.day||'',e.date||'',e.time||'',
+        e.tipo?String(e.tipo).toUpperCase():'',e.qty||'',
+        (+e.costo||0).toFixed(2), e.venta!=null?(+e.venta).toFixed(2):'',
+        ct!=null?ct.toFixed(2):'', (ct!=null&&pnl!=null)?(ct+pnl).toFixed(2):'',
+        bruto!=null?bruto.toFixed(2):'', _strikeComision(e).toFixed(2),
+        pnl!=null?pnl.toFixed(2):'', gain!=null?gain.toFixed(2):'',
+        e.entrada!=null?(+e.entrada).toFixed(2):'', e.salida!=null?(+e.salida).toFixed(2):'',
+        diff!=null?diff.toFixed(2):'', e.spread!=null?(+e.spread).toFixed(2):'',
+        e.paper===true?'paper':'real',
+        e.paper===true?'':(e.synced===true?'si':'no')].map(esc).join(','));
+    });
+    const _hoy=new Date().toISOString().slice(0,10);
+    _descargarCSV(`strikelog_${_strikeTicker}_${_hoy}.csv`,lines);
+    addLog('info','Strike Log',`Exportadas ${log.length} operaciones de ${_strikeTicker} a CSV`);
+  }catch(err){
+    console.error('exportStrikeLog',err);
+    alert('No se pudo exportar el Strike Log: '+(err&&err.message?err.message:err));
+    try{addLog('error','Strike Log','Fall\u00f3 la exportaci\u00f3n: '+(err&&err.message?err.message:err));}catch(e){}
+  }
+}
+// Exporta el LIBRO COMPLETO \u2014 todos los tickers en un solo CSV. Es el respaldo
+// que de verdad importa ahora que TD Pro solo conserva los \u00faltimos d\u00edas en
+// local: si Google Sheets falla, esto es la copia del hist\u00f3rico que quede.
+function exportStrikeLogTodos(){
+  try{
+    const filas=[];
+    Object.keys(localStorage).filter(k=>k.startsWith('strikelog_')).sort().forEach(k=>{
+      const tk=k.replace('strikelog_','');
+      let log=[];try{log=JSON.parse(localStorage.getItem(k)||'[]');}catch(e){return;}
+      if(Array.isArray(log))log.forEach(e=>filas.push({tk,e}));
+    });
+    if(!filas.length){alert('No hay operaciones registradas en ning\u00fan ticker.');return;}
+    const head=['Ticker','Dia','Fecha','Hora','Tipo','Contratos','Costo $','Venta $',
+                'P&L bruto $','Comision $','P&L neto $','% Ganancia',
+                'Entrada $','Salida $','Movimiento $','Spread','Origen','Enviado a Sheets'];
+    const esc=v=>`"${String(v==null?'':v).replace(/"/g,'""')}"`;
+    const lines=[head.map(esc).join(',')];
+    filas.forEach(({tk,e})=>{
+      const pnl=_strikePnlDollars(e);
+      const bruto=_strikePnlBruto(e);
+      const gain=_strikeGainPct(e.costo,e.venta);
+      const diff=_strikeDiffDollars(e.entrada,e.salida);
+      lines.push([tk,e.day||'',e.date||'',e.time||'',
+        e.tipo?String(e.tipo).toUpperCase():'',e.qty||'',
+        (+e.costo||0).toFixed(2), e.venta!=null?(+e.venta).toFixed(2):'',
+        bruto!=null?bruto.toFixed(2):'', _strikeComision(e).toFixed(2),
+        pnl!=null?pnl.toFixed(2):'', gain!=null?gain.toFixed(2):'',
+        e.entrada!=null?(+e.entrada).toFixed(2):'', e.salida!=null?(+e.salida).toFixed(2):'',
+        diff!=null?diff.toFixed(2):'', e.spread!=null?(+e.spread).toFixed(2):'',
+        e.paper===true?'paper':'real',
+        e.paper===true?'':(e.synced===true?'si':'no')].map(esc).join(','));
+    });
+    _descargarCSV(`strikelog_TODOS_${new Date().toISOString().slice(0,10)}.csv`,lines);
+    addLog('info','Strike Log',`Exportado el libro completo: ${filas.length} operaciones`);
+  }catch(err){
+    console.error('exportStrikeLogTodos',err);
+    alert('No se pudo exportar el libro completo: '+(err&&err.message?err.message:err));
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -5779,8 +5842,10 @@ function openStrikeLog(ticker,color){
     if(sel.options[i].text===today||sel.options[i].value===today){sel.selectedIndex=i;break;}
   }}
   // Clear inputs
-  const distEl=document.getElementById('strikeDist');
-  if(distEl)distEl.value='';
+  const _qEl=document.getElementById('strikeQty');
+  if(_qEl)_qEl.value='1';
+  ['strikeCosto','strikeVenta','strikeEntrada','strikeSalida','strikeSpread']
+    .forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
   // Show modal
   const modal=document.getElementById('strikeModal');
   if(!modal){console.error('strikeModal not found');return;}
@@ -5798,7 +5863,7 @@ function openStrikeLog(ticker,color){
   try{loadStrikeFundamentals(ticker);}catch(e){}
   try{loadStrikeLevels(ticker);}catch(e){}
   renderStrikeLog();
-  setTimeout(()=>{const d=document.getElementById('strikeDist');if(d)d.focus();},150);
+  setTimeout(()=>{const d=document.getElementById('strikeCosto');if(d)d.focus();},150);
 }
 function closeStrikeModal(){document.getElementById('strikeModal').style.display='none';}
 function saveStrikeFundamentals(){
@@ -5851,13 +5916,21 @@ function _strikeDiffDollars(entrada,salida){
 }
 function addStrikeEntry(){
   const day=document.getElementById('strikeDay').value;
-  const dist=parseFloat(document.getElementById('strikeDist').value);
   const costo=parseFloat(document.getElementById('strikeCosto').value)||0;
   const venta=parseFloat(document.getElementById('strikeVenta').value);
   const entrada=parseFloat(document.getElementById('strikeEntrada').value);
   const salida=parseFloat(document.getElementById('strikeSalida').value);
   const spread=parseFloat(document.getElementById('strikeSpread').value)||null;
-  if(!dist&&dist!==0)return;
+  // ── CAMPO OBLIGATORIO (2026-08-14) ────────────────────────────────────────
+  // Antes el campo requerido era "Lugares" y, si estaba vacío, la función hacía
+  // `return` en silencio: dabas + Agregar y no pasaba nada, sin explicación.
+  // Quitados los Lugares, el único dato sin el cual la operación no sirve es el
+  // COSTO (sin él no hay P&L ni balance). Y ahora avisa en vez de callarse.
+  if(!(costo>0)){
+    alert('Falta el Costo $ de la opción — sin ese dato no se puede calcular el P&L de la operación.');
+    document.getElementById('strikeCosto')?.focus();
+    return;
+  }
   const key='strikelog_'+_strikeTicker;
   let log=[];try{log=JSON.parse(localStorage.getItem(key)||'[]');}catch(e){}
   const _now=new Date();
@@ -5873,7 +5946,7 @@ function addStrikeEntry(){
   // entradas simplemente se vuelven promedios de verdad.
   const _qtyRaw=parseInt(document.getElementById('strikeQty')?.value,10);
   const qty=Number.isFinite(_qtyRaw)&&_qtyRaw>0?_qtyRaw:1;
-  const newEntry={day,dist,costo,venta:isNaN(venta)?null:venta,
+  const newEntry={day,costo,venta:isNaN(venta)?null:venta,
     entrada:isNaN(entrada)?null:entrada,salida:isNaN(salida)?null:salida,
     spread,date:_date,time:_time,qty,
     ts:(_now.getHours()*60+_now.getMinutes()),
@@ -5885,7 +5958,6 @@ function addStrikeEntry(){
   const _dayOrder=['Lunes','Martes','Miércoles','Jueves','Viernes'];
   log.sort((a,b)=>(_dayOrder.indexOf(a.day)-_dayOrder.indexOf(b.day))||(_strikeMin(a)-_strikeMin(b)));
   try{localStorage.setItem(key,JSON.stringify(log));}catch(e){}
-  document.getElementById('strikeDist').value='';
   document.getElementById('strikeCosto').value='';
   document.getElementById('strikeVenta').value='';
   document.getElementById('strikeEntrada').value='';
@@ -5933,17 +6005,15 @@ function editStrikeEntry(ticker,idx){
     </select>
     <input type="number" id="eq-${idx}" value="${e.qty||1}" min="1" step="1" placeholder="Contr." style="background:var(--bg4);border:1px solid var(--green);border-radius:6px;color:var(--green);padding:3px 6px;font-size:12px;width:56px;text-align:center;font-weight:700;">
     <input type="number" id="esal-${idx}" value="${e.salida!=null?e.salida:''}" step="0.01" placeholder="Salida $" style="background:var(--bg4);border:1px solid var(--blue);border-radius:6px;color:var(--blue);padding:3px 6px;font-size:12px;width:70px;text-align:center;">
-    <input type="number" id="ev-${idx}" value="${e.dist}" step="0.5" style="background:var(--bg4);border:1px solid var(--blue);border-radius:6px;color:var(--text);padding:3px 6px;font-size:12px;width:60px;text-align:center;">
     <input type="number" id="es-${idx}" value="${e.spread||''}" step="0.01" placeholder="Spread" style="background:var(--bg4);border:1px solid var(--blue);border-radius:6px;color:var(--purple);padding:3px 6px;font-size:12px;width:60px;text-align:center;">
     <button onclick="saveStrikeEdit('${ticker}',${idx})" style="background:var(--green);border:none;border-radius:6px;color:#001a0e;padding:3px 10px;font-size:12px;font-weight:700;cursor:pointer;">✓</button>
     <button onclick="renderStrikeLog()" style="background:none;border:1px solid var(--border);border-radius:6px;color:var(--text3);padding:3px 8px;font-size:12px;cursor:pointer;">✕</button>`;
-  document.getElementById('ev-'+idx).focus();
+  document.getElementById('ec-'+idx)?.focus();
 }
 function saveStrikeEdit(ticker,idx){
   const day=document.getElementById('ed-'+idx)?.value;
-  const dist=parseFloat(document.getElementById('ev-'+idx)?.value);
   const costo=parseFloat(document.getElementById('ec-'+idx)?.value)||0;
-  if(!day||isNaN(dist))return;
+  if(!day)return;
   const key='strikelog_'+ticker;let log=[];
   try{log=JSON.parse(localStorage.getItem(key)||'[]');}catch(e){}
   const spread=parseFloat(document.getElementById('es-'+idx)?.value)||null;
@@ -5953,7 +6023,7 @@ function saveStrikeEdit(ticker,idx){
   const entrada=isNaN(_entradaRaw)?null:_entradaRaw;
   const _salidaRaw=parseFloat(document.getElementById('esal-'+idx)?.value);
   const salida=isNaN(_salidaRaw)?null:_salidaRaw;
-  if(!log[idx])return;log[idx].day=day;log[idx].dist=dist;log[idx].costo=costo;log[idx].venta=venta;
+  if(!log[idx])return;log[idx].day=day;log[idx].costo=costo;log[idx].venta=venta;
   log[idx].entrada=entrada;log[idx].salida=salida;log[idx].spread=spread;
   const _qE=parseInt(document.getElementById('eq-'+idx)?.value,10);
   if(Number.isFinite(_qE)&&_qE>0)log[idx].qty=_qE;
@@ -5982,14 +6052,14 @@ function renderStrikeLog(){
     // de Bollinger, para calibrar el timing de salida.
     const _diff=_strikeDiffDollars(e.entrada,e.salida);
     // ── Columnas EN EL MISMO ORDEN que el formulario de arriba ──────────────
-    // Día | Fecha | Hora | Costo $ | Venta $ | Entrada $ | Salida $ | Lugares
-    // | Spread | % Ganancia | Diferencia $ | editar/borrar. Ancho fijo en
+    // Día | Fecha | Hora | Tipo | Contratos | Costo $ | Venta $ | Entrada $ |
+    // Salida $ | Spread | % Ganancia | P&L neto | Mov. $ | Sheets | editar/borrar. Ancho fijo en
     // cada columna (aunque esté vacía) para que la grilla quede alineada con
     // los inputs de arriba en vez de "saltar" cuando falta un dato.
-    const _ventaHTML=`<span style="font-family:var(--mono);font-size:14px;color:var(--green);min-width:64px;">${e.venta!=null?'$'+e.venta.toFixed(2):'—'}</span>`;
-    const _entradaHTML=`<span style="font-family:var(--mono);font-size:14px;color:var(--blue);min-width:74px;">${e.entrada!=null?'$'+e.entrada.toFixed(2):'—'}</span>`;
-    const _salidaHTML=`<span style="font-family:var(--mono);font-size:14px;color:var(--blue);min-width:74px;">${e.salida!=null?'$'+e.salida.toFixed(2):'—'}</span>`;
-    const _gainHTML=`<span style="font-family:var(--mono);font-size:15px;font-weight:700;color:${_gain!=null?(_gain>=0?'var(--green)':'var(--red)'):'var(--text3)'};min-width:64px;text-align:right;" title="Venta vs Costo">${_gain!=null?(_gain>=0?'+':'')+_gain.toFixed(1)+'%':'—'}</span>`;
+    const _ventaHTML=`<span style="font-family:var(--mono);font-size:13px;color:var(--green);width:62px;flex:0 0 62px;text-align:right;">${e.venta!=null?'$'+e.venta.toFixed(2):'—'}</span>`;
+    const _entradaHTML=`<span style="font-family:var(--mono);font-size:13px;color:var(--blue);width:68px;flex:0 0 68px;text-align:right;">${e.entrada!=null?'$'+e.entrada.toFixed(2):'—'}</span>`;
+    const _salidaHTML=`<span style="font-family:var(--mono);font-size:13px;color:var(--blue);width:68px;flex:0 0 68px;text-align:right;">${e.salida!=null?'$'+e.salida.toFixed(2):'—'}</span>`;
+    const _gainHTML=`<span style="font-family:var(--mono);font-size:14px;font-weight:700;color:${_gain!=null?(_gain>=0?'var(--green)':'var(--red)'):'var(--text3)'};width:64px;flex:0 0 64px;text-align:right;" title="Venta vs Costo">${_gain!=null?(_gain>=0?'+':'')+_gain.toFixed(1)+'%':'—'}</span>`;
     // Diferencia $ = magnitud del recorrido de la ACCIÓN, sin signo (ver
     // _strikeDiffDollars). Se pinta en azul como Entrada/Salida — son las tres
     // columnas que hablan del subyacente. El verde/rojo queda reservado para el
@@ -6000,45 +6070,76 @@ function renderStrikeLog(){
     const _com=_strikeComision(e);
     const _pnlTip=_pnlD==null?'Falta la venta o los contratos'
       :`Bruto $${_pnlBr.toFixed(2)} − comisión $${_com.toFixed(2)} (${e.qty}c × $${getComisionContrato().toFixed(2)} × 2 puntas) = neto $${_pnlD.toFixed(2)}`;
-    const _pnlHTML=`<span style="font-family:var(--mono);font-size:15px;font-weight:700;color:${_pnlD==null?'var(--text3)':_pnlD>=0?'var(--green)':'var(--red)'};min-width:78px;text-align:right;" title="${_pnlTip}">${_pnlD==null?'—':(_pnlD>=0?'+$':'-$')+Math.abs(_pnlD).toFixed(2)}</span>`;
+    const _pnlHTML=`<span style="font-family:var(--mono);font-size:14px;font-weight:700;color:${_pnlD==null?'var(--text3)':_pnlD>=0?'var(--green)':'var(--red)'};width:76px;flex:0 0 76px;text-align:right;" title="${_pnlTip}">${_pnlD==null?'—':(_pnlD>=0?'+$':'-$')+Math.abs(_pnlD).toFixed(2)}</span>`;
     const _syncHTML=e.paper===true
-      ? `<span title="Registro de la época de paper trading — no cuenta en el balance real ni se envía a Sheets" style="color:var(--text3);font-size:9px;min-width:14px;font-weight:700;">PAPER</span>`
+      ? `<span title="Registro de la época de paper trading — no cuenta en el balance real ni se envía a Sheets" style="color:var(--text3);font-size:9px;width:38px;flex:0 0 38px;text-align:center;font-weight:700;">PAPER</span>`
       : e.synced===true
-      ? `<span title="Enviado a Google Sheets" style="color:var(--green);font-size:12px;min-width:14px;">✓</span>`
-      : `<span title="Pendiente de enviar a Google Sheets — usa ⟳ Reintentar en el panel de Cuenta Real" style="color:var(--yellow);font-size:12px;min-width:14px;">⏳</span>`;
-    const _diffHTML=`<span style="font-family:var(--mono);font-size:15px;font-weight:700;color:${_diff!=null?'var(--blue)':'var(--text3)'};min-width:74px;text-align:right;" title="Cuánto recorrió la acción entre entrada y salida (magnitud, sin dirección)">${_diff!=null?'$'+_diff.toFixed(2):'—'}</span>`;
-    return`<div style="display:flex;align-items:center;gap:9px;padding:8px 0;border-bottom:1px solid var(--border);font-size:15px;flex-wrap:nowrap;overflow-x:auto;" id="sentry-${i}">
-    <span style="min-width:76px;color:var(--text);font-weight:600;font-size:15px;">${e.day}</span>
-    <span style="font-size:13px;color:var(--text3);min-width:80px;">${e.date||''}</span>
-    <span style="font-size:13px;color:var(--blue);min-width:62px;font-family:var(--mono);">${e.time||''}</span>
-    <span style="font-size:11px;font-weight:700;min-width:42px;text-align:center;color:${e.tipo==='put'?'var(--red)':e.tipo==='call'?'var(--green)':'var(--text3)'};">${e.tipo?e.tipo.toUpperCase():'—'}</span>
-    <span style="font-family:var(--mono);font-size:14px;font-weight:700;color:${e.qty?'var(--green)':e.paper?'var(--text3)':'var(--yellow)'};min-width:60px;text-align:center;" title="${e.qty?'Contratos':e.paper?'Registro de paper trading — no aplica':'⚠ Sin contratos: esta operación no cuenta en el balance. Edítala y ponle la cantidad.'}">${e.qty?e.qty+'c':e.paper?'—':'⚠ —'}</span>
-    <span style="font-family:var(--mono);font-size:14px;color:var(--yellow);min-width:64px;">$${(e.costo||0).toFixed(2)}</span>
+      ? `<span title="Enviado a Google Sheets" style="color:var(--green);font-size:12px;width:38px;flex:0 0 38px;text-align:center;">✓</span>`
+      : `<span title="Pendiente de enviar a Google Sheets — usa ⟳ Reintentar en el panel de Cuenta Real" style="color:var(--yellow);font-size:12px;width:38px;flex:0 0 38px;text-align:center;">⏳</span>`;
+    const _diffHTML=`<span style="font-family:var(--mono);font-size:14px;font-weight:700;color:${_diff!=null?'var(--blue)':'var(--text3)'};width:68px;flex:0 0 68px;text-align:right;" title="Cuánto recorrió la acción entre entrada y salida (magnitud, sin dirección)">${_diff!=null?'$'+_diff.toFixed(2):'—'}</span>`;
+    // ── FILA (2026-08-14) ───────────────────────────────────────────────────
+    // Antes cada fila llevaba `overflow-x:auto`, así que CADA UNA tenía su
+    // propia barra de scroll y las líneas se veían cortadas. Ahora la fila no
+    // scrollea: el scroll (si hace falta) es uno solo, del contenedor
+    // #strikeLogScroll. Los anchos pasaron de min-width a width+flex:0 0 para
+    // que todas las columnas queden en la misma rejilla, fila tras fila.
+    return`<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);width:max-content;min-width:100%;" id="sentry-${i}">
+    <span style="width:74px;flex:0 0 74px;color:var(--text);font-weight:600;font-size:14px;">${e.day}</span>
+    <span style="font-size:12px;color:var(--text3);width:76px;flex:0 0 76px;font-family:var(--mono);">${e.date||''}</span>
+    <span style="font-size:12px;color:var(--blue);width:62px;flex:0 0 62px;font-family:var(--mono);">${e.time||''}</span>
+    <span style="font-size:11px;font-weight:700;width:40px;flex:0 0 40px;text-align:center;color:${e.tipo==='put'?'var(--red)':e.tipo==='call'?'var(--green)':'var(--text3)'};">${e.tipo?e.tipo.toUpperCase():'—'}</span>
+    <span style="font-family:var(--mono);font-size:13px;font-weight:700;color:${e.qty?'var(--green)':e.paper?'var(--text3)':'var(--yellow)'};width:46px;flex:0 0 46px;text-align:center;" title="${e.qty?'Contratos':e.paper?'Registro de paper trading — no aplica':'⚠ Sin contratos: esta operación no cuenta en el balance. Edítala y ponle la cantidad.'}">${e.qty?e.qty+'c':e.paper?'—':'⚠ —'}</span>
+    <span style="font-family:var(--mono);font-size:13px;color:var(--yellow);width:62px;flex:0 0 62px;text-align:right;">$${(e.costo||0).toFixed(2)}</span>
     ${_ventaHTML}
     ${_entradaHTML}
     ${_salidaHTML}
-    <span style="font-family:var(--mono);font-weight:700;font-size:15px;color:${_strikeColor};min-width:52px;text-align:right;">${e.dist}</span>
-    <span style="font-family:var(--mono);font-size:13px;color:var(--purple);min-width:64px;" title="Spread Bid/Ask">${e.spread!=null?'Δ$'+e.spread.toFixed(2):'—'}</span>
+    <span style="font-family:var(--mono);font-size:12px;color:var(--purple);width:60px;flex:0 0 60px;text-align:right;" title="Spread Bid/Ask">${e.spread!=null?'Δ$'+e.spread.toFixed(2):'—'}</span>
     ${_gainHTML}
     ${_pnlHTML}
     ${_diffHTML}
     ${_syncHTML}
-    <button onclick="editStrikeEntry('${_strikeTicker}',${i})" style="background:none;border:none;color:var(--blue);cursor:pointer;font-size:13px;padding:0 4px;">✏️</button>
-    <button onclick="deleteStrikeEntry('${_strikeTicker}',${i})" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:13px;padding:0 4px;">✕</button>
+    <button onclick="editStrikeEntry('${_strikeTicker}',${i})" title="Editar" style="background:none;border:none;color:var(--blue);cursor:pointer;font-size:13px;padding:0;width:26px;flex:0 0 26px;">✏️</button>
+    <button onclick="deleteStrikeEntry('${_strikeTicker}',${i})" title="Borrar" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:13px;padding:0;width:22px;flex:0 0 22px;">✕</button>
   </div>`;
   }).join('');
-  // Promedios por día
-  const byDay={};log.forEach(e=>{if(!byDay[e.day])byDay[e.day]=[];byDay[e.day].push(e.dist);});
+  // Encabezado de columnas — mismos anchos que la fila, para que se lea qué es
+  // cada número sin tener que adivinar por el color.
+  const _th=(txt,w,align='left',tip='')=>`<span style="width:${w}px;flex:0 0 ${w}px;text-align:${align};font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;font-weight:700;"${tip?` title="${tip}"`:''}>${txt}</span>`;
+  const headHTML=`<div style="display:flex;align-items:center;gap:8px;padding:0 0 6px 0;border-bottom:1px solid var(--border2);width:max-content;min-width:100%;">
+    ${_th('Día',74)}${_th('Fecha',76)}${_th('Hora',62)}${_th('Tipo',40,'center')}${_th('Contr.',46,'center')}
+    ${_th('Costo',62,'right')}${_th('Venta',62,'right')}${_th('Entrada',68,'right','Precio de la acción al comprar')}${_th('Salida',68,'right','Precio de la acción al vender')}
+    ${_th('Spread',60,'right')}${_th('% Gan.',64,'right')}${_th('P&L neto',76,'right','Ya descontada la comisión')}${_th('Mov. $',68,'right','Cuánto corrió la acción')}${_th('Sheets',38,'center')}
+    <span style="width:56px;flex:0 0 56px;"></span>
+  </div>`;
+  // ── RESUMEN POR DÍA (2026-08-14) ──────────────────────────────────────────
+  // Antes esta caja promediaba "Lugares" (a cuántos lugares del spot compraste
+  // el strike), que era el número con el que se calibraba paper trading. Con la
+  // cuenta real ese dato ya no se captura, así que el resumen ahora muestra lo
+  // que sí importa: cuánto dejó cada día de la semana en dólares netos.
+  // Solo cuentan operaciones reales y cerradas (con venta y contratos): las de
+  // paper y las abiertas no tienen P&L y falsearían el promedio.
+  const byDay={};
+  log.forEach(e=>{
+    if(e.paper===true)return;
+    const p=_strikePnlDollars(e);
+    if(p==null)return;
+    if(!byDay[e.day])byDay[e.day]=[];
+    byDay[e.day].push(p);
+  });
   const dayOrder=['Lunes','Martes','Miércoles','Jueves','Viernes'];
   const avgDetHTML=dayOrder.filter(d=>byDay[d]).map(d=>{
-    const avg=(byDay[d].reduce((a,b)=>a+b,0)/byDay[d].length).toFixed(1);
-    return`<div style="text-align:center;"><div style="font-size:11px;color:var(--text);font-weight:600">${d}</div><div style="font-size:18px;font-weight:700;font-family:var(--mono);color:${_strikeColor}">${avg}</div><div style="font-size:10px;color:var(--text3)">${byDay[d].length} reg.</div></div>`;
-  }).join('');
-  const all=log.map(e=>e.dist);
-  const gAvg=(all.reduce((a,b)=>a+b,0)/all.length).toFixed(1);
+    const tot=byDay[d].reduce((a,b)=>a+b,0);
+    const col=tot>=0?'var(--green)':'var(--red)';
+    return`<div style="text-align:center;" title="${byDay[d].length} operación(es) cerrada(s) el ${d}"><div style="font-size:11px;color:var(--text);font-weight:600">${d}</div><div style="font-size:17px;font-weight:700;font-family:var(--mono);color:${col}">${tot>=0?'+$':'-$'}${Math.abs(tot).toFixed(2)}</div><div style="font-size:10px;color:var(--text3)">${byDay[d].length} op.</div></div>`;
+  }).join('')||`<div style="font-size:11px;color:var(--text3);">Sin operaciones cerradas todavía</div>`;
+  const _cerradas=Object.values(byDay).flat();
+  const _totNeto=_cerradas.reduce((a,b)=>a+b,0);
+  const _ganadoras=_cerradas.filter(p=>p>0).length;
+  const _winRate=_cerradas.length?Math.round(_ganadoras/_cerradas.length*100):null;
   const _sinEnviar=log.filter(e=>e.paper!==true&&e.synced!==true&&_strikePnlDollars(e)!=null).length;
   const _notaVentana=`<div style="font-size:10px;color:var(--text3);margin-top:6px;">📅 TD Pro muestra los últimos ${getDiasLocal()} días · el histórico completo está en Google Sheets${_sinEnviar?` · <span style="color:var(--yellow);">⏳ ${_sinEnviar} sin enviar (no se borran hasta confirmarse)</span>`:''}</div>`;
-  const avgGlbHTML=`<span style="font-size:13px;color:var(--text)">Promedio global: <strong style="font-size:15px;font-family:var(--mono);color:${_strikeColor}">${gAvg>0?'+':''}${gAvg}</strong> Lugares</span>`;
+  const avgGlbHTML=`<span style="font-size:13px;color:var(--text)">Total ${_strikeTicker}: <strong style="font-size:15px;font-family:var(--mono);color:${_totNeto>=0?'var(--green)':'var(--red)'}">${_totNeto>=0?'+$':'-$'}${Math.abs(_totNeto).toFixed(2)}</strong> neto`+
+    (_winRate!=null?` · <span style="color:var(--text3)">${_ganadoras}/${_cerradas.length} ganadoras (${_winRate}%)</span>`:'')+`</span>`;
   // Promedio de cuántos $ corre el precio de la ACCIÓN entre entrada y salida
   // (a partir de la Diferencia $ de cada fila) -- solo cuenta filas donde
   // ambos datos (entrada y salida) fueron capturados.
@@ -6050,7 +6151,9 @@ function renderStrikeLog(){
     ?`<span style="font-size:13px;color:var(--text)" title="Promedio de cuánto recorre la acción entre entrada y salida — referencia para calibrar el movimiento mínimo esperado">Movimiento $: <strong style="font-size:15px;font-family:var(--mono);color:var(--blue)">$${diffAvg.toFixed(2)}</strong></span>`
     :`<span style="font-size:13px;color:var(--text3);">Movimiento $: —</span>`;
   area.innerHTML=`
-    <div id="strikeLogList" style="padding:0 16px;">${listHTML}</div>
+    <div id="strikeLogScroll" style="overflow-x:auto;padding:0 16px;">
+      <div id="strikeLogList" style="min-width:max-content;">${headHTML}${listHTML}</div>
+    </div>
     <div id="strikeAvgBox" style="padding:12px 16px;border-top:1px solid var(--border);margin-top:4px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
       <div style="display:flex;flex-direction:column;gap:8px;">
         <div id="strikeAvgDetail" style="display:flex;gap:16px;flex-wrap:wrap;">${avgDetHTML}</div>
@@ -6063,10 +6166,17 @@ function renderStrikeLog(){
 function updateCardAverages(){
   _mainTickers.forEach(ticker=>{
     const el=document.getElementById('avg-'+ticker);if(!el)return;
+    // ── (2026-08-14) El número de la tarjeta era el promedio de "Lugares".
+    // Quitado ese campo, la tarjeta muestra el P&L neto acumulado del ticker
+    // en la ventana local — que es lo que uno quiere ver de un vistazo al
+    // decidir dónde entrar. Solo operaciones reales y cerradas.
     let log=[];try{log=JSON.parse(localStorage.getItem('strikelog_'+ticker)||'[]');}catch(e){}
-    if(!log.length){el.textContent='—';el.style.color='#fff';return;}
-    const avg=log.reduce((a,b)=>a+b.dist,0)/log.length;
-    el.textContent=Math.round(avg);el.style.color=avg>0?'var(--green)':avg<0?'var(--red)':'#fff';
+    const pnls=log.filter(e=>e&&e.paper!==true).map(e=>_strikePnlDollars(e)).filter(p=>p!=null);
+    if(!pnls.length){el.textContent='—';el.style.color='#fff';el.title='Sin operaciones cerradas';return;}
+    const tot=pnls.reduce((a,b)=>a+b,0);
+    el.textContent=(tot>=0?'+$':'-$')+Math.abs(tot).toFixed(2);
+    el.style.color=tot>0?'var(--green)':tot<0?'var(--red)':'#fff';
+    el.title=`P&L neto de ${pnls.length} operación(es) cerrada(s) de ${ticker}`;
   });
 }
 
@@ -9840,7 +9950,13 @@ async function init(){
   }else{
     // No key — don't make any API calls
     document.getElementById('signalArea').innerHTML='<div style="text-align:center;padding:30px;color:var(--text2);font-size:13px;"><div style="font-size:28px;margin-bottom:10px">🔑</div><div style="font-weight:600;">Configura tu API key</div><div style="font-size:11px;margin-top:6px;color:var(--text3)">Haz clic en el botón Finnhub en el topbar</div></div>';
-    document.getElementById('momentumArea').innerHTML='<div style="text-align:center;padding:20px;color:var(--text3);font-size:12px;">Requiere API key</div>';
+    // BUG LATENTE ENCONTRADO AL PROBAR (2026-08-14): #momentumArea no existe en
+    // el HTML (quedó de una versión anterior del panel). Sin key, esta línea
+    // lanzaba TypeError y ABORTABA init() ahí mismo, así que todo lo que va
+    // después (popup de reglas, refresco de token, timers) nunca arrancaba en
+    // una instalación nueva. Ahora es opcional.
+    const _mA=document.getElementById('momentumArea');
+    if(_mA)_mA.innerHTML='<div style="text-align:center;padding:20px;color:var(--text3);font-size:12px;">Requiere API key</div>';
   }
 
   // Show rules popup on first load
@@ -10498,7 +10614,12 @@ async function updateFuturesSemaphore(){
 
 <!-- Strike Log Modal -->
 <div id="strikeModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:1000;align-items:center;justify-content:center;padding:16px;">
-  <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:var(--rl);width:100%;max-width:1080px;max-height:90vh;overflow-y:auto;display:flex;flex-direction:column;">
+  <!-- ── ANCHO (2026-08-14): antes 1080px y cada fila del log traía su propia
+       barra de scroll horizontal, así que las líneas se veían cortadas. Ahora
+       el cuadro usa casi todo el ancho de la pantalla (tope 1600px) y el scroll
+       horizontal, si hace falta, es UNO solo para toda la lista — ver
+       #strikeLogScroll en renderStrikeLog(). ─────────────────────────────── -->
+  <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:var(--rl);width:100%;max-width:1600px;max-height:92vh;overflow-y:auto;display:flex;flex-direction:column;">
     <!-- Header -->
     <div style="padding:14px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
       <div style="display:flex;align-items:center;gap:10px;">
@@ -10515,7 +10636,7 @@ async function updateFuturesSemaphore(){
     </div>
     <!-- Range + niveles -->
     <div style="padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-      <div style="font-size:11px;color:var(--text3);">Distancia Spot → Strike · <span style="color:var(--text2)">Costo $ · Lugares · Spread</span></div>
+      <div style="font-size:11px;color:var(--text3);">Libro de operaciones · <span style="color:var(--text2)">Contratos · Costo $ · Venta $ · P&amp;L neto</span></div>
       <div style="display:flex;align-items:center;gap:4px;margin-left:auto;">
         <span style="font-size:10px;color:var(--text3);">Rango: $</span>
         <input type="number" id="strikeRangeMin" placeholder="Min" step="1"
@@ -10583,8 +10704,6 @@ async function updateFuturesSemaphore(){
       <input type="number" id="strikeSalida" placeholder="Salida $" min="0" step="0.01"
         title="Precio de la ACCIÓN (no de la opción) al momento de vender — sirve para medir cuánto corre el precio saliendo de Bollinger"
         style="flex:1;min-width:80px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--blue);padding:6px 8px;font-size:13px;font-family:var(--mono);outline:none;text-align:center;">
-      <input type="number" id="strikeDist" placeholder="Lugares" min="-50" max="100" step="0.5"
-        style="flex:1;min-width:70px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--text);padding:6px 8px;font-size:13px;font-family:var(--mono);outline:none;text-align:center;">
       <input type="number" id="strikeSpread" placeholder="Spread" min="0" step="0.01"
         style="flex:1;min-width:70px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--purple);padding:6px 8px;font-size:13px;font-family:var(--mono);outline:none;text-align:center;">
       <button onclick="addStrikeEntry()" style="background:var(--blue);border:none;border-radius:var(--r);color:#fff;padding:6px 16px;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap;">+ Agregar</button>
@@ -10594,7 +10713,10 @@ async function updateFuturesSemaphore(){
     <!-- Footer: export -->
     <div style="padding:8px 16px;border-top:1px solid var(--border);display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
       <div style="margin-left:auto;display:flex;gap:8px;">
-        <button onclick="exportStrikeLog()" style="background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--text2);padding:5px 14px;font-size:12px;cursor:pointer;">↓ Exportar</button>
+        <button onclick="exportStrikeLog()" title="Descarga en CSV las operaciones de este ticker, con contratos, comisión y P&amp;L neto"
+          style="background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--text2);padding:5px 14px;font-size:12px;cursor:pointer;">↓ Exportar este ticker</button>
+        <button onclick="exportStrikeLogTodos()" title="Descarga TODAS las operaciones de todos los tickers — respaldo del libro completo"
+          style="background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);color:var(--text2);padding:5px 14px;font-size:12px;cursor:pointer;">↓ Exportar todo</button>
       </div>
     </div>
   </div>
@@ -10644,7 +10766,13 @@ async function updateFuturesSemaphore(){
 
 <!-- ══ CONFIGURACIÓN MODAL ════════════════════════════════════ -->
 <div id="configModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:2500;align-items:center;justify-content:center;padding:16px;">
-  <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:var(--rl);width:100%;max-width:560px;max-height:90vh;display:flex;flex-direction:column;">
+  <!-- ── ANCHO (2026-08-14): antes 560px con 9 pestañas en una sola línea con
+       overflow-x. En la práctica se veían 5 y las otras 4 (APIs, Sync, Notas,
+       PIN) quedaban escondidas detrás de un scroll horizontal que casi no se
+       nota — parecía que no existían. Ahora el cuadro es de 1000px y la barra
+       de pestañas hace WRAP: nunca se esconde ninguna, sea cual sea el ancho
+       de pantalla. ──────────────────────────────────────────────────────── -->
+  <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:var(--rl);width:100%;max-width:1000px;max-height:92vh;display:flex;flex-direction:column;">
 
     <!-- Header -->
     <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
@@ -10656,7 +10784,7 @@ async function updateFuturesSemaphore(){
     </div>
 
     <!-- Tabs -->
-    <div style="display:flex;gap:0;border-bottom:1px solid var(--border);flex-shrink:0;overflow-x:auto;">
+    <div style="display:flex;gap:0;border-bottom:1px solid var(--border);flex-shrink:0;flex-wrap:wrap;row-gap:2px;">
       <button class="cfg-tab active" id="cfgTab-historial" onclick="switchCfgTab('historial')">📋 Historial</button>
       <button class="cfg-tab"        id="cfgTab-estrategias" onclick="switchCfgTab('estrategias')">📊 Estrategias</button>
       <button class="cfg-tab"        id="cfgTab-tickers"   onclick="switchCfgTab('tickers')"  >🎛️ Tickers</button>
@@ -10672,7 +10800,9 @@ async function updateFuturesSemaphore(){
     <div style="flex:1;overflow-y:auto;padding:18px;">
 
       <!-- ── TAB: APIs ──────────────────────────────────────── -->
-      <div id="cfgPanel-apis" style="overflow-y:auto;max-height:calc(90vh - 120px);">
+      <!-- Sin overflow/max-height propios: el cuerpo del modal ya scrollea.
+           Tenerlo en los dos sitios creaba dos barras de scroll anidadas. -->
+      <div id="cfgPanel-apis">
         <div class="cfg-section-title">Charles Schwab <span id="api-status-schwab" style="font-size:15px;margin-left:4px;">📡</span></div>
         <div class="cfg-label">App Key (Client ID)</div>
         <input id="cfg-schwabClientId" type="text" placeholder="Tu Schwab App Key..."

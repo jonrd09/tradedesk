@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- TradeDeskPro v5 | build:20260814_strikelog_ledger | B1:_wsSessionCandle_per15min B2:BB-REGRESO_strategy B3:intentoBull_loose B4:bbCallTrigger_connected B5:dedup_distVars B6:setup_gate_bbw B7:stochPutOk_noFloor A1:bbSessionOk_isMarketHours A2:schwabToken_firstTicker M1:momentumToLower_gate M2:bbwExpandActive M3:aviso_stricter M4:intento_volOk M5:unified_setup_card M6:bbwSqueezeBreakout M7:multiTF_regreso M8:BB-MTF_panel_replaces_noticias M9:setup_levels_removed M10:atr_velocity_gate M11:piercing_only_trigger M12:score_base60_no_double_filter M13:minmove_pct_of_price M14:casi_senal_diag M15:diferencia_abs M16:1h_derived_from_15m M17:meta_added M18:cuenta_real_ledger M19:sheets_autosync M20:strikelog_is_ledger M21:exportStrikeLog_fixed M22:paper_entries_flagged M23:delete_confirm_and_refresh M24:comision_neta -->
+<!-- TradeDeskPro v5 | build:20260814_strikelog_ledger | B1:_wsSessionCandle_per15min B2:BB-REGRESO_strategy B3:intentoBull_loose B4:bbCallTrigger_connected B5:dedup_distVars B6:setup_gate_bbw B7:stochPutOk_noFloor A1:bbSessionOk_isMarketHours A2:schwabToken_firstTicker M1:momentumToLower_gate M2:bbwExpandActive M3:aviso_stricter M4:intento_volOk M5:unified_setup_card M6:bbwSqueezeBreakout M7:multiTF_regreso M8:BB-MTF_panel_replaces_noticias M9:setup_levels_removed M10:atr_velocity_gate M11:piercing_only_trigger M12:score_base60_no_double_filter M13:minmove_pct_of_price M14:casi_senal_diag M15:diferencia_abs M16:1h_derived_from_15m M17:meta_added M18:cuenta_real_ledger M19:sheets_autosync M20:strikelog_is_ledger M21:exportStrikeLog_fixed M22:paper_entries_flagged M23:delete_confirm_and_refresh M24:comision_neta M25:panel_limpio -->
 <html lang="es">
 <head>
 <meta charset="UTF-8">
@@ -4238,6 +4238,29 @@ function _renderStratTab(){
   // Bloquea la señal cuando el activo está demasiado "dormido" para que la opción
   // rinda, aunque técnicamente rompa la banda. El % automático evita el sesgo del
   // valor plano en dólares, que silenciaba los tickers de precio bajo.
+  // ── Ajustes de Cuenta Real (movidos aquí desde el panel derecho el 2026-08-14,
+  //    para que el panel muestre solo números y no configuración) ──────────────
+  const _nPaper=crPaperCount();
+  const _crHtml=`<div style="background:var(--bg3);border:1px solid var(--green);border-radius:var(--r);padding:12px 14px;margin-bottom:10px;">
+    <div style="font-size:13px;font-weight:700;color:#fff;margin-bottom:8px;">💰 Cuenta Real</div>
+    <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-end;">
+      <div>
+        <div style="font-size:11px;color:var(--text3);margin-bottom:3px;">Capital inicial ($)</div>
+        <input type="number" value="${getCapitalInicial()}" min="1" step="0.01" onchange="setCapitalInicial(this.value);_renderStratTab();"
+          style="background:var(--bg4);border:1px solid var(--green);border-radius:var(--r);color:var(--green);padding:6px 10px;font-size:14px;font-family:var(--mono);width:110px;text-align:center;font-weight:700;outline:none;">
+      </div>
+      <div>
+        <div style="font-size:11px;color:var(--text3);margin-bottom:3px;" title="Se descuenta por contrato y por punta (comprar + vender)">Comisión por contrato ($)</div>
+        <input type="number" value="${getComisionContrato()}" min="0" step="0.05" onchange="setComisionContrato(this.value);_renderStratTab();"
+          style="background:var(--bg4);border:1px solid var(--yellow);border-radius:var(--r);color:var(--yellow);padding:6px 10px;font-size:14px;font-family:var(--mono);width:100px;text-align:center;font-weight:700;outline:none;">
+        <span style="font-size:10px;color:var(--text3);margin-left:4px;">× 2 puntas</span>
+      </div>
+      ${_nPaper?`<div>
+        <div style="font-size:11px;color:var(--text3);margin-bottom:3px;">Registros de paper trading</div>
+        <button onclick="crBorrarPaper();_renderStratTab();" style="background:rgba(255,77,109,.1);border:1px solid rgba(255,77,109,.35);border-radius:var(--r);color:var(--red);padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;">🗑 Borrar ${_nPaper}</button>
+      </div>`:''}
+    </div>
+  </div>`;
   const _mmPct=getMinMovePct();
   const _mmOvr=getMinMoveOverrides();
   const _mmRows=_signalTickers.filter((v,i,a)=>a.indexOf(v)===i).map(sym=>{
@@ -4275,7 +4298,7 @@ function _renderStratTab(){
     </div>
     ${_mmRows||'<div style="font-size:11px;color:var(--text3);">Sin tickers configurados</div>'}
   </div>`;
-  list.innerHTML=_mmHtml+STRAT_META.map(s=>{
+  list.innerHTML=_crHtml+_mmHtml+STRAT_META.map(s=>{
     const on=_stratEnabled(s.code);
     const dirColor=s.code.endsWith('-B')||s.code.endsWith('-C')||s.name.includes('PUT')?'var(--red)':'var(--green)';
     return`<div style="background:var(--bg3);border:1px solid var(--border2);border-radius:var(--r);padding:12px 14px;display:flex;align-items:center;gap:12px;">
@@ -4706,6 +4729,7 @@ function renderCuentaRealPanel(){
       <div style="display:flex;gap:5px;align-items:center;">
         ${pend?`<button onclick="crSyncPendientes()" title="${pend} operación(es) sin enviar a Google Sheets — clic para reintentar" style="background:rgba(255,194,52,.12);border:1px solid rgba(255,194,52,.4);border-radius:20px;color:var(--yellow);padding:3px 9px;font-size:10px;font-weight:700;cursor:pointer;">⟳ ${pend} sin enviar</button>`:''}
         <button onclick="crAddAjuste()" title="Registrar un depósito o retiro de dinero" style="background:rgba(167,139,250,.12);border:1px solid rgba(167,139,250,.4);border-radius:20px;color:var(--purple);padding:3px 9px;font-size:10px;font-weight:700;cursor:pointer;">± Depósito</button>
+        <button onclick="openConfigModal();switchCfgTab('estrategias');" title="Capital inicial, comisión y limpieza de registros de paper" style="background:none;border:1px solid var(--border2);border-radius:20px;color:var(--text3);padding:3px 8px;font-size:10px;cursor:pointer;">⚙</button>
       </div>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px;">
@@ -4732,21 +4756,7 @@ function renderCuentaRealPanel(){
         <div style="font-family:var(--mono);font-size:13px;font-weight:700;color:var(--yellow);">${_crMoney(bal*0.10)}</div>
       </div>
     </div>
-    <div style="display:flex;align-items:center;justify-content:center;gap:6px;margin-top:6px;flex-wrap:wrap;">
-      <span style="font-size:10px;color:var(--text3);">Capital inicial</span>
-      <input type="number" value="${cap}" min="1" step="1" onchange="setCapitalInicial(this.value)"
-        style="background:var(--bg4);border:1px solid var(--border2);border-radius:6px;color:var(--green);padding:2px 5px;font-size:11px;font-family:var(--mono);width:70px;text-align:center;font-weight:700;outline:none;">
-      <span style="font-size:10px;color:var(--text3);">· ${cerradas.length} operación${cerradas.length===1?'':'es'} cerrada${cerradas.length===1?'':'s'}</span>
-    </div>
-    <div style="display:flex;align-items:center;justify-content:center;gap:6px;margin-top:4px;">
-      <span style="font-size:10px;color:var(--text3);" title="Se descuenta por contrato y por punta: comprar y vender">Comisión / contrato</span>
-      <input type="number" value="${getComisionContrato()}" min="0" step="0.05" onchange="setComisionContrato(this.value)"
-        style="background:var(--bg4);border:1px solid var(--border2);border-radius:6px;color:var(--yellow);padding:2px 5px;font-size:11px;font-family:var(--mono);width:58px;text-align:center;font-weight:700;outline:none;">
-      <span style="font-size:10px;color:var(--text3);">× 2 puntas${totalComis>0?` · llevas ${_crMoney(totalComis)} en comisiones`:''}</span>
-    </div>
-    ${sinQty?`<div style="font-size:10px;color:var(--yellow);text-align:center;margin-top:5px;line-height:1.4;">⚠ ${sinQty} operación(es) sin cantidad de contratos — no cuentan en el balance.<br>Ábrelas en el Strike Log (✏️) y ponles los contratos.</div>`:''}
-    ${nPaper?`<div style="font-size:10px;color:var(--text3);text-align:center;margin-top:5px;line-height:1.4;">📝 ${nPaper} registro(s) de paper trading — no cuentan en el balance ni se envían a Sheets.<br>Siguen alimentando los promedios de Lugares. <button onclick="crBorrarPaper()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:10px;text-decoration:underline;padding:0;">Borrarlos</button></div>`:''}
-    <div style="font-size:10px;color:var(--text3);text-align:center;margin-top:5px;">Las operaciones se registran en el Strike Log: toca un ticker arriba.</div>`;
+    `;
 }
 
 function crAddAjuste(){

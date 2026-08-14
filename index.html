@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- TradeDeskPro v5 | build:20260814_strikelog_ledger | B1:_wsSessionCandle_per15min B2:BB-REGRESO_strategy B3:intentoBull_loose B4:bbCallTrigger_connected B5:dedup_distVars B6:setup_gate_bbw B7:stochPutOk_noFloor A1:bbSessionOk_isMarketHours A2:schwabToken_firstTicker M1:momentumToLower_gate M2:bbwExpandActive M3:aviso_stricter M4:intento_volOk M5:unified_setup_card M6:bbwSqueezeBreakout M7:multiTF_regreso M8:BB-MTF_panel_replaces_noticias M9:setup_levels_removed M10:atr_velocity_gate M11:piercing_only_trigger M12:score_base60_no_double_filter M13:minmove_pct_of_price M14:casi_senal_diag M15:diferencia_abs M16:1h_derived_from_15m M17:meta_added M18:cuenta_real_ledger M19:sheets_autosync M20:strikelog_is_ledger M21:exportStrikeLog_fixed M22:paper_entries_flagged M23:delete_confirm_and_refresh M24:comision_neta M25:panel_limpio M26:orden_cronologico M27:poda_local_5dias M28:probar_conexion M29:sin_lugares M30:log_ancho_scroll_unico M31:export_csv_robusto M32:config_ancho_tabs_visibles -->
+<!-- TradeDeskPro v5 | build:20260814_strikelog_ledger | B1:_wsSessionCandle_per15min B2:BB-REGRESO_strategy B3:intentoBull_loose B4:bbCallTrigger_connected B5:dedup_distVars B6:setup_gate_bbw B7:stochPutOk_noFloor A1:bbSessionOk_isMarketHours A2:schwabToken_firstTicker M1:momentumToLower_gate M2:bbwExpandActive M3:aviso_stricter M4:intento_volOk M5:unified_setup_card M6:bbwSqueezeBreakout M7:multiTF_regreso M8:BB-MTF_panel_replaces_noticias M9:setup_levels_removed M10:atr_velocity_gate M11:piercing_only_trigger M12:score_base60_no_double_filter M13:minmove_pct_of_price M14:casi_senal_diag M15:diferencia_abs M16:1h_derived_from_15m M17:meta_added M18:cuenta_real_ledger M19:sheets_autosync M20:strikelog_is_ledger M21:exportStrikeLog_fixed M22:paper_entries_flagged M23:delete_confirm_and_refresh M24:comision_neta M25:panel_limpio M26:orden_cronologico M27:poda_local_5dias M28:probar_conexion M29:sin_lugares M30:log_ancho_scroll_unico M31:export_csv_robusto M32:config_ancho_tabs_visibles M33:strikelog_grid_full_width M34:debug_radiografia_gate -->
 <html lang="es">
 <head>
 <meta charset="UTF-8">
@@ -105,6 +105,34 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
 /* Rules popup */
 .rules-popup{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:linear-gradient(135deg,#0d1b2e,#111827);border:1px solid rgba(61,139,255,.4);border-radius:var(--rl);padding:28px 32px;z-index:2000;min-width:420px;max-width:90vw;box-shadow:0 20px 60px rgba(0,0,0,.7);}
 /* Strike Log */
+/* ── REJILLA DEL LOG (2026-08-14) ────────────────────────────────────────────
+   Antes las columnas eran flex con ancho FIJO (flex:0 0 Npx): la fila medía lo
+   que medía y todo el ancho sobrante del cuadro quedaba vacío a la derecha.
+   Ahora es un grid con minmax(min, fr): cada columna tiene un mínimo legible y
+   el espacio de más se reparte entre todas, así que la tabla siempre llega al
+   borde y cada dato cae exactamente bajo su encabezado. min-width mantiene el
+   scroll horizontal solo cuando la pantalla es de verdad estrecha. */
+.slog-row{display:grid;
+  grid-template-columns:
+    minmax(66px,1fr)    /* Día */
+    minmax(78px,1.05fr) /* Fecha */
+    minmax(62px,.85fr)  /* Hora */
+    minmax(40px,.55fr)  /* Tipo */
+    minmax(44px,.55fr)  /* Contratos */
+    minmax(58px,.8fr)   /* Costo */
+    minmax(58px,.8fr)   /* Venta */
+    minmax(64px,.9fr)   /* Entrada */
+    minmax(64px,.9fr)   /* Salida */
+    minmax(58px,.8fr)   /* Spread */
+    minmax(60px,.85fr)  /* % Ganancia */
+    minmax(72px,1fr)    /* P&L neto */
+    minmax(64px,.9fr)   /* Mov. $ */
+    minmax(38px,.5fr)   /* Sheets */
+    26px 22px;          /* editar / borrar */
+  gap:8px;align-items:center;min-width:940px;}
+/* Al editar, la fila deja de ser rejilla: el formulario tiene otra cantidad de
+   celdas y se acomoda libre. */
+.slog-editing{display:flex;flex-wrap:wrap;gap:6px;align-items:center;min-width:940px;}
 .strike-modal{position:fixed;inset:0;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;z-index:1000;}
 .strike-box{background:var(--bg2);border:1px solid var(--border2);border-radius:var(--rl);padding:24px;width:580px;max-width:95vw;}
 /* ── News Panel ── */
@@ -258,6 +286,10 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
         <!-- populated by renderSignalTickerChips() -->
       </div>
     </div>
+    <!-- Radiografía del gate — solo visible con Debug ON. Vive FUERA de
+         #signalArea a propósito: ese contenedor lo reescribe el render
+         incremental de señales y borraría el panel en cada ciclo. -->
+    <div id="debugDiagPanel" style="display:none;"></div>
     <div id="signalArea">
       <div style="text-align:center;padding:20px;color:var(--text2);font-size:13px;">⟳ Calculando señales…</div>
     </div>
@@ -387,6 +419,14 @@ let _pinBuffer='',_pinCallback=null;
 let _pinFailCount=0; // track consecutive failures
 let _testMode=false;
 let _debugMode=false; // shows all signals regardless of % threshold
+// ── RADIOGRAFÍA DEL GATE (solo se llena en Debug) ───────────────────────────
+// El botón Debug prometía "todas las señales sin filtro de 75%", pero el 75% es
+// el ÚLTIMO filtro de la cadena: antes está el gate de calidad, y una señal que
+// no pasa el gate nunca llega a crearse, así que Debug no tenía nada que mostrar
+// y salía vacío. Ahora Debug (a) deja pasar las rupturas que el gate bloqueó,
+// con su score real, y (b) guarda aquí el estado de CADA ticker aunque no haya
+// habido ruptura, para que siempre se vea qué tan cerca está cada uno.
+let _dbgGateDiag=[];
 // Persiste el tiempo de primera detección de cada señal — clave: sym_code_type
 const _sigDetectedAt={};
 const _pinnedSignals={}; // señales fijadas en el panel — persisten hasta que el trader las cierra con X
@@ -2184,6 +2224,7 @@ async function _buildSignalsCore(){
   // ───────────────────────────────────────────────────────────────────────────
 
   const all=[];
+  _dbgGateDiag=[]; // se repuebla en cada ciclo cuando Debug está encendido
   const _mtfActiveSignals=[]; // BB-MTF — confluencia 15m+1H+Día, se renderiza aparte (panel violeta)
   // Check market hours — skip after hours (low volume, unreliable signals)
   const _etSig=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
@@ -3088,6 +3129,37 @@ async function _buildSignalsCore(){
       addLog('warn','Casi-señal',`${sym} ${_dir} rompió la banda pero se bloqueó (${_f.length} razón${_f.length>1?'es':''})`,_f.join(' · '));
     })();
 
+    // ── RADIOGRAFÍA PARA EL MODO DEBUG ──────────────────────────────────────
+    // Se guarda SIEMPRE que Debug esté encendido, haya o no ruptura. Es lo que
+    // hace que el botón nunca salga vacío: aunque ningún ticker rompa banda,
+    // se ve cuánto le falta a cada uno y qué condición es la que está frenando.
+    if(_debugMode){
+      _dbgGateDiag.push({
+        sym, price:lP15,
+        rompio: piercingUpper?'call':piercingLower?'put':null,
+        distUp:(lUp15-_candleClose)/lP15*100,   // % que le falta al close para la banda superior
+        distLow:(_candleClose-lLow15)/lP15*100, // % que le falta para la inferior
+        paso: bbPureGateCall?'call':bbPureGatePut?'put':null,
+        conds:[
+          {k:'Volatilidad', ok:_volatilidadReal, val:`BBW ${lBBW15.toFixed(2)}% · pct ${_bbwPctRank.toFixed(0)}`, req:'pct ≥60 + bandas abriendo'},
+          {k:'Velocidad',   ok:_velocidadOk,     val:`${_velATR.toFixed(2)} ATR/30min`,                          req:'≥0.70 ATR'},
+          {k:'Potencial',   ok:_potencialOk,     val:`$${_potencial1h.toFixed(2)} en 1h`,                        req:`≥$${_minMove.toFixed(2)}`},
+          {k:'Cuerpo',      ok:_velaGrande,      val:`$${_bodyNow.toFixed(2)}`,                                  req:`≥$${(_avgBody10*1.2).toFixed(2)} (1.2× prom.)`},
+          {k:'No es mecha', ok:_cuerpoDominante, val:`${(_bodyNow/_rangeNow*100).toFixed(0)}% del rango`,         req:'≥50%'},
+          {k:'Cierre fuerte',ok:piercingLower?_cierreFuertePut:_cierreFuerteCall,
+             val:`${((piercingLower?(_candleHigh-_candleClose):(_candleClose-_candleLow))/_rangeNow*100).toFixed(0)}%`, req:'≥65%'},
+          {k:'Sesión',      ok:_bbSessionOk,     val:_bbSessionOk?'vela real de hoy':'sin vela de hoy',           req:'horario de mercado'},
+        ],
+      });
+    }
+    // En Debug el gate de calidad se RELAJA: basta con que el precio haya roto
+    // la banda para que la señal se cree y se pueda ver con las condiciones que
+    // fallaron marcadas en ❌. El score NO recibe los 60 puntos del gate (el
+    // gate no pasó), así que estas candidatas salen con porcentaje bajo y ni
+    // llegan a Telegram ni al Historial — ambos exigen superar el umbral.
+    const _dbgSoloCall=_debugMode&&bbCallTrigger&&!bbPureGateCall;
+    const _dbgSoloPut =_debugMode&&bbPutTrigger &&!bbPureGatePut;
+
     // M-05 — bloque original eliminado (movido arriba)
 
     // ── VOLATILIDAD CÍCLICA (tus notas: "baja vol → alta vol → baja vol") ───
@@ -3105,10 +3177,10 @@ async function _buildSignalsCore(){
     const _bbwWasSqueezed=lBBW15_2<=_bbwPct25*1.15; // hace 2 velas estaba en zona baja
     const _bbwSqueezeBreakout=_bbwWasSqueezed&&_bbwExpandActive; // squeeze → expansión
 
-    if(_stratEnabled('BB-A')&&bbPureGateCall){
+    if(_stratEnabled('BB-A')&&(bbPureGateCall||_dbgSoloCall)){
       // Gate de calidad aprobado = 60 puntos. Los bonos suben de 60 a 100 como
       // etiqueta de confianza, NO como requisito (ver comentario de _WBB).
-      let score=_WBB.bb_gate; // 60 base
+      let score=bbPureGateCall?_WBB.bb_gate:0; // 0 base si es candidata solo-Debug
       if(bbwAboveMedian)       score+=_WBB.bb_bbwAboveMedian;
       if(_bbwSqueezeBreakout)  score+=_WBB.bb_squeeze; // 🔥 volatilidad cíclica — rompe squeeze
       if(bigBodyCall)          score+=_WBB.bb_body;
@@ -3119,7 +3191,7 @@ async function _buildSignalsCore(){
       if(_hlCallOk)            score+=_WBB.ctx_hlines;
 
       all.push({...meta,code:'BB-A',name:'BB Breakout — CALL',type:'call',
-        weighted:true,score,threshold:60,
+        weighted:true,score,threshold:60,_dbgOnly:!bbPureGateCall,
         _scoreQuality:score>=BB_SCORE_STRONG?'strong':score>=BB_SCORE_MODERATE?'moderate':'weak',
         reqs:[
         // ── GATE DE RUPTURA + CALIDAD (siempre ✅ cuando llegamos aquí) ──
@@ -3141,8 +3213,8 @@ async function _buildSignalsCore(){
       ]});
     }
 
-    if(_stratEnabled('BB-B')&&bbPureGatePut){
-      let score=_WBB.bb_gate; // 60 base — el gate de calidad ES la señal
+    if(_stratEnabled('BB-B')&&(bbPureGatePut||_dbgSoloPut)){
+      let score=bbPureGatePut?_WBB.bb_gate:0; // 0 base si es candidata solo-Debug
       if(bbwAboveMedian)      score+=_WBB.bb_bbwAboveMedian;
       if(_bbwSqueezeBreakout) score+=_WBB.bb_squeeze; // 🔥 volatilidad cíclica — rompe squeeze
       if(bigBodyPut)          score+=_WBB.bb_body;
@@ -3153,7 +3225,7 @@ async function _buildSignalsCore(){
       if(_hlPutOk)            score+=_WBB.ctx_hlines;
 
       all.push({...meta,code:'BB-B',name:'BB Breakout — PUT',type:'put',
-        weighted:true,score,threshold:60,
+        weighted:true,score,threshold:60,_dbgOnly:!bbPureGatePut,
         _scoreQuality:score>=BB_SCORE_STRONG?'strong':score>=BB_SCORE_MODERATE?'moderate':'weak',
         reqs:[
         {ok:piercingLower,  tf:'15m',weight:'BB',text:(()=>{const _d=(lLow15-_candleClose)/lP15*100;return `✅ Vela FUERA de banda inferior: $${_candleClose.toFixed(2)} < $${lLow15.toFixed(2)} (-${_d.toFixed(2)}%)`;})()},
@@ -3503,6 +3575,7 @@ async function _buildSignalsCore(){
   // independiente de si hay o no señales normales, para que siempre refleje el ciclo actual.
   _lastMTFSignals=_mtfActiveSignals;
   renderMultiTFPanel(_mtfActiveSignals);
+  renderDebugDiag(); // radiografía del gate — no hace nada si Debug está apagado
 
   if(all.length===0&&!_testMode){
     area.innerHTML='<div style="text-align:center;padding:30px;color:var(--text2);font-size:13px;"><div style="font-size:28px;margin-bottom:10px">🔗</div><div style="font-weight:600;color:var(--yellow);">Sin datos disponibles</div><div style="font-size:12px;margin-top:8px;color:var(--text3);">Verifica la conexión con Schwab</div></div>';
@@ -3545,7 +3618,7 @@ async function _buildSignalsCore(){
           const _totalReqs=s.reqs?s.reqs.length:0;
           const _dispPct=s.weighted?s.pct:(_totalReqs>0?Math.round((s.reqs.filter(r=>r.ok).length/_totalReqs)*100):0);
           const _thr=s.weighted?(s.threshold||70):75;
-          if(_dispPct>=_thr){
+          if(_dispPct>=_thr&&!s._dbgOnly){
             s.pct_signal=_dispPct;
             addToHistorial(s);
             addLog('debug','Historial',`✅ ${s.sym} ${s.code} ${s.type.toUpperCase()} ${_dispPct}% — guardado`);
@@ -3618,7 +3691,9 @@ async function _buildSignalsCore(){
     // Guardar SIEMPRE en historial cuando la señal pasa el threshold
     // (independiente de si el precio es live o stale — el trader necesita el registro)
     const _passThreshold=s.weighted?(s.threshold||70):75;
-    if(!s.isSetup&&disp>=_passThreshold){
+    // _dbgOnly = candidata que solo existe porque Debug relajó el gate. Nunca
+    // debe entrar al Historial ni salir por Telegram: no es una señal válida.
+    if(!s.isSetup&&disp>=_passThreshold&&!s._dbgOnly){
       s.pct_signal=disp;
       addToHistorial(s);
     }
@@ -3643,7 +3718,7 @@ async function _buildSignalsCore(){
     const _etNow=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
     const _hourKey=`${_etNow.toLocaleDateString('es-PR')}_${_etNow.getHours()}`;
     const _sigKey=`tg_sent_${s.sym}_${s.code}_${_hourKey}`;
-    if(disp>=_passThreshold&&!localStorage.getItem(_sigKey)){
+    if(disp>=_passThreshold&&!s._dbgOnly&&!localStorage.getItem(_sigKey)){
       if(_priceConfirmed){
         localStorage.setItem(_sigKey,'1');
         notifySignal(s.sym,s.code,s.name,s.type,disp,s.price,s._pctReliable!==false?s.pct:null);
@@ -5994,6 +6069,9 @@ function editStrikeEntry(ticker,idx){
   try{log=JSON.parse(localStorage.getItem(key)||'[]');}catch(e){}
   const e=log[idx];if(!e)return;
   const el=document.getElementById('sentry-'+idx);if(!el)return;
+  // El formulario de edición no tiene las mismas celdas que la rejilla, así que
+  // la fila cambia a flujo libre mientras se edita (renderStrikeLog la repinta).
+  el.className='slog-editing';
   const days=['Lunes','Martes','Miércoles','Jueves','Viernes'];
   const opts=days.map(d=>`<option value="${d}" ${d===e.day?'selected':''}>${d}</option>`).join('');
   el.innerHTML=`<select id="ed-${idx}" style="background:var(--bg4);border:1px solid var(--blue);border-radius:6px;color:var(--text);padding:3px 6px;font-size:12px;flex:1;">${opts}</select>
@@ -6056,10 +6134,10 @@ function renderStrikeLog(){
     // Salida $ | Spread | % Ganancia | P&L neto | Mov. $ | Sheets | editar/borrar. Ancho fijo en
     // cada columna (aunque esté vacía) para que la grilla quede alineada con
     // los inputs de arriba en vez de "saltar" cuando falta un dato.
-    const _ventaHTML=`<span style="font-family:var(--mono);font-size:13px;color:var(--green);width:62px;flex:0 0 62px;text-align:right;">${e.venta!=null?'$'+e.venta.toFixed(2):'—'}</span>`;
-    const _entradaHTML=`<span style="font-family:var(--mono);font-size:13px;color:var(--blue);width:68px;flex:0 0 68px;text-align:right;">${e.entrada!=null?'$'+e.entrada.toFixed(2):'—'}</span>`;
-    const _salidaHTML=`<span style="font-family:var(--mono);font-size:13px;color:var(--blue);width:68px;flex:0 0 68px;text-align:right;">${e.salida!=null?'$'+e.salida.toFixed(2):'—'}</span>`;
-    const _gainHTML=`<span style="font-family:var(--mono);font-size:14px;font-weight:700;color:${_gain!=null?(_gain>=0?'var(--green)':'var(--red)'):'var(--text3)'};width:64px;flex:0 0 64px;text-align:right;" title="Venta vs Costo">${_gain!=null?(_gain>=0?'+':'')+_gain.toFixed(1)+'%':'—'}</span>`;
+    const _ventaHTML=`<span style="font-family:var(--mono);font-size:13px;color:var(--green);text-align:right;">${e.venta!=null?'$'+e.venta.toFixed(2):'—'}</span>`;
+    const _entradaHTML=`<span style="font-family:var(--mono);font-size:13px;color:var(--blue);text-align:right;">${e.entrada!=null?'$'+e.entrada.toFixed(2):'—'}</span>`;
+    const _salidaHTML=`<span style="font-family:var(--mono);font-size:13px;color:var(--blue);text-align:right;">${e.salida!=null?'$'+e.salida.toFixed(2):'—'}</span>`;
+    const _gainHTML=`<span style="font-family:var(--mono);font-size:14px;font-weight:700;color:${_gain!=null?(_gain>=0?'var(--green)':'var(--red)'):'var(--text3)'};text-align:right;" title="Venta vs Costo">${_gain!=null?(_gain>=0?'+':'')+_gain.toFixed(1)+'%':'—'}</span>`;
     // Diferencia $ = magnitud del recorrido de la ACCIÓN, sin signo (ver
     // _strikeDiffDollars). Se pinta en azul como Entrada/Salida — son las tres
     // columnas que hablan del subyacente. El verde/rojo queda reservado para el
@@ -6070,46 +6148,46 @@ function renderStrikeLog(){
     const _com=_strikeComision(e);
     const _pnlTip=_pnlD==null?'Falta la venta o los contratos'
       :`Bruto $${_pnlBr.toFixed(2)} − comisión $${_com.toFixed(2)} (${e.qty}c × $${getComisionContrato().toFixed(2)} × 2 puntas) = neto $${_pnlD.toFixed(2)}`;
-    const _pnlHTML=`<span style="font-family:var(--mono);font-size:14px;font-weight:700;color:${_pnlD==null?'var(--text3)':_pnlD>=0?'var(--green)':'var(--red)'};width:76px;flex:0 0 76px;text-align:right;" title="${_pnlTip}">${_pnlD==null?'—':(_pnlD>=0?'+$':'-$')+Math.abs(_pnlD).toFixed(2)}</span>`;
+    const _pnlHTML=`<span style="font-family:var(--mono);font-size:14px;font-weight:700;color:${_pnlD==null?'var(--text3)':_pnlD>=0?'var(--green)':'var(--red)'};text-align:right;" title="${_pnlTip}">${_pnlD==null?'—':(_pnlD>=0?'+$':'-$')+Math.abs(_pnlD).toFixed(2)}</span>`;
     const _syncHTML=e.paper===true
-      ? `<span title="Registro de la época de paper trading — no cuenta en el balance real ni se envía a Sheets" style="color:var(--text3);font-size:9px;width:38px;flex:0 0 38px;text-align:center;font-weight:700;">PAPER</span>`
+      ? `<span title="Registro de la época de paper trading — no cuenta en el balance real ni se envía a Sheets" style="color:var(--text3);font-size:9px;text-align:center;font-weight:700;">PAPER</span>`
       : e.synced===true
-      ? `<span title="Enviado a Google Sheets" style="color:var(--green);font-size:12px;width:38px;flex:0 0 38px;text-align:center;">✓</span>`
-      : `<span title="Pendiente de enviar a Google Sheets — usa ⟳ Reintentar en el panel de Cuenta Real" style="color:var(--yellow);font-size:12px;width:38px;flex:0 0 38px;text-align:center;">⏳</span>`;
-    const _diffHTML=`<span style="font-family:var(--mono);font-size:14px;font-weight:700;color:${_diff!=null?'var(--blue)':'var(--text3)'};width:68px;flex:0 0 68px;text-align:right;" title="Cuánto recorrió la acción entre entrada y salida (magnitud, sin dirección)">${_diff!=null?'$'+_diff.toFixed(2):'—'}</span>`;
+      ? `<span title="Enviado a Google Sheets" style="color:var(--green);font-size:12px;text-align:center;">✓</span>`
+      : `<span title="Pendiente de enviar a Google Sheets — usa ⟳ Reintentar en el panel de Cuenta Real" style="color:var(--yellow);font-size:12px;text-align:center;">⏳</span>`;
+    const _diffHTML=`<span style="font-family:var(--mono);font-size:14px;font-weight:700;color:${_diff!=null?'var(--blue)':'var(--text3)'};text-align:right;" title="Cuánto recorrió la acción entre entrada y salida (magnitud, sin dirección)">${_diff!=null?'$'+_diff.toFixed(2):'—'}</span>`;
     // ── FILA (2026-08-14) ───────────────────────────────────────────────────
     // Antes cada fila llevaba `overflow-x:auto`, así que CADA UNA tenía su
     // propia barra de scroll y las líneas se veían cortadas. Ahora la fila no
     // scrollea: el scroll (si hace falta) es uno solo, del contenedor
     // #strikeLogScroll. Los anchos pasaron de min-width a width+flex:0 0 para
     // que todas las columnas queden en la misma rejilla, fila tras fila.
-    return`<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);width:max-content;min-width:100%;" id="sentry-${i}">
-    <span style="width:74px;flex:0 0 74px;color:var(--text);font-weight:600;font-size:14px;">${e.day}</span>
-    <span style="font-size:12px;color:var(--text3);width:76px;flex:0 0 76px;font-family:var(--mono);">${e.date||''}</span>
-    <span style="font-size:12px;color:var(--blue);width:62px;flex:0 0 62px;font-family:var(--mono);">${e.time||''}</span>
-    <span style="font-size:11px;font-weight:700;width:40px;flex:0 0 40px;text-align:center;color:${e.tipo==='put'?'var(--red)':e.tipo==='call'?'var(--green)':'var(--text3)'};">${e.tipo?e.tipo.toUpperCase():'—'}</span>
-    <span style="font-family:var(--mono);font-size:13px;font-weight:700;color:${e.qty?'var(--green)':e.paper?'var(--text3)':'var(--yellow)'};width:46px;flex:0 0 46px;text-align:center;" title="${e.qty?'Contratos':e.paper?'Registro de paper trading — no aplica':'⚠ Sin contratos: esta operación no cuenta en el balance. Edítala y ponle la cantidad.'}">${e.qty?e.qty+'c':e.paper?'—':'⚠ —'}</span>
-    <span style="font-family:var(--mono);font-size:13px;color:var(--yellow);width:62px;flex:0 0 62px;text-align:right;">$${(e.costo||0).toFixed(2)}</span>
+    return`<div class="slog-row" style="padding:8px 0;border-bottom:1px solid var(--border);" id="sentry-${i}">
+    <span style="color:var(--text);font-weight:600;font-size:14px;">${e.day}</span>
+    <span style="font-size:12px;color:var(--text3);font-family:var(--mono);">${e.date||''}</span>
+    <span style="font-size:12px;color:var(--blue);font-family:var(--mono);">${e.time||''}</span>
+    <span style="font-size:11px;font-weight:700;text-align:center;color:${e.tipo==='put'?'var(--red)':e.tipo==='call'?'var(--green)':'var(--text3)'};">${e.tipo?e.tipo.toUpperCase():'—'}</span>
+    <span style="font-family:var(--mono);font-size:13px;font-weight:700;color:${e.qty?'var(--green)':e.paper?'var(--text3)':'var(--yellow)'};text-align:center;" title="${e.qty?'Contratos':e.paper?'Registro de paper trading — no aplica':'⚠ Sin contratos: esta operación no cuenta en el balance. Edítala y ponle la cantidad.'}">${e.qty?e.qty+'c':e.paper?'—':'⚠ —'}</span>
+    <span style="font-family:var(--mono);font-size:13px;color:var(--yellow);text-align:right;">$${(e.costo||0).toFixed(2)}</span>
     ${_ventaHTML}
     ${_entradaHTML}
     ${_salidaHTML}
-    <span style="font-family:var(--mono);font-size:12px;color:var(--purple);width:60px;flex:0 0 60px;text-align:right;" title="Spread Bid/Ask">${e.spread!=null?'Δ$'+e.spread.toFixed(2):'—'}</span>
+    <span style="font-family:var(--mono);font-size:12px;color:var(--purple);text-align:right;" title="Spread Bid/Ask">${e.spread!=null?'Δ$'+e.spread.toFixed(2):'—'}</span>
     ${_gainHTML}
     ${_pnlHTML}
     ${_diffHTML}
     ${_syncHTML}
-    <button onclick="editStrikeEntry('${_strikeTicker}',${i})" title="Editar" style="background:none;border:none;color:var(--blue);cursor:pointer;font-size:13px;padding:0;width:26px;flex:0 0 26px;">✏️</button>
-    <button onclick="deleteStrikeEntry('${_strikeTicker}',${i})" title="Borrar" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:13px;padding:0;width:22px;flex:0 0 22px;">✕</button>
+    <button onclick="editStrikeEntry('${_strikeTicker}',${i})" title="Editar" style="background:none;border:none;color:var(--blue);cursor:pointer;font-size:13px;padding:0;">✏️</button>
+    <button onclick="deleteStrikeEntry('${_strikeTicker}',${i})" title="Borrar" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:13px;padding:0;">✕</button>
   </div>`;
   }).join('');
   // Encabezado de columnas — mismos anchos que la fila, para que se lea qué es
   // cada número sin tener que adivinar por el color.
-  const _th=(txt,w,align='left',tip='')=>`<span style="width:${w}px;flex:0 0 ${w}px;text-align:${align};font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;font-weight:700;"${tip?` title="${tip}"`:''}>${txt}</span>`;
-  const headHTML=`<div style="display:flex;align-items:center;gap:8px;padding:0 0 6px 0;border-bottom:1px solid var(--border2);width:max-content;min-width:100%;">
-    ${_th('Día',74)}${_th('Fecha',76)}${_th('Hora',62)}${_th('Tipo',40,'center')}${_th('Contr.',46,'center')}
-    ${_th('Costo',62,'right')}${_th('Venta',62,'right')}${_th('Entrada',68,'right','Precio de la acción al comprar')}${_th('Salida',68,'right','Precio de la acción al vender')}
-    ${_th('Spread',60,'right')}${_th('% Gan.',64,'right')}${_th('P&L neto',76,'right','Ya descontada la comisión')}${_th('Mov. $',68,'right','Cuánto corrió la acción')}${_th('Sheets',38,'center')}
-    <span style="width:56px;flex:0 0 56px;"></span>
+  const _th=(txt,align='left',tip='')=>`<span style="text-align:${align};font-size:9px;color:var(--text3);text-transform:uppercase;letter-spacing:.04em;font-weight:700;"${tip?` title="${tip}"`:''}>${txt}</span>`;
+  const headHTML=`<div class="slog-row" style="padding:0 0 6px 0;border-bottom:1px solid var(--border2);">
+    ${_th('Día')}${_th('Fecha')}${_th('Hora')}${_th('Tipo','center')}${_th('Contr.','center')}
+    ${_th('Costo','right')}${_th('Venta','right')}${_th('Entrada','right','Precio de la acción al comprar')}${_th('Salida','right','Precio de la acción al vender')}
+    ${_th('Spread','right')}${_th('% Gan.','right')}${_th('P&L neto','right','Ya descontada la comisión')}${_th('Mov. $','right','Cuánto corrió la acción')}${_th('Sheets','center')}
+    <span></span><span></span>
   </div>`;
   // ── RESUMEN POR DÍA (2026-08-14) ──────────────────────────────────────────
   // Antes esta caja promediaba "Lugares" (a cuántos lugares del spot compraste
@@ -6152,7 +6230,7 @@ function renderStrikeLog(){
     :`<span style="font-size:13px;color:var(--text3);">Movimiento $: —</span>`;
   area.innerHTML=`
     <div id="strikeLogScroll" style="overflow-x:auto;padding:0 16px;">
-      <div id="strikeLogList" style="min-width:max-content;">${headHTML}${listHTML}</div>
+      <div id="strikeLogList">${headHTML}${listHTML}</div>
     </div>
     <div id="strikeAvgBox" style="padding:12px 16px;border-top:1px solid var(--border);margin-top:4px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
       <div style="display:flex;flex-direction:column;gap:8px;">
@@ -6415,6 +6493,78 @@ function renderInsiderTable(data){
 // ═══════════════════════════════════════════════════════════════
 // TEST MODE — Datos históricos reales para verificar lógica
 // ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// RADIOGRAFÍA DEL GATE — panel del modo Debug
+// ═══════════════════════════════════════════════════════════════
+// Por qué existe: el botón Debug decía "todas las señales sin filtro de 75%",
+// pero el 75% es el ÚLTIMO filtro de la cadena. Antes de él está el gate de
+// calidad (volatilidad, velocidad, potencial, cuerpo, cierre), y una ruptura que
+// no pasa el gate nunca se convierte en señal — no hay objeto que mostrar. Por
+// eso Debug salía vacío: no había nada que "dejar pasar".
+//
+// Ahora Debug hace dos cosas: deja crear las rupturas bloqueadas (con score real,
+// bajo, así que no llegan a Telegram ni al Historial) y pinta esta tabla con el
+// estado de CADA ticker aunque no haya roto banda. Si el mercado está quieto,
+// eso también es información: se ve qué condición es la que frena y por cuánto.
+function renderDebugDiag(){
+  const box=document.getElementById('debugDiagPanel');
+  if(!box)return;
+  if(!_debugMode){box.style.display='none';box.innerHTML='';return;}
+  box.style.display='block';
+  const d=_dbgGateDiag||[];
+  const _et=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
+  const _mins=_et.getHours()*60+_et.getMinutes();
+  const _cerrado=!(_et.getDay()>=1&&_et.getDay()<=5&&_mins>=570&&_mins<960);
+  const _avisoAH=_cerrado
+    ?`<div style="padding:6px 10px;margin-bottom:8px;border:1px solid rgba(255,77,109,.4);border-radius:8px;background:rgba(255,77,109,.08);color:#ff4d6d;font-size:11px;font-weight:700;text-align:center;">⚠ MERCADO CERRADO — la última vela puede ser vieja; estos números son de referencia</div>`
+    :'';
+  if(!d.length){
+    box.innerHTML=`<div style="border:1px solid rgba(255,194,52,.35);border-radius:10px;background:rgba(255,194,52,.06);padding:12px;margin-bottom:10px;">
+      <div style="color:#ffc234;font-size:11px;font-weight:700;margin-bottom:6px;">🔍 MODO DEBUG — radiografía del filtro</div>${_avisoAH}
+      <div style="color:var(--text3);font-size:12px;line-height:1.6;">Ningún ticker se pudo evaluar en este ciclo. Suele ser falta de datos de Schwab (token vencido o velas viejas), no el filtro. Revisa 📋 Logs.</div>
+    </div>`;
+    return;
+  }
+  // Diseño: una tarjeta por ticker con los chips de condición debajo. El panel
+  // de señales es una columna estrecha (~520px), así que una tabla de 10
+  // columnas quedaría cortada — los chips simplemente hacen wrap.
+  const _cel=(c)=>`<span title="${c.k}: ${c.val} — requiere ${c.req}" style="display:inline-flex;align-items:center;gap:3px;font-size:10px;font-family:var(--mono);white-space:nowrap;padding:2px 6px;border-radius:6px;background:${c.ok?'rgba(0,209,122,.10)':'rgba(255,77,109,.10)'};border:1px solid ${c.ok?'rgba(0,209,122,.28)':'rgba(255,77,109,.28)'};color:${c.ok?'var(--green)':'var(--red)'};">${c.ok?'✅':'❌'} <span style="color:var(--text3);">${c.k}</span> ${c.val}</span>`;
+  // Los que rompieron banda primero: son los casos que de verdad interesan.
+  const orden=[...d].sort((a,b)=>(b.rompio?1:0)-(a.rompio?1:0)||
+    Math.min(Math.abs(a.distUp),Math.abs(a.distLow))-Math.min(Math.abs(b.distUp),Math.abs(b.distLow)));
+  const filas=orden.map(r=>{
+    const falla=r.conds.filter(c=>!c.ok).length;
+    const estado=r.paso
+      ? `<span style="color:var(--green);font-weight:700;font-size:11px;">✅ PASÓ EL GATE — ${r.paso.toUpperCase()}</span>`
+      : r.rompio
+      ? `<span style="color:#ffc234;font-weight:700;font-size:11px;">⚠ ROMPIÓ ${r.rompio.toUpperCase()} · bloqueada por ${falla} condición${falla>1?'es':''}</span>`
+      : `<span style="color:var(--text3);font-size:11px;">Sin ruptura de banda</span>`;
+    const cerca=Math.min(Math.abs(r.distUp),Math.abs(r.distLow));
+    const borde=r.paso?'rgba(0,209,122,.35)':r.rompio?'rgba(255,194,52,.45)':'var(--border)';
+    return `<div style="border:1px solid ${borde};border-radius:8px;padding:8px 10px;margin-bottom:6px;background:var(--bg3);">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
+        <span style="font-family:var(--mono);font-size:13px;font-weight:700;color:var(--text);">${r.sym}</span>
+        <span style="font-family:var(--mono);font-size:11px;color:var(--text3);">$${r.price.toFixed(2)}</span>
+        ${estado}
+        <span style="margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--text3);" title="Distancia del cierre a la banda más cercana">${r.rompio?'fuera':'a'} ${cerca.toFixed(2)}% ${r.rompio?'de la banda':'de la banda'}</span>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:4px;">${r.conds.map(_cel).join('')}</div>
+    </div>`;
+  }).join('');
+  const _rompieron=d.filter(r=>r.rompio).length, _pasaron=d.filter(r=>r.paso).length;
+  box.innerHTML=`<div style="border:1px solid rgba(255,194,52,.35);border-radius:10px;background:rgba(255,194,52,.06);padding:12px;margin-bottom:10px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;margin-bottom:8px;">
+      <span style="color:#ffc234;font-size:11px;font-weight:700;">🔍 MODO DEBUG — radiografía del filtro</span>
+      <span style="font-size:10px;color:var(--text3);font-family:var(--mono);">${d.length} tickers · ${_rompieron} rompieron banda · ${_pasaron} pasaron el gate</span>
+    </div>${_avisoAH}
+    ${filas}
+    <div style="font-size:10px;color:var(--text3);margin-top:6px;line-height:1.6;">
+      ❌ = condición que está bloqueando la señal. Pasa el ratón por encima de cada chip para ver el valor requerido.
+      Las rupturas bloqueadas también salen abajo como tarjetas con score bajo (no se envían a Telegram ni al Historial) y quedan detalladas en 📋 Logs → 🎯 Casi-señal.
+    </div>
+  </div>`;
+}
+
 async function runDebugMode(){
   const btn=document.getElementById('testBtn');
   const logBtn=document.getElementById('logBtn');
@@ -6428,23 +6578,19 @@ async function runDebugMode(){
     btn.style.borderColor='rgba(255,194,52,.8)';
     btn.style.color='#ffc234';
     if(logBtn)logBtn.style.display='inline-block';
+    // El aviso de Debug y el de after-hours ya NO se pegan aquí encima de
+    // #signalArea: ese contenedor lo reescribe buildSignals en cada refresco y
+    // el aviso desaparecía al minuto. Ahora los pinta renderDebugDiag() en su
+    // propio panel (#debugDiagPanel), que sobrevive a los ciclos de render.
     await buildSignals();
-    const area=document.getElementById('signalArea');
-    // Check if after-hours — add strong warning
-    const _dbgEt=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
-    const _dbgMins=_dbgEt.getHours()*60+_dbgEt.getMinutes();
-    const _dbgDay=_dbgEt.getDay();
-    const _isAfterHours=!(_dbgDay>=1&&_dbgDay<=5&&_dbgMins>=570&&_dbgMins<960);
-    const _ahWarning=_isAfterHours
-      ?`<div style="text-align:center;padding:6px 12px;color:#ff4d6d;font-size:11px;font-weight:700;border:1px solid rgba(255,77,109,.4);border-radius:8px;margin-bottom:6px;background:rgba(255,77,109,.08);">⚠ MERCADO CERRADO — Datos de after-hours pueden ser inexactos. Las señales en horario de mercado serán más confiables.</div>`
-      :'';
-    area.innerHTML='<div style="text-align:center;padding:6px 12px;color:#ffc234;font-size:11px;font-weight:700;border:1px solid rgba(255,194,52,.3);border-radius:8px;margin-bottom:6px;background:rgba(255,194,52,.08);">🔍 MODO DEBUG — Mostrando TODAS las señales con datos reales (sin filtro de 75%)</div>'+_ahWarning+area.innerHTML;
+    renderDebugDiag();
   }else{
     btn.textContent='🔍 Debug';
     btn.style.background='rgba(167,139,250,.15)';
     btn.style.borderColor='rgba(167,139,250,.5)';
     btn.style.color='var(--purple)';
     // logBtn se mantiene visible siempre — es el acceso a las casi-señales
+    renderDebugDiag(); // oculta el panel de radiografía
     await buildSignals();
   }
 }

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- TradeDeskPro v5 | build:20260814_strikelog_ledger | B1:_wsSessionCandle_per15min B2:BB-REGRESO_strategy B3:intentoBull_loose B4:bbCallTrigger_connected B5:dedup_distVars B6:setup_gate_bbw B7:stochPutOk_noFloor A1:bbSessionOk_isMarketHours A2:schwabToken_firstTicker M1:momentumToLower_gate M2:bbwExpandActive M3:aviso_stricter M4:intento_volOk M5:unified_setup_card M6:bbwSqueezeBreakout M7:multiTF_regreso M8:BB-MTF_panel_replaces_noticias M9:setup_levels_removed M10:atr_velocity_gate M11:piercing_only_trigger M12:score_base60_no_double_filter M13:minmove_pct_of_price M14:casi_senal_diag M15:diferencia_abs M16:1h_derived_from_15m M17:meta_added M18:cuenta_real_ledger M19:sheets_autosync M20:strikelog_is_ledger M21:exportStrikeLog_fixed M22:paper_entries_flagged M23:delete_confirm_and_refresh -->
+<!-- TradeDeskPro v5 | build:20260814_strikelog_ledger | B1:_wsSessionCandle_per15min B2:BB-REGRESO_strategy B3:intentoBull_loose B4:bbCallTrigger_connected B5:dedup_distVars B6:setup_gate_bbw B7:stochPutOk_noFloor A1:bbSessionOk_isMarketHours A2:schwabToken_firstTicker M1:momentumToLower_gate M2:bbwExpandActive M3:aviso_stricter M4:intento_volOk M5:unified_setup_card M6:bbwSqueezeBreakout M7:multiTF_regreso M8:BB-MTF_panel_replaces_noticias M9:setup_levels_removed M10:atr_velocity_gate M11:piercing_only_trigger M12:score_base60_no_double_filter M13:minmove_pct_of_price M14:casi_senal_diag M15:diferencia_abs M16:1h_derived_from_15m M17:meta_added M18:cuenta_real_ledger M19:sheets_autosync M20:strikelog_is_ledger M21:exportStrikeLog_fixed M22:paper_entries_flagged M23:delete_confirm_and_refresh M24:comision_neta -->
 <html lang="es">
 <head>
 <meta charset="UTF-8">
@@ -4536,10 +4536,49 @@ function setCapitalInicial(v){
   }
 }
 
-// ── P&L en dólares de una fila del Strike Log ────────────────────────────────
-// (venta − costo) × contratos × 100. Devuelve null si falta algún dato: es
-// preferible no contar la operación que inventar un monto.
+// ── Comisión del bróker, por contrato y por punta ────────────────────────────
+// Schwab/TOS cobra $0.65 por contrato AL ABRIR y otros $0.65 AL CERRAR, así que
+// el ciclo completo son $1.30 por contrato.
+//
+// Por qué hace falta descontarla aquí (2026-08-14): la Calculadora ya contempla
+// la comisión, pero para algo distinto — le suma $0.02 a la prima objetivo para
+// decidir a qué precio poner el límite de venta. Eso protege la ganancia, pero
+// el REGISTRO seguía siendo bruto: `(venta − costo) × contratos × 100` no resta
+// nada. Resultado: el balance de la plataforma se separaba del bróker en cada
+// operación. En los dos primeros días reales fueron $2.66 (dos ciclos completos
+// de 1 contrato = $2.60, más tarifas regulatorias) — exactamente el descuadre
+// que apareció al comparar con el estado de cuenta.
+const _COMIS_KEY='tdp_comision_contrato';
+const _COMIS_DEFAULT=0.65;
+function getComisionContrato(){
+  const v=parseFloat(localStorage.getItem(_COMIS_KEY));
+  return Number.isFinite(v)&&v>=0?v:_COMIS_DEFAULT;
+}
+function setComisionContrato(v){
+  const n=parseFloat(String(v).replace(/[^0-9.]/g,''));
+  if(Number.isFinite(n)&&n>=0){
+    try{localStorage.setItem(_COMIS_KEY,String(n));}catch(e){}
+    renderCuentaRealPanel();renderStrikeLog();
+  }
+}
+// Comisión total de una operación: por contrato × 2 puntas (abrir + cerrar)
+function _strikeComision(e){
+  if(!e||!e.qty)return 0;
+  return +(getComisionContrato()*(+e.qty)*2).toFixed(2);
+}
+
+// ── P&L NETO en dólares de una fila del Strike Log ───────────────────────────
+// (venta − costo) × contratos × 100 − comisión de ida y vuelta.
+// Devuelve null si falta algún dato: es preferible no contar la operación que
+// inventar un monto.
 function _strikePnlDollars(e){
+  if(!e)return null;
+  const c=+(e.costo||0), v=e.venta, q=+(e.qty||0);
+  if(!q||!c||v==null||!isFinite(v))return null;
+  return +((v-c)*q*100-_strikeComision(e)).toFixed(2);
+}
+// Bruto, sin comisión — se muestra en el tooltip para poder comparar
+function _strikePnlBruto(e){
   if(!e)return null;
   const c=+(e.costo||0), v=e.venta, q=+(e.qty||0);
   if(!q||!c||v==null||!isFinite(v))return null;
@@ -4659,6 +4698,7 @@ function renderCuentaRealPanel(){
   const sinQty=all.filter(e=>e.paper!==true&&!e.qty&&e.venta!=null).length;
   const pend=all.filter(e=>e.paper!==true&&e.synced!==true&&_strikePnlDollars(e)!=null).length;
   const nPaper=all.filter(e=>e.paper===true).length;
+  const totalComis=+cerradas.reduce((s2,e)=>s2+_strikeComision(e),0).toFixed(2);
   const col=v=>v>0?'var(--green)':v<0?'var(--red)':'var(--text2)';
   el.innerHTML=`
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;gap:6px;flex-wrap:wrap;">
@@ -4697,6 +4737,12 @@ function renderCuentaRealPanel(){
       <input type="number" value="${cap}" min="1" step="1" onchange="setCapitalInicial(this.value)"
         style="background:var(--bg4);border:1px solid var(--border2);border-radius:6px;color:var(--green);padding:2px 5px;font-size:11px;font-family:var(--mono);width:70px;text-align:center;font-weight:700;outline:none;">
       <span style="font-size:10px;color:var(--text3);">· ${cerradas.length} operación${cerradas.length===1?'':'es'} cerrada${cerradas.length===1?'':'s'}</span>
+    </div>
+    <div style="display:flex;align-items:center;justify-content:center;gap:6px;margin-top:4px;">
+      <span style="font-size:10px;color:var(--text3);" title="Se descuenta por contrato y por punta: comprar y vender">Comisión / contrato</span>
+      <input type="number" value="${getComisionContrato()}" min="0" step="0.05" onchange="setComisionContrato(this.value)"
+        style="background:var(--bg4);border:1px solid var(--border2);border-radius:6px;color:var(--yellow);padding:2px 5px;font-size:11px;font-family:var(--mono);width:58px;text-align:center;font-weight:700;outline:none;">
+      <span style="font-size:10px;color:var(--text3);">× 2 puntas${totalComis>0?` · llevas ${_crMoney(totalComis)} en comisiones`:''}</span>
     </div>
     ${sinQty?`<div style="font-size:10px;color:var(--yellow);text-align:center;margin-top:5px;line-height:1.4;">⚠ ${sinQty} operación(es) sin cantidad de contratos — no cuentan en el balance.<br>Ábrelas en el Strike Log (✏️) y ponles los contratos.</div>`:''}
     ${nPaper?`<div style="font-size:10px;color:var(--text3);text-align:center;margin-top:5px;line-height:1.4;">📝 ${nPaper} registro(s) de paper trading — no cuentan en el balance ni se envían a Sheets.<br>Siguen alimentando los promedios de Lugares. <button onclick="crBorrarPaper()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:10px;text-decoration:underline;padding:0;">Borrarlos</button></div>`:''}
@@ -4743,9 +4789,13 @@ function _crStrikeToRow(ticker,e){
     fecha:_crDateToISO(e.date),hora:e.time||'',
     ticker,tipo:(e.tipo?String(e.tipo).toUpperCase():''),contratos:+(e.qty||0),
     primaCompra:+(e.costo||0),primaVenta:e.venta!=null?+e.venta:'',
-    pnlDirecto:'',
+    // Se manda el NETO como "P&L directo" para que la hoja no tenga que saber de
+    // comisiones: si dejara que calculara (venta−costo)×contratos×100 daría el
+    // bruto y el balance de Sheets no cuadraría con el del bróker.
+    pnlDirecto:_strikePnlDollars(e),
     estrategia:'Strike Log',
-    notas:[e.dist!=null?`Lugares ${e.dist}`:'',e.spread!=null?`Spread $${(+e.spread).toFixed(2)}`:'',
+    notas:[`Bruto $${(_strikePnlBruto(e)||0).toFixed(2)} − comisión $${_strikeComision(e).toFixed(2)}`,
+           e.dist!=null?`Lugares ${e.dist}`:'',e.spread!=null?`Spread $${(+e.spread).toFixed(2)}`:'',
            e.entrada!=null?`Entrada $${(+e.entrada).toFixed(2)}`:'',e.salida!=null?`Salida $${(+e.salida).toFixed(2)}`:'']
           .filter(Boolean).join(' · ')};
 }
@@ -4831,7 +4881,7 @@ function exportStrikeLog(){
   let log=[];try{log=JSON.parse(localStorage.getItem(key)||'[]');}catch(e){}
   if(!log.length){alert(`No hay operaciones registradas para ${_strikeTicker}.`);return;}
   const head=['Ticker','Dia','Fecha','Hora','Tipo','Contratos','Costo $','Venta $',
-              'Costo total $','Venta total $','P&L $','% Ganancia',
+              'Costo total $','Venta total $','P&L bruto $','Comision $','P&L neto $','% Ganancia',
               'Entrada $','Salida $','Diferencia $','Lugares','Spread','Enviado a Sheets'];
   const esc=v=>`"${String(v==null?'':v).replace(/"/g,'""')}"`;
   const lines=[head.join(',')];
@@ -4844,6 +4894,7 @@ function exportStrikeLog(){
       e.tipo?String(e.tipo).toUpperCase():'',e.qty||'',
       (+e.costo||0).toFixed(2), e.venta!=null?(+e.venta).toFixed(2):'',
       ct!=null?ct.toFixed(2):'', (ct!=null&&pnl!=null)?(ct+pnl).toFixed(2):'',
+      (_strikePnlBruto(e)!=null)?_strikePnlBruto(e).toFixed(2):'', _strikeComision(e).toFixed(2),
       pnl!=null?pnl.toFixed(2):'', gain!=null?gain.toFixed(2):'',
       e.entrada!=null?(+e.entrada).toFixed(2):'', e.salida!=null?(+e.salida).toFixed(2):'',
       diff!=null?diff.toFixed(2):'', e.dist, e.spread!=null?(+e.spread).toFixed(2):'',
@@ -5812,7 +5863,11 @@ function renderStrikeLog(){
     // % de ganancia, que sí es P&L de la opción.
     // P&L en DÓLARES — necesita contratos: (venta - costo) x contratos x 100
     const _pnlD=_strikePnlDollars(e);
-    const _pnlHTML=`<span style="font-family:var(--mono);font-size:15px;font-weight:700;color:${_pnlD==null?'var(--text3)':_pnlD>=0?'var(--green)':'var(--red)'};min-width:78px;text-align:right;" title="Ganancia o pérdida real en dólares (contratos x 100)">${_pnlD==null?'—':(_pnlD>=0?'+$':'-$')+Math.abs(_pnlD).toFixed(2)}</span>`;
+    const _pnlBr=_strikePnlBruto(e);
+    const _com=_strikeComision(e);
+    const _pnlTip=_pnlD==null?'Falta la venta o los contratos'
+      :`Bruto $${_pnlBr.toFixed(2)} − comisión $${_com.toFixed(2)} (${e.qty}c × $${getComisionContrato().toFixed(2)} × 2 puntas) = neto $${_pnlD.toFixed(2)}`;
+    const _pnlHTML=`<span style="font-family:var(--mono);font-size:15px;font-weight:700;color:${_pnlD==null?'var(--text3)':_pnlD>=0?'var(--green)':'var(--red)'};min-width:78px;text-align:right;" title="${_pnlTip}">${_pnlD==null?'—':(_pnlD>=0?'+$':'-$')+Math.abs(_pnlD).toFixed(2)}</span>`;
     const _syncHTML=e.paper===true
       ? `<span title="Registro de la época de paper trading — no cuenta en el balance real ni se envía a Sheets" style="color:var(--text3);font-size:9px;min-width:14px;font-weight:700;">PAPER</span>`
       : e.synced===true

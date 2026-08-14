@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- TradeDeskPro v5 | build:20260814_strikelog_ledger | B1:_wsSessionCandle_per15min B2:BB-REGRESO_strategy B3:intentoBull_loose B4:bbCallTrigger_connected B5:dedup_distVars B6:setup_gate_bbw B7:stochPutOk_noFloor A1:bbSessionOk_isMarketHours A2:schwabToken_firstTicker M1:momentumToLower_gate M2:bbwExpandActive M3:aviso_stricter M4:intento_volOk M5:unified_setup_card M6:bbwSqueezeBreakout M7:multiTF_regreso M8:BB-MTF_panel_replaces_noticias M9:setup_levels_removed M10:atr_velocity_gate M11:piercing_only_trigger M12:score_base60_no_double_filter M13:minmove_pct_of_price M14:casi_senal_diag M15:diferencia_abs M16:1h_derived_from_15m M17:meta_added M18:cuenta_real_ledger M19:sheets_autosync M20:strikelog_is_ledger M21:exportStrikeLog_fixed M22:paper_entries_flagged M23:delete_confirm_and_refresh M24:comision_neta M25:panel_limpio M26:orden_cronologico M27:poda_local_5dias -->
+<!-- TradeDeskPro v5 | build:20260814_strikelog_ledger | B1:_wsSessionCandle_per15min B2:BB-REGRESO_strategy B3:intentoBull_loose B4:bbCallTrigger_connected B5:dedup_distVars B6:setup_gate_bbw B7:stochPutOk_noFloor A1:bbSessionOk_isMarketHours A2:schwabToken_firstTicker M1:momentumToLower_gate M2:bbwExpandActive M3:aviso_stricter M4:intento_volOk M5:unified_setup_card M6:bbwSqueezeBreakout M7:multiTF_regreso M8:BB-MTF_panel_replaces_noticias M9:setup_levels_removed M10:atr_velocity_gate M11:piercing_only_trigger M12:score_base60_no_double_filter M13:minmove_pct_of_price M14:casi_senal_diag M15:diferencia_abs M16:1h_derived_from_15m M17:meta_added M18:cuenta_real_ledger M19:sheets_autosync M20:strikelog_is_ledger M21:exportStrikeLog_fixed M22:paper_entries_flagged M23:delete_confirm_and_refresh M24:comision_neta M25:panel_limpio M26:orden_cronologico M27:poda_local_5dias M28:probar_conexion -->
 <html lang="es">
 <head>
 <meta charset="UTF-8">
@@ -4256,6 +4256,11 @@ function _renderStratTab(){
         <span style="font-size:10px;color:var(--text3);margin-left:4px;">× 2 puntas</span>
       </div>
       <div>
+        <div style="font-size:11px;color:var(--text3);margin-bottom:3px;">Conexión con Google Sheets</div>
+        <button onclick="crProbarConexion()" title="Verifica navegador → Worker → Apps Script → hoja, sin escribir ninguna fila"
+          style="background:rgba(61,139,255,.12);border:1px solid rgba(61,139,255,.4);border-radius:var(--r);color:var(--blue);padding:6px 14px;font-size:12px;font-weight:700;cursor:pointer;">🔌 Probar conexión</button>
+      </div>
+      <div>
         <div style="font-size:11px;color:var(--text3);margin-bottom:3px;" title="El histórico completo se conserva en Google Sheets sin límite">Días visibles en TD Pro</div>
         <input type="number" value="${getDiasLocal()}" min="1" max="90" step="1" onchange="setDiasLocal(this.value);_renderStratTab();"
           style="background:var(--bg4);border:1px solid var(--blue);border-radius:var(--r);color:var(--blue);padding:6px 10px;font-size:14px;font-family:var(--mono);width:80px;text-align:center;font-weight:700;outline:none;">
@@ -4265,6 +4270,7 @@ function _renderStratTab(){
         <button onclick="crBorrarPaper();_renderStratTab();" style="background:rgba(255,77,109,.1);border:1px solid rgba(255,77,109,.35);border-radius:var(--r);color:var(--red);padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;">🗑 Borrar ${_nPaper}</button>
       </div>`:''}
     </div>
+    <div id="crProbarMsg" style="font-size:11px;color:var(--text3);margin-top:8px;min-height:15px;"></div>
   </div>`;
   const _mmPct=getMinMovePct();
   const _mmOvr=getMinMoveOverrides();
@@ -4937,6 +4943,41 @@ async function _crSyncAjuste(id){
     addLog('warn','Cuenta Real','Ajuste no se pudo enviar a Sheets — queda pendiente',err.message);
     renderCuentaRealPanel();
     return false;
+  }
+}
+
+// ── Probar conexión con Google Sheets, SIN escribir ninguna fila ────────────
+// Recorre la cadena completa: navegador → Worker → Apps Script → hoja. El script
+// responde en modo ping (no escribe), así que se puede usar cuando quieras sin
+// dejar filas de prueba que después haya que borrar a mano.
+async function crProbarConexion(){
+  const el=document.getElementById('crProbarMsg');
+  const set=(t,c)=>{if(el){el.textContent=t;el.style.color=c;}};
+  const proxy=(localStorage.getItem('proxy_url')||'').trim();
+  if(!proxy||!proxy.startsWith('http')){
+    set('⚠ Falta el Proxy URL en Configuración → APIs','var(--yellow)');return;
+  }
+  set('⟳ Probando…','var(--text3)');
+  try{
+    const r=await fetch(`${proxy}/sheets-log`,{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ping:true}),signal:AbortSignal.timeout(20000)
+    });
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok||d.error){
+      set(`❌ ${d.error||('HTTP '+r.status)}`,'var(--red)');
+      addLog('error','Cuenta Real','Prueba de conexión con Sheets falló',d.error||('HTTP '+r.status));
+      return;
+    }
+    const falt=(d.pestanas_faltantes||[]);
+    if(falt.length){
+      set(`⚠ Conecta, pero faltan pestañas: ${falt.join(', ')}`,'var(--yellow)');return;
+    }
+    set(`✅ Conectado a "${d.hoja}" · ${d.filas_registradas} fila(s) · balance $${(d.balance||0).toFixed(2)}`,'var(--green)');
+    addLog('info','Cuenta Real',`Prueba de conexión OK — hoja "${d.hoja}", ${d.filas_registradas} filas`);
+  }catch(e){
+    set(`❌ ${e.message}`,'var(--red)');
+    addLog('error','Cuenta Real','Prueba de conexión con Sheets falló',e.message);
   }
 }
 

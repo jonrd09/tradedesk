@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- TradeDeskPro v5 | build:20260814_strikelog_ledger | B1:_wsSessionCandle_per15min B2:BB-REGRESO_strategy B3:intentoBull_loose B4:bbCallTrigger_connected B5:dedup_distVars B6:setup_gate_bbw B7:stochPutOk_noFloor A1:bbSessionOk_isMarketHours A2:schwabToken_firstTicker M1:momentumToLower_gate M2:bbwExpandActive M3:aviso_stricter M4:intento_volOk M5:unified_setup_card M6:bbwSqueezeBreakout M7:multiTF_regreso M8:BB-MTF_panel_replaces_noticias M9:setup_levels_removed M10:atr_velocity_gate M11:piercing_only_trigger M12:score_base60_no_double_filter M13:minmove_pct_of_price M14:casi_senal_diag M15:diferencia_abs M16:1h_derived_from_15m M17:meta_added M18:cuenta_real_ledger M19:sheets_autosync M20:strikelog_is_ledger M21:exportStrikeLog_fixed M22:paper_entries_flagged M23:delete_confirm_and_refresh M24:comision_neta M25:panel_limpio M26:orden_cronologico M27:poda_local_5dias M28:probar_conexion M29:sin_lugares M30:log_ancho_scroll_unico M31:export_csv_robusto M32:config_ancho_tabs_visibles M33:strikelog_grid_full_width M34:debug_radiografia_gate -->
+<!-- TradeDeskPro v5 | build:20260814_strikelog_ledger | B1:_wsSessionCandle_per15min B2:BB-REGRESO_strategy B3:intentoBull_loose B4:bbCallTrigger_connected B5:dedup_distVars B6:setup_gate_bbw B7:stochPutOk_noFloor A1:bbSessionOk_isMarketHours A2:schwabToken_firstTicker M1:momentumToLower_gate M2:bbwExpandActive M3:aviso_stricter M4:intento_volOk M5:unified_setup_card M6:bbwSqueezeBreakout M7:multiTF_regreso M8:BB-MTF_panel_replaces_noticias M9:setup_levels_removed M10:atr_velocity_gate M11:piercing_only_trigger M12:score_base60_no_double_filter M13:minmove_pct_of_price M14:casi_senal_diag M15:diferencia_abs M16:1h_derived_from_15m M17:meta_added M18:cuenta_real_ledger M19:sheets_autosync M20:strikelog_is_ledger M21:exportStrikeLog_fixed M22:paper_entries_flagged M23:delete_confirm_and_refresh M24:comision_neta M25:panel_limpio M26:orden_cronologico M27:poda_local_5dias M28:probar_conexion M29:sin_lugares M30:log_ancho_scroll_unico M31:export_csv_robusto M32:config_ancho_tabs_visibles M33:strikelog_grid_full_width M34:debug_radiografia_gate M35:viewer_mode_eliminado M36:cfg_password M37:candados_por_campo -->
 <html lang="es">
 <head>
 <meta charset="UTF-8">
@@ -1259,6 +1259,63 @@ async function _verifySHA256Pin(pin, stored){
 }
 function getStoredPin(){return localStorage.getItem('app_pin')||'';}
 
+// ════════════════════════════════════════════════════════════════════════════
+// CONTRASEÑA DE CONFIGURACIÓN  (2026-08-14)
+// ════════════════════════════════════════════════════════════════════════════
+// Reemplaza al viejo "modo visor" como única protección real de la plataforma.
+// Qué protege:
+//   • Abrir ⚙️ Configuración
+//   • Editar cada campo sensible por separado (API keys, secrets, Proxy URL,
+//     token de Telegram) — cada campo tiene su propio candado
+//   • Cambiar la propia contraseña
+//
+// La contraseña se guarda HASHEADA con PBKDF2 (100k iteraciones, la misma
+// función _hashPin que ya usaba el PIN), nunca en texto plano.
+//
+// ⚠ NOTA HONESTA SOBRE 2122: por decisión explícita del usuario, 2122 funciona
+// como LLAVE MAESTRA — abre Configuración, desbloquea campos y permite cambiar
+// la contraseña. Eso significa que quien conozca ese número entra igual, sin
+// importar qué contraseña pongas. Es cómodo para no quedarse fuera nunca, pero
+// no lo trates como seguridad frente a terceros: la contraseña sirve contra un
+// descuido (alguien que se sienta en tu PC), no contra alguien que sepa el 2122.
+const _CFG_MASTER='2122';
+const _CFG_PW_KEY='tdp_cfg_pw';
+function getCfgPw(){return localStorage.getItem(_CFG_PW_KEY)||'';}
+async function setCfgPw(pw){
+  const h=await _hashPin(pw);
+  try{localStorage.setItem(_CFG_PW_KEY,h);}catch(e){}
+  return h;
+}
+// Devuelve: 'ok' | 'master' | 'bad'
+async function verifyCfgPw(pw){
+  if(pw===_CFG_MASTER)return 'master';
+  const stored=getCfgPw();
+  if(!stored)return 'bad';
+  return (await _verifyPin(pw,stored))?'ok':'bad';
+}
+
+// Pide la contraseña y devuelve true/false. `motivo` sale en el prompt para que
+// se entienda QUÉ se está desbloqueando (el panel entero o un campo puntual).
+async function _cfgPwUnlock(motivo){
+  if(!getCfgPw()){
+    // Primera vez en esta PC — crear la contraseña en el momento.
+    const n1=prompt('🔐 Aún no hay contraseña de Configuración en esta PC.\n\nElige una ahora (mínimo 4 caracteres):');
+    if(n1===null)return false;
+    if(!n1||n1.length<4){alert('❌ La contraseña debe tener al menos 4 caracteres.');return false;}
+    const n2=prompt('🔐 Confírmala:');
+    if(n1!==n2){alert('❌ No coinciden. Intenta de nuevo.');return false;}
+    await setCfgPw(n1);
+    alert('✅ Contraseña creada.\n\nLa vas a necesitar para abrir Configuración y para editar las API keys.\n\nSi la olvidas, 2122 siempre funciona como llave maestra.');
+    return true;
+  }
+  const pw=prompt(`🔐 Contraseña de Configuración${motivo?`\n\n${motivo}`:''}`);
+  if(pw===null)return false;
+  const r=await verifyCfgPw(pw);
+  if(r==='bad'){alert('❌ Contraseña incorrecta.');return false;}
+  if(r==='master')addLog('warn','Config','Acceso con llave maestra (2122)');
+  return true;
+}
+
 function requirePin(cb,label='Ingresa tu PIN'){
   // A-3: PIN deshabilitado intencionalmente para uso LOCAL de un solo usuario.
   // ADVERTENCIA HONESTA: este bypass hace que requirePin() no proteja nada.
@@ -1372,18 +1429,17 @@ function resetPinFull(){
   });
 }
 
+// Diagnóstico de la contraseña de Configuración (panel ⚙️ → PIN).
 function _renderPinDiag(){
   const diag=document.getElementById('pinStatusDiag');
   if(!diag)return;
-  const stored=localStorage.getItem('app_pin');
+  const stored=getCfgPw();
+  const _n=_CFG_LOCKED_FIELDS.length;
   if(!stored){
-    diag.innerHTML='⚠️ Sin PIN configurado — se usará <strong>2122</strong> por defecto al próximo acceso';
-    diag.style.color='var(--yellow)';
-  }else if(_isLegacyPin(stored)){
-    diag.innerHTML=`🔄 PIN en formato <strong>legacy</strong> (v3) — se migrará automáticamente al ingresar tu PIN actual · ${stored.length} chars`;
+    diag.innerHTML=`⚠️ Todavía no hay contraseña en esta PC — se te pedirá crear una la próxima vez que abras Configuración. Mientras tanto, <strong>2122</strong> es la única llave.`;
     diag.style.color='var(--yellow)';
   }else{
-    diag.innerHTML=`✅ PIN en formato <strong>PBKDF2</strong> (seguro) · ${stored.length} chars`;
+    diag.innerHTML=`✅ Contraseña activa, guardada como hash <strong>PBKDF2</strong> (100.000 iteraciones) — nunca en texto plano.<br>🔒 Protege: abrir Configuración · ${_n} campos sensibles (API keys, secrets, Proxy URL, Telegram) · cambiar esta misma contraseña.`;
     diag.style.color='var(--green)';
   }
 }
@@ -4003,15 +4059,86 @@ function updateFinnhubBtn(active){
 // ═══════════════════════════════════════════════════════════════
 // CONFIGURACIÓN MODAL
 // ═══════════════════════════════════════════════════════════════
-function openConfigModal(){
-  // PIN removido de Configuration — acceso directo
+async function openConfigModal(){
+  // (2026-08-14) Config vuelve a pedir contraseña. Antes el acceso era directo
+  // porque el PIN estaba puenteado (requirePin no verificaba nada).
+  if(!await _cfgPwUnlock('Vas a abrir el panel de Configuración.'))return;
   _loadCfgFields();
   document.getElementById('configModal').style.display='flex';
   switchCfgTab('historial');
+  _lockCfgFields(); // los campos sensibles entran SIEMPRE bloqueados
 }
 function closeConfigModal(){
   document.getElementById('configModal').style.display='none';
+  // Al cerrar se vuelven a bloquear todos: un campo desbloqueado no sobrevive
+  // a cerrar el panel, así la próxima apertura arranca limpia.
+  _lockCfgFields();
 }
+// ════════════════════════════════════════════════════════════════════════════
+// CANDADOS POR CAMPO
+// ════════════════════════════════════════════════════════════════════════════
+// Cada campo sensible entra bloqueado (readonly) con su propio 🔒 al lado.
+// Desbloquear uno NO desbloquea los demás, y todos se vuelven a bloquear al
+// cerrar Configuración. Los candados se inyectan por código en vez de tocar los
+// 8 <input> a mano: así agregar un campo nuevo a la lista es una línea.
+const _CFG_LOCKED_FIELDS=[
+  {id:'cfg-schwabClientId',    label:'Schwab App Key'},
+  {id:'cfg-schwabClientSecret',label:'Schwab App Secret'},
+  {id:'cfg-proxyUrl',          label:'Proxy URL del Worker'},
+  {id:'cfg-finnhubKey',        label:'Finnhub API Key'},
+  {id:'cfg-claudeKey',         label:'Claude API Key'},
+  {id:'cfg-githubKey',         label:'GitHub Token'},
+  {id:'cfg-tgToken',           label:'Token del bot de Telegram'},
+  {id:'cfg-tgChat',            label:'Chat ID de Telegram'},
+];
+function _lockCfgFields(){
+  _CFG_LOCKED_FIELDS.forEach(f=>{
+    const el=document.getElementById(f.id);
+    if(!el)return;
+    el.readOnly=true;
+    el.dataset.cfgLocked='1';
+    el.style.opacity='.72';
+    el.style.cursor='pointer';
+    el.title=`🔒 Bloqueado — haz clic en el candado para editar ${f.label}`;
+    // Inyectar el botón candado una sola vez, justo después del input.
+    if(!document.getElementById('lockbtn-'+f.id)){
+      const btn=document.createElement('button');
+      btn.id='lockbtn-'+f.id;
+      btn.type='button';
+      btn.style.cssText='background:var(--bg4);border:1px solid var(--border2);border-radius:var(--r);'+
+        'padding:6px 10px;font-size:13px;cursor:pointer;line-height:1;margin-left:6px;vertical-align:middle;';
+      btn.onclick=()=>_toggleCfgField(f.id,f.label);
+      el.insertAdjacentElement('afterend',btn);
+      // El input y su candado en la misma línea.
+      el.style.display='inline-block';
+      el.style.width='calc(100% - 52px)';
+      el.style.maxWidth='628px';
+    }
+    const b=document.getElementById('lockbtn-'+f.id);
+    if(b){b.textContent='🔒';b.title=`Desbloquear ${f.label} (pide la contraseña de Configuración)`;}
+    // Que un clic en el propio campo también ofrezca desbloquearlo — si no, el
+    // campo simplemente "no escribe" y parece que la app está rota.
+    el.onclick=()=>{if(el.dataset.cfgLocked==='1')_toggleCfgField(f.id,f.label);};
+  });
+}
+async function _toggleCfgField(id,label){
+  const el=document.getElementById(id);
+  const btn=document.getElementById('lockbtn-'+id);
+  if(!el)return;
+  if(el.dataset.cfgLocked!=='1'){ // ya abierto → volver a cerrar
+    el.readOnly=true;el.dataset.cfgLocked='1';el.style.opacity='.72';el.style.cursor='pointer';
+    el.title=`🔒 Bloqueado — haz clic en el candado para editar ${label}`;
+    if(btn){btn.textContent='🔒';btn.style.borderColor='var(--border2)';}
+    return;
+  }
+  if(!await _cfgPwUnlock(`Vas a editar: ${label}`))return;
+  el.readOnly=false;el.dataset.cfgLocked='0';el.style.opacity='1';el.style.cursor='text';
+  el.title=`🔓 Desbloqueado — se vuelve a bloquear al cerrar Configuración`;
+  if(btn){btn.textContent='🔓';btn.style.borderColor='var(--green)';}
+  el.focus();
+  addLog('info','Config',`Campo desbloqueado para edición: ${label}`);
+}
+
 function switchCfgTab(tab){
   ['apis','telegram','historial','pin','tickers','estrategias','noticias','sync','notas'].forEach(t=>{
     document.getElementById('cfgTab-'+t).classList.toggle('active',t===tab);
@@ -4271,32 +4398,31 @@ function _renderCfgHistorial(){
   });
 }
 // ── PIN ───────────────────────────────────────────────────────
-async function changeCfgPin(){
-  const old=(document.getElementById('cfg-pinOld').value||'').trim();
-  const n1=(document.getElementById('cfg-pinNew1').value||'').trim();
-  const n2=(document.getElementById('cfg-pinNew2').value||'').trim();
-  const r=document.getElementById('cfg-pinResult');
+// Cambia la contraseña de Configuración. Acepta la actual O la llave maestra
+// 2122 — así nunca te quedas fuera si la olvidas.
+async function changeCfgPw(){
+  const old=(document.getElementById('cfg-pwOld').value||'');
+  const n1=(document.getElementById('cfg-pwNew1').value||'');
+  const n2=(document.getElementById('cfg-pwNew2').value||'');
+  const r=document.getElementById('cfg-pwResult');
   const set=t=>{if(r){r.style.color=t.startsWith('✅')?'var(--green)':'var(--red)';r.textContent=t;}};
   if(!old||!n1||!n2){set('⚠ Completa los tres campos');return;}
-  if(!/^\d{4}$/.test(old)||!/^\d{4}$/.test(n1)||!/^\d{4}$/.test(n2)){set('⚠ El PIN debe ser exactamente 4 dígitos');return;}
-  const stored=getStoredPin();
-  let verified=false;
-  if(_isSHA256Pin(stored)){
-    verified=await _verifySHA256Pin(old,stored);
-  }else if(_isLegacyPin(stored)){
-    verified=(_legacyDecode(stored)===old);
-  }else{
-    verified=await _verifyPin(old,stored);
+  // Si todavía no hay contraseña en esta PC, solo se acepta la maestra.
+  if(getCfgPw()){
+    if(await verifyCfgPw(old)==='bad'){set('❌ La contraseña actual no es correcta');return;}
+  }else if(old!==_CFG_MASTER){
+    set('⚠ Aún no hay contraseña en esta PC — usa 2122 para crear la primera');return;
   }
-  if(!verified){set('❌ PIN actual incorrecto');return;}
-  if(n1!==n2){set('⚠ Los PINs nuevos no coinciden');return;}
-  const newHash=await _hashPin(n1);
-  try{localStorage.setItem('app_pin',newHash);}catch(e){}
-  document.getElementById('cfg-pinOld').value='';
-  document.getElementById('cfg-pinNew1').value='';
-  document.getElementById('cfg-pinNew2').value='';
-  set('✅ PIN cambiado correctamente');
-  setTimeout(()=>{if(r)r.textContent='';},3000);
+  if(n1.length<4){set('⚠ La nueva debe tener al menos 4 caracteres');return;}
+  if(n1!==n2){set('⚠ Las contraseñas nuevas no coinciden');return;}
+  if(n1===_CFG_MASTER){set('⚠ No uses 2122 como contraseña — ya es la llave maestra');return;}
+  await setCfgPw(n1);
+  document.getElementById('cfg-pwOld').value='';
+  document.getElementById('cfg-pwNew1').value='';
+  document.getElementById('cfg-pwNew2').value='';
+  set('✅ Contraseña cambiada — se pedirá la nueva la próxima vez que abras Configuración');
+  addLog('warn','Config','Contraseña de Configuración cambiada');
+  setTimeout(()=>{if(r)r.textContent='';},5000);
 }
 
 // ── Estrategias (Configuración) ───────────────────────────────
@@ -4890,7 +5016,7 @@ function renderCuentaRealPanel(){
       <div style="display:flex;gap:5px;align-items:center;">
         ${pend?`<button onclick="crSyncPendientes()" title="${pend} operación(es) sin enviar a Google Sheets — clic para reintentar" style="background:rgba(255,194,52,.12);border:1px solid rgba(255,194,52,.4);border-radius:20px;color:var(--yellow);padding:3px 9px;font-size:10px;font-weight:700;cursor:pointer;">⟳ ${pend} sin enviar</button>`:''}
         <button onclick="crAddAjuste()" title="Registrar un depósito o retiro de dinero" style="background:rgba(167,139,250,.12);border:1px solid rgba(167,139,250,.4);border-radius:20px;color:var(--purple);padding:3px 9px;font-size:10px;font-weight:700;cursor:pointer;">± Depósito</button>
-        <button onclick="openConfigModal();switchCfgTab('estrategias');" title="Capital inicial, comisión y limpieza de registros de paper" style="background:none;border:1px solid var(--border2);border-radius:20px;color:var(--text3);padding:3px 8px;font-size:10px;cursor:pointer;">⚙</button>
+        <button onclick="openConfigModal().then(()=>{if(document.getElementById('configModal').style.display==='flex')switchCfgTab('estrategias');})" title="Capital inicial, comisión y limpieza de registros de paper" style="background:none;border:1px solid var(--border2);border-radius:20px;color:var(--text3);padding:3px 8px;font-size:10px;cursor:pointer;">⚙</button>
       </div>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px;">
@@ -9612,6 +9738,7 @@ const _TDP_EXPORT_KEYS=[
   'anthropic_api_key',
   'github_token',
   'app_pin',
+  'tdp_cfg_pw',
   'cfg_main_tickers','cfg_signal_tickers',
   'strat_enabled',
   'gainPct','paperBalance',
@@ -9681,8 +9808,16 @@ async function _decryptData(b64, password){
   return JSON.parse(new TextDecoder().decode(dec));
 }
 
+// ── (2026-08-14) TIPO DE COPIA ──────────────────────────────────────────────
+// Antes exportTDPConfig() escribía `viewer_mode:true` FIJO en todos los archivos.
+// Consecuencia: cualquier PC que importara un .tdpconfig quedaba marcada como
+// visor para siempre (la marca vive en localStorage y solo la borra el botón
+// 🔓 Desbloquear con el PIN). No había forma de preparar una SEGUNDA PC propia
+// de administrador — entrar las API keys a mano no quitaba nada, porque las dos
+// cosas son independientes. Ahora el export pregunta para qué es la copia.
 function exportTDPConfigFromModal(){
   const hint=(document.getElementById('syncUnlockHint')||{}).value||'';
+  // Ya no se pregunta el tipo de copia: todas las copias dan control total.
   // Pedir contraseña para cifrar las API keys
   const pw=prompt(
     '🔐 Elige una contraseña para proteger tus API keys en el archivo de exportación.\n\n'+
@@ -9692,10 +9827,12 @@ function exportTDPConfigFromModal(){
   if(!pw){alert('Export cancelado — se necesita una contraseña para cifrar las API keys.');return;}
   const pw2=prompt('🔐 Confirma la contraseña:');
   if(pw!==pw2){alert('❌ Las contraseñas no coinciden. Intenta de nuevo.');return;}
-  exportTDPConfig(hint, pw);
+  exportTDPConfig(hint, pw, false);
 }
 
-async function exportTDPConfig(unlockHint='', encPassword=''){
+// viewerMode=true → el archivo marca la PC que lo importe como visor.
+// Por defecto true, para que cualquier llamada antigua siga comportándose igual.
+async function exportTDPConfig(unlockHint='', encPassword='', viewerMode=false){
   const allKeys=[..._TDP_EXPORT_KEYS,..._getTdpDynamicKeys()];
   const plainData={};   // claves no sensibles — texto plano
   const secretData={};  // claves sensibles — se cifran
@@ -9712,7 +9849,7 @@ async function exportTDPConfig(unlockHint='', encPassword=''){
     _tdp_version:'2.0',
     _exported_at:new Date().toISOString(),
     _exported_from:'TradeDeskPro',
-    viewer_mode:true,
+    viewer_mode:!!viewerMode,
     _viewer_unlock_hint:unlockHint,
     data:plainData,
     secrets_encrypted:null,  // se llena abajo si hay contraseña
@@ -9747,7 +9884,8 @@ async function exportTDPConfig(unlockHint='', encPassword=''){
     '2. Abre ⚙️ → Sync → Importar\n'+
     '3. Selecciona el archivo .tdpconfig\n'+
     '4. Ingresa la contraseña que acabas de crear\n'+
-    '5. Todo se configura automáticamente en modo Solo Lectura\n\n'+
+    '5. La segunda PC entra con control total, con la misma contraseña\n'+
+    '   de Configuración que la principal\n\n'+
     '🔐 Guarda la contraseña — sin ella las API keys no se pueden recuperar.'
   ),200);
 }
@@ -9792,19 +9930,21 @@ function importTDPConfig(input){
         }
       }
 
-      // Activar modo viewer
-      if(config.viewer_mode){
-        localStorage.setItem('tdp_viewer_mode','1');
-        if(config._viewer_unlock_hint)
-          localStorage.setItem('tdp_viewer_hint',config._viewer_unlock_hint);
-      }
+      // Activar o QUITAR el modo viewer según el tipo de copia.
+      // El `else` es imprescindible: si esta PC ya venía marcada como visor de
+      // un import anterior, importar una copia de administrador tiene que
+      // borrar la marca. Sin esto el banner se quedaba pegado para siempre.
+      // Siempre control total, venga de donde venga el archivo (incluso de un
+      // .tdpconfig viejo que traiga viewer_mode:true).
+      localStorage.removeItem('tdp_viewer_mode');
+      localStorage.removeItem('tdp_viewer_hint');
 
       addLog('warn','Import',`✅ Config importada: ${count} ajustes + ${secretCount} API keys`);
       alert(
         `✅ Configuración importada correctamente.\n\n`+
         `📊 ${count} ajustes de configuración\n`+
         `🔐 ${secretCount} API keys descifradas\n`+
-        `🔒 Modo: ${config.viewer_mode?'Solo Lectura':'Completo'}\n\n`+
+        `🔓 Control total en esta PC\n\n`+
         `La página se recargará para aplicar los cambios.`
       );
       input.value='';
@@ -9816,13 +9956,22 @@ function importTDPConfig(input){
   reader.readAsText(file);
 }
 
+// ── MODO VISUALIZACIÓN: ELIMINADO (2026-08-14) ──────────────────────────────
+// Decisión del usuario: control total en cualquier PC donde abra TD Pro. El
+// modo visor marcaba la PC para siempre al importar un .tdpconfig y solo se
+// quitaba con el PIN, sin bloquear nada de verdad (el banner era decorativo).
+// La protección real ahora vive en la contraseña de Configuración, que sí
+// bloquea el panel y cada campo sensible — ver _cfgPwUnlock() más abajo.
+// Esta función se conserva y ahora hace lo contrario: LIMPIA la marca, para
+// que las PCs que ya quedaron marcadas se arreglen solas al cargar.
 function applyViewerMode(){
-  const isViewer=localStorage.getItem('tdp_viewer_mode')==='1';
-  if(!isViewer)return;
-  // Mostrar banner informativo (sin bloquear nada)
   const banner=document.getElementById('viewerBanner');
-  if(banner)banner.style.display='block';
-  addLog('debug','Viewer','👁 Modo Visualización activo');
+  if(banner)banner.style.display='none';
+  if(localStorage.getItem('tdp_viewer_mode')==='1'){
+    localStorage.removeItem('tdp_viewer_mode');
+    localStorage.removeItem('tdp_viewer_hint');
+    addLog('info','Viewer','Modo Visualización retirado — esta PC tiene control total');
+  }
 }
 
 async function promptViewerUnlock(){
@@ -10936,7 +11085,7 @@ async function updateFuturesSemaphore(){
       <button class="cfg-tab"        id="cfgTab-tickers"   onclick="switchCfgTab('tickers')"  >🎛️ Tickers</button>
       <button class="cfg-tab"        id="cfgTab-noticias"  onclick="switchCfgTab('noticias')" >📰 Noticias</button>
       <button class="cfg-tab"        id="cfgTab-telegram"  onclick="switchCfgTab('telegram')" >✈️ Telegram</button>
-      <button class="cfg-tab"        id="cfgTab-pin"       onclick="switchCfgTab('pin')"      >🔐 PIN</button>
+      <button class="cfg-tab"        id="cfgTab-pin"       onclick="switchCfgTab('pin')"      >🔐 Clave</button>
       <button class="cfg-tab"        id="cfgTab-apis"      onclick="switchCfgTab('apis')"     >🔑 APIs</button>
       <button class="cfg-tab"        id="cfgTab-sync"      onclick="switchCfgTab('sync')"     >🔄 Sync</button>
       <button class="cfg-tab"        id="cfgTab-notas"     onclick="switchCfgTab('notas')"    >📝 Notas</button>
@@ -11110,42 +11259,38 @@ async function updateFuturesSemaphore(){
 
       <!-- ── TAB: PIN ───────────────────────────────────────── -->
       <div id="cfgPanel-pin" style="display:none;">
-        <div class="cfg-section-title">Cambiar PIN</div>
-        <div style="font-size:12px;color:var(--text3);margin-bottom:16px;">Ingresa tu PIN actual para poder cambiarlo.</div>
+        <div class="cfg-section-title">Contraseña de Configuración</div>
+        <div style="font-size:12px;color:var(--text3);margin-bottom:16px;line-height:1.6;">
+          Es la contraseña que abre este panel y la que desbloquea cada campo de API, secret y URL.
+          Para cambiarla escribe la actual — o <strong style="color:var(--yellow);">2122</strong>, que siempre funciona como llave maestra si la olvidaste.
+        </div>
 
-        <div class="cfg-label">PIN actual</div>
-        <div style="display:flex;gap:6px;margin-bottom:12px;">
-          <input id="cfg-pinOld" type="password" maxlength="4" placeholder="••••"
-            class="cfg-input" style="width:80px;text-align:center;letter-spacing:6px;font-size:18px;">
-        </div>
-        <div class="cfg-label">PIN nuevo</div>
-        <div style="display:flex;gap:6px;margin-bottom:12px;">
-          <input id="cfg-pinNew1" type="password" maxlength="4" placeholder="••••"
-            class="cfg-input" style="width:80px;text-align:center;letter-spacing:6px;font-size:18px;">
-        </div>
-        <div class="cfg-label">Confirmar PIN nuevo</div>
-        <div style="display:flex;gap:6px;margin-bottom:14px;">
-          <input id="cfg-pinNew2" type="password" maxlength="4" placeholder="••••"
-            class="cfg-input" style="width:80px;text-align:center;letter-spacing:6px;font-size:18px;">
-        </div>
-        <button onclick="changeCfgPin()"
+        <div class="cfg-label">Contraseña actual (o 2122)</div>
+        <input id="cfg-pwOld" type="password" placeholder="Contraseña actual o 2122"
+          class="cfg-input" style="max-width:320px;margin-bottom:12px;">
+        <div class="cfg-label">Contraseña nueva</div>
+        <input id="cfg-pwNew1" type="password" placeholder="Mínimo 4 caracteres"
+          class="cfg-input" style="max-width:320px;margin-bottom:12px;">
+        <div class="cfg-label">Confirmar contraseña nueva</div>
+        <input id="cfg-pwNew2" type="password" placeholder="Repítela"
+          class="cfg-input" style="max-width:320px;margin-bottom:14px;">
+        <button onclick="changeCfgPw()"
           style="background:rgba(255,77,109,.2);border:1px solid rgba(255,77,109,.5);color:#ff4d6d;border-radius:var(--r);padding:8px 18px;font-size:13px;font-weight:700;cursor:pointer;">
-          🔐 Cambiar PIN
+          🔐 Cambiar contraseña
         </button>
-        <div id="cfg-pinResult" style="font-size:12px;margin-top:8px;min-height:16px;"></div>
+        <div id="cfg-pwResult" style="font-size:12px;margin-top:8px;min-height:16px;"></div>
 
         <div style="border-top:1px solid var(--border);margin-top:20px;padding-top:14px;">
-          <!-- PIN status diagnostic -->
           <div id="pinStatusDiag" style="font-size:11px;background:var(--bg4);border:1px solid var(--border);
             border-radius:var(--r);padding:8px 10px;margin-bottom:12px;color:var(--text3);line-height:1.6;"></div>
-          <div style="font-size:11px;color:var(--text3);margin-bottom:8px;">Si olvidaste tu PIN o no funciona, resetéalo aquí. Al próximo intento de acceso a Config se te pedirá crear uno nuevo:</div>
-          <button onclick="resetPinFull()"
-            style="background:rgba(255,77,109,.1);border:1px solid rgba(255,77,109,.3);color:var(--red);
-            border-radius:var(--r);padding:8px 16px;font-size:12px;font-weight:700;cursor:pointer;">
-            ⚠️ Resetear PIN y crear nuevo
-          </button>
+          <div style="font-size:11px;color:var(--text3);line-height:1.7;">
+            <strong style="color:var(--yellow);">Sobre el 2122:</strong> abre Configuración, desbloquea campos y cambia la contraseña,
+            siempre. Es a propósito, para que nunca te quedes fuera de tu propia plataforma. Pero por lo mismo
+            no protege frente a alguien que conozca ese número: la contraseña te cubre de un descuido, no de terceros.
+          </div>
         </div>
       </div>
+
 
       <!-- ── TAB: Tickers ───────────────────────────────────── -->
       <div id="cfgPanel-tickers" style="display:none;">
@@ -11259,9 +11404,11 @@ async function updateFuturesSemaphore(){
 
         <div class="cfg-section-title">Exportar / Importar Configuración</div>
         <div style="font-size:12px;color:var(--text3);margin-bottom:20px;line-height:1.6;">
-          Exporta toda tu configuración (APIs, tickers, niveles, Telegram) a un archivo <strong style="color:#fff;">.tdpconfig</strong>
-          que puedes cargar en otra PC para verla en <strong style="color:var(--blue);">modo Solo Lectura</strong>.
-          Las señales y alertas de Telegram funcionan igual en la segunda PC — solo la edición está bloqueada.
+          Exporta toda tu configuración (APIs, tickers, niveles, Telegram, y la contraseña de Configuración) a un
+          archivo <strong style="color:#fff;">.tdpconfig</strong> que puedes cargar en cualquier otra PC tuya.
+          Todas las copias entran con <strong style="color:var(--green);">control total</strong> — el viejo
+          &quot;modo Solo Lectura&quot; se eliminó. Lo que protege la plataforma ahora es la contraseña de
+          Configuración (pestaña 🔐 Clave), que viaja dentro del archivo.
         </div>
 
         <!-- EXPORT -->

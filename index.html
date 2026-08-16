@@ -1,12 +1,39 @@
 <!DOCTYPE html>
-<!-- TradeDeskPro v5 | build:20260814_strikelog_ledger | B1:_wsSessionCandle_per15min B2:BB-REGRESO_strategy B3:intentoBull_loose B4:bbCallTrigger_connected B5:dedup_distVars B6:setup_gate_bbw B7:stochPutOk_noFloor A1:bbSessionOk_isMarketHours A2:schwabToken_firstTicker M1:momentumToLower_gate M2:bbwExpandActive M3:aviso_stricter M4:intento_volOk M5:unified_setup_card M6:bbwSqueezeBreakout M7:multiTF_regreso M8:BB-MTF_panel_replaces_noticias M9:setup_levels_removed M10:atr_velocity_gate M11:piercing_only_trigger M12:score_base60_no_double_filter M13:minmove_pct_of_price M14:casi_senal_diag M15:diferencia_abs M16:1h_derived_from_15m M17:meta_added M18:cuenta_real_ledger M19:sheets_autosync M20:strikelog_is_ledger M21:exportStrikeLog_fixed M22:paper_entries_flagged M23:delete_confirm_and_refresh M24:comision_neta M25:panel_limpio M26:orden_cronologico M27:poda_local_5dias M28:probar_conexion M29:sin_lugares M30:log_ancho_scroll_unico M31:export_csv_robusto M32:config_ancho_tabs_visibles M33:strikelog_grid_full_width M34:debug_radiografia_gate M35:viewer_mode_eliminado M36:cfg_password M37:candados_por_campo -->
+<!-- TradeDeskPro v5 | build:20260814_strikelog_ledger | B1:_wsSessionCandle_per15min B2:BB-REGRESO_strategy B3:intentoBull_loose B4:bbCallTrigger_connected B5:dedup_distVars B6:setup_gate_bbw B7:stochPutOk_noFloor A1:bbSessionOk_isMarketHours A2:schwabToken_firstTicker M1:momentumToLower_gate M2:bbwExpandActive M3:aviso_stricter M4:intento_volOk M5:unified_setup_card M6:bbwSqueezeBreakout M7:multiTF_regreso M8:BB-MTF_panel_replaces_noticias M9:setup_levels_removed M10:atr_velocity_gate M11:piercing_only_trigger M12:score_base60_no_double_filter M13:minmove_pct_of_price M14:casi_senal_diag M15:diferencia_abs M16:1h_derived_from_15m M17:meta_added M18:cuenta_real_ledger M19:sheets_autosync M20:strikelog_is_ledger M21:exportStrikeLog_fixed M22:paper_entries_flagged M23:delete_confirm_and_refresh M24:comision_neta M25:panel_limpio M26:orden_cronologico M27:poda_local_5dias M28:probar_conexion M29:sin_lugares M30:log_ancho_scroll_unico M31:export_csv_robusto M32:config_ancho_tabs_visibles M33:strikelog_grid_full_width M34:debug_radiografia_gate M35:viewer_mode_eliminado M36:cfg_password M37:candados_por_campo M38:sec_xss_escapes M39:sec_sanitizeHtml M40:sec_import_allowlist M41:sec_csp_sri M42:sec_pinhash_fix M43:worker_key_boton_propio -->
 <html lang="es">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>TradeDesk Pro</title>
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<!-- SRI (2026-08-15): sin `integrity` el navegador ejecuta lo que sea que
+     devuelva el CDN. Si cdnjs se compromete, ese script corre en esta página y
+     lee localStorage entero —tokens de Schwab, keys de Finnhub, Claude y
+     GitHub— saltándose de golpe la contraseña, los candados y la ofuscación.
+     Con el hash, un archivo alterado simplemente no se ejecuta. -->
+<!-- ════════════════════════════════════════════════════════════════════════
+     CSP (2026-08-15). No puede ser estricta: la app entera está construida con
+     handlers onclick en el HTML y un solo bloque de JS embebido, así que quitar
+     'unsafe-inline' la rompería por completo. Aun así vale mucho, porque lo que
+     limita es el DESTINO: aunque alguien lograra inyectar código, connect-src
+     solo permite hablar con estos servidores, o sea que no puede mandar tus
+     tokens a ninguna parte. object-src/base-uri/form-action cierran las otras
+     tres vías clásicas de exfiltración.
+     Si algún día añades un servicio nuevo, hay que agregarlo a connect-src o
+     sus llamadas fallarán (se ve claro en la consola). ═══════════════════ -->
+<meta http-equiv="Content-Security-Policy" content="
+  default-src 'self';
+  script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com;
+  style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+  font-src 'self' data: https://fonts.gstatic.com;
+  img-src 'self' data: blob: https:;
+  connect-src 'self' https://finnhub.io wss://ws.finnhub.io https://api.schwabapi.com
+              https://api.anthropic.com https://api.telegram.org https://api.allorigins.win
+              https://feeds.finance.yahoo.com https://*.workers.dev;
+  object-src 'none'; base-uri 'none'; form-action 'none';">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"
+  integrity="sha512-qZvrmS2ekKPF2mSznTQsxqPgnpkI4DNTlrdUmTzrDgektczlKNRRhy5X5AAOnx5S09ydFYWWNSfcEqDTTHgtNA=="
+  crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <style>
 :root{
   --bg:#0a0e1a;--bg2:#111827;--bg3:#1a2235;--bg4:#1e2d42;
@@ -666,7 +693,7 @@ async function handleSchwabCallback(){
       // Via proxy — secret never touches browser
       r=await fetch(`${proxyUrl}/schwab/token`,{
         method:'POST',
-        headers:{'Content-Type':'application/json'},
+        headers:_wh(),
         body:JSON.stringify({code,redirect_uri:SCHWAB_REDIRECT})
       });
     }else{
@@ -721,7 +748,7 @@ async function getSchwabToken(){
         try{
           r=await fetch(`${proxyUrl}/schwab/refresh`,{
             method:'POST',
-            headers:{'Content-Type':'application/json'},
+            headers:_wh(),
             body:JSON.stringify({refresh_token:refresh}),
             signal:AbortSignal.timeout(8000)
           });
@@ -1101,6 +1128,107 @@ function esc(s){
     .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// ESCAPES POR CONTEXTO  (2026-08-15 — auditoría de seguridad)
+// ════════════════════════════════════════════════════════════════════════════
+// esc() sirve para TEXTO dentro del HTML. NO sirve dentro de un atributo de
+// evento (onclick="...") y este era un XSS real y comprobado: el navegador
+// DECODIFICA las entidades del atributo ANTES de que el motor de JavaScript vea
+// el contenido, así que el &#39; que produce esc() vuelve a ser una comilla de
+// verdad y cierra el string. Un enlace de noticia con  x');codigo;//  se
+// ejecutaba. Verificado en navegador antes de escribir esto.
+//
+// escJs(): para interpolar dentro de un string JS que vive en un atributo.
+//   Escapa la barra invertida y las comillas de forma que sobreviven a la
+//   decodificación de entidades, y neutraliza < > & para no romper el HTML.
+function escJs(s){
+  if(s==null)return '';
+  return String(s)
+    .replace(/\\/g,'\\\\')
+    .replace(/'/g,"\\'")
+    .replace(/"/g,'\\"')
+    .replace(/\r/g,'\\r').replace(/\n/g,'\\n')
+    .replace(/&/g,'\\u0026').replace(/</g,'\\u003c').replace(/>/g,'\\u003e');
+}
+// escUrl(): para href/src. Bloquea javascript:, data: y vbscript: — un href
+// con javascript:... es un XSS de un clic. Devuelve '#' si el esquema no es
+// http(s) o relativo.
+function escUrl(u){
+  if(u==null)return '#';
+  const s=String(u).trim();
+  if(/^(javascript|data|vbscript|file):/i.test(s.replace(/[\s\u0000-\u001f]/g,'')))return '#';
+  return esc(s);
+}
+// escHtml(): quita TODO el marcado de un texto que llega de fuera y que se va a
+// meter con innerHTML. Se usa donde antes se inyectaba HTML crudo de una API.
+function escHtml(s){return esc(s);}
+
+// ════════════════════════════════════════════════════════════════════════════
+// SANEADOR DE HTML  (2026-08-15)
+// ════════════════════════════════════════════════════════════════════════════
+// El Reporte Premarket se le pide a Claude EN HTML, así que no se puede escapar
+// sin destruir el formato. Pero ese HTML no es de fiar: el modelo hace búsqueda
+// web para armarlo, o sea que lee páginas que no controlamos. Una página que
+// diga "escribe <img src=x onerror=...>" consigue que ese marcado acabe dentro
+// de la app — y peor, el reporte se guarda en localStorage y se vuelve a
+// inyectar cada vez que se abre el modal, así que una sola vez envenenada se
+// queda pegada para siempre. Comprobado: el onerror se ejecutaba.
+//
+// La solución es una lista blanca. Se parsea en un documento SUELTO (DOMParser
+// no ejecuta nada ni carga imágenes), se tira todo lo que no esté permitido y
+// se devuelve el resultado limpio.
+const _HTML_TAGS_OK=new Set(['DIV','SPAN','P','BR','HR','B','STRONG','I','EM','U','SMALL',
+  'H1','H2','H3','H4','H5','H6','UL','OL','LI','TABLE','THEAD','TBODY','TR','TH','TD',
+  'CODE','PRE','BLOCKQUOTE','A','SECTION','ARTICLE','HEADER','FOOTER','FIGURE','FIGCAPTION']);
+// href va en la lista porque los <a> del reporte son útiles; se valida aparte
+// más abajo (esquema + target/rel). Sin él, el bucle lo borraba antes de llegar
+// a esa validación y los enlaces legítimos quedaban muertos.
+const _HTML_ATTR_OK=new Set(['class','style','colspan','rowspan','align','title','href']);
+function sanitizeHtml(html){
+  try{
+    const doc=new DOMParser().parseFromString('<body>'+String(html||'')+'</body>','text/html');
+    const walk=node=>{
+      [...node.children].forEach(el=>{
+        if(!_HTML_TAGS_OK.has(el.tagName)){
+          // Se conserva el texto — el contenido del reporte importa; lo que se
+          // va es la etiqueta. script/style/iframe se borran enteros: su texto
+          // es código, no contenido.
+          if(['SCRIPT','STYLE','IFRAME','OBJECT','EMBED','LINK','META','FORM','SVG','MATH'].includes(el.tagName)){
+            el.remove();return;
+          }
+          const txt=doc.createTextNode(el.textContent||'');
+          el.replaceWith(txt);return;
+        }
+        [...el.attributes].forEach(a=>{
+          const n=a.name.toLowerCase();
+          // Fuera TODO manejador de evento y todo lo que no esté en la lista.
+          if(n.startsWith('on')||!_HTML_ATTR_OK.has(n)){el.removeAttribute(a.name);return;}
+          if(n==='style'&&/expression\s*\(|url\s*\(|javascript:|@import/i.test(a.value)){
+            el.removeAttribute(a.name);
+          }
+        });
+        // Los <a> pierden href peligroso y se abren siempre en pestaña nueva
+        // con noopener (si no, la página destino puede manipular la nuestra).
+        if(el.tagName==='A'){
+          const h=el.getAttribute('href');
+          if(h!=null){
+            const limpio=String(h).trim().replace(/[\s\u0000-\u001f]/g,'');
+            if(/^(javascript|data|vbscript|file):/i.test(limpio))el.removeAttribute('href');
+            else{el.setAttribute('target','_blank');el.setAttribute('rel','noopener noreferrer');}
+          }
+        }
+        walk(el);
+      });
+    };
+    walk(doc.body);
+    return doc.body.innerHTML;
+  }catch(e){
+    // Si algo falla, se degrada a texto plano. Nunca al HTML original.
+    console.error('sanitizeHtml',e);
+    return esc(html);
+  }
+}
+
 function addLog(level, category, message, detail='') {
   // Filtrar niveles muy verbosos — info se descarta, debug se guarda solo en debugMode
   if(level === 'info') return;
@@ -1241,8 +1369,22 @@ async function _verifyPin(pin,stored){
 // - XOR legacy (v3):      short base64 ~8 chars, decodeable with _xor
 // - SHA-256 intermediate: exactly 44 chars base64 (SHA-256 = 32 bytes)
 // - PBKDF2 current (v4):  ~88 chars base64
-function _isLegacyPin(stored){return stored&&stored.length<88;}
-function _isSHA256Pin(stored){return stored&&stored.length===44;}
+// ── BUG CORREGIDO (2026-08-15) ──────────────────────────────────────────────
+// El comentario de arriba afirmaba que PBKDF2 produce ~88 caracteres. Es falso:
+// _hashPin pide 256 bits = 32 bytes, y 32 bytes en base64 son EXACTAMENTE 44
+// caracteres — igual que SHA-256. Verificado con Node:
+//   PBKDF2('2122', salt) = 'NpaE2S6jDuv7WCvS6odlR+CI91H1Ma/1xWVT78kVXFw=' (44)
+// Consecuencia: todo hash PBKDF2 correcto era clasificado como "SHA-256
+// intermedio" (y también como "legacy", porque 44 < 88), así que la
+// verificación tomaba siempre la rama equivocada y NUNCA podía acertar. Peor:
+// permitía una degradación — quien pudiera escribir localStorage plantaba un
+// SHA-256 simple, sin salt ni iteraciones, y la rama de 44 lo aceptaba.
+//
+// Los formatos ya no se distinguen por longitud sino por un prefijo explícito.
+// Sin prefijo se asume PBKDF2, que es lo que genera _hashPin hoy. El formato
+// XOR de v3 sí es reconocible: es corto (<40) y no lleva '=' de relleno base64.
+function _isLegacyPin(stored){return !!stored&&stored.length<40&&!stored.endsWith('=');}
+function _isSHA256Pin(stored){return !!stored&&stored.indexOf('sha256:')===0;}
 function _legacyDecode(e){try{return _xor(atob(e),'tdp_salt_2025');}catch(ex){return ''};}
 async function _encodePin(p){return _hashPin(p);}
 // _decodePin preserved only for backward compat — returns '' (hash is one-way)
@@ -1349,7 +1491,7 @@ function pinPress(d){
         addLog('debug','PIN','PIN creado desde entrada vacía');
       }else if(_isSHA256Pin(stored)){
         // 44-char SHA-256 intermediate format (NpaE2S6j... type)
-        const sha256ok=await _verifySHA256Pin(_pinBuffer,stored);
+        const sha256ok=await _verifySHA256Pin(_pinBuffer,stored.slice(7));
         if(sha256ok){
           ok=true;
           // Migrate to PBKDF2
@@ -2064,7 +2206,7 @@ function renderSignalTickerChips(){
   const syms=[..._signalTickers].filter((v,i,a)=>a.indexOf(v)===i);
   let h=`<button onclick="filterSignalsByTicker(null)" style="${_tickerChipStyle(!_activeTickerFilter)}">Todos</button>`;
   syms.forEach(sym=>{
-    h+=`<button onclick="filterSignalsByTicker('${sym}')" style="${_tickerChipStyle(_activeTickerFilter===sym)}">${sym}</button>`;
+    h+=`<button onclick="filterSignalsByTicker('${escJs(sym)}')" style="${_tickerChipStyle(_activeTickerFilter===sym)}">${sym}</button>`;
   });
   box.innerHTML=h;
 }
@@ -2150,7 +2292,7 @@ async function loadTelegramNotes(){
   }
   if(statusEl){statusEl.textContent='⟳ Buscando notas nuevas…';statusEl.style.color='var(--text3)';}
   try{
-    const r=await fetch(`${proxyUrl}/telegram-notes`,{signal:AbortSignal.timeout(10000)});
+    const r=await fetch(`${proxyUrl}/telegram-notes`,{headers:_wh(),signal:AbortSignal.timeout(10000)});
     const d=await r.json().catch(()=>({}));
     if(!r.ok||d.error){
       if(statusEl){statusEl.textContent=`⚠ Error: ${d.error||'HTTP '+r.status}`;statusEl.style.color='var(--red)';}
@@ -3838,7 +3980,7 @@ async function _buildSignalsCore(){
 
     html.push(`<div class="sig-card" data-sigkey="${s.sym}_${s.code}_${s.type}" style="margin-bottom:12px;${fullSignal?`box-shadow:0 0 0 2px ${accentCol};`:''}">
       <div class="sig-hdr ${hdr}" data-card-header style="padding:12px 14px;position:relative;">
-        <button onclick="dismissSignal('${s.sym}','${s.code}','${s.type}')"
+        <button onclick="dismissSignal('${escJs(s.sym)}','${escJs(s.code)}','${escJs(s.type)}')"
           title="Cerrar señal"
           style="position:absolute;top:8px;right:8px;background:rgba(0,0,0,.25);border:none;border-radius:50%;width:22px;height:22px;color:rgba(255,255,255,.55);cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:center;padding:0;z-index:2;"
           onmouseover="this.style.background='rgba(255,77,109,.4)';this.style.color='#fff'"
@@ -4085,6 +4227,7 @@ const _CFG_LOCKED_FIELDS=[
   {id:'cfg-schwabClientId',    label:'Schwab App Key'},
   {id:'cfg-schwabClientSecret',label:'Schwab App Secret'},
   {id:'cfg-proxyUrl',          label:'Proxy URL del Worker'},
+  {id:'cfg-workerKey',         label:'Clave del Worker (X-TDP-Key)'},
   {id:'cfg-finnhubKey',        label:'Finnhub API Key'},
   {id:'cfg-claudeKey',         label:'Claude API Key'},
   {id:'cfg-githubKey',         label:'GitHub Token'},
@@ -4187,6 +4330,7 @@ function _loadCfgFields(){
   if(el('cfg-schwabClientId'))el('cfg-schwabClientId').value=cid;
   if(el('cfg-schwabClientSecret'))el('cfg-schwabClientSecret').value=csec;
   if(el('cfg-proxyUrl'))el('cfg-proxyUrl').value=proxy;
+  if(el('cfg-workerKey'))el('cfg-workerKey').value=getWorkerKey();
   if(el('cfg-finnhubKey'))el('cfg-finnhubKey').value=fhk;
   if(el('cfg-claudeKey'))el('cfg-claudeKey').value=clk;
   const ghk=_loadKey('github_token')||'';
@@ -4247,12 +4391,54 @@ function saveCfgSchwab(){
   try{_storeKey('schwab_client_secret',csec);}catch(e){} // C-SEC-01
   if(proxy)try{localStorage.setItem('proxy_url',proxy);}catch(e){}
   else localStorage.removeItem('proxy_url');
+  const wk=(document.getElementById('cfg-workerKey')?.value||'').trim();
+  if(wk)try{localStorage.setItem('tdp_worker_key',wk);}catch(e){}
+  else localStorage.removeItem('tdp_worker_key');
   _updateApiStatus();
   // Iniciar OAuth — redirige al portal de Schwab para renovar el refresh token
   const s=document.getElementById('cfg-schwabSaved');
   if(s){s.style.color='var(--green)';s.textContent='✅ Credenciales guardadas — redirigiendo a Schwab...';s.style.display='block';}
   setTimeout(()=>{ startSchwabOAuth(); },900);
 }
+// Guarda SOLO la clave del Worker. Existe aparte porque "Guardar Schwab"
+// dispara el OAuth y te manda al portal de Schwab: no tiene sentido rehacer
+// toda la autenticación del bróker solo para escribir una clave.
+function saveCfgWorkerKey(){
+  const el=document.getElementById('cfg-workerKey');
+  const r=document.getElementById('cfg-workerKeyResult');
+  const set=(t,c)=>{if(r){r.style.color=c;r.textContent=t;}};
+  const wk=(el?.value||'').trim();
+  if(!wk){localStorage.removeItem('tdp_worker_key');set('Clave borrada','var(--text3)');return;}
+  try{localStorage.setItem('tdp_worker_key',wk);}catch(e){}
+  set('✅ Guardada','var(--green)');
+  setTimeout(()=>set('',''),3000);
+}
+
+// Comprueba de verdad que la clave sirve: llama a un endpoint protegido y
+// distingue los tres casos que importan — sin Proxy URL, 401 (clave mal), y OK.
+async function probarWorker(){
+  const r=document.getElementById('cfg-workerKeyResult');
+  const set=(t,c)=>{if(r){r.style.color=c;r.textContent=t;}};
+  const proxy=(localStorage.getItem('proxy_url')||'').trim();
+  if(!proxy.startsWith('http')){set('⚠ Falta el Proxy URL arriba','var(--yellow)');return;}
+  set('⏳ Probando...','var(--text3)');
+  try{
+    const resp=await fetch(`${proxy}/sheets-log`,{
+      method:'POST',headers:_wh(),body:JSON.stringify({ping:true}),
+      signal:AbortSignal.timeout(20000)
+    });
+    if(resp.status===401){set('❌ 401 — la clave no coincide con API_SECRET','var(--red)');return;}
+    if(resp.status===503){set('❌ El Worker no tiene API_SECRET configurado','var(--red)');return;}
+    if(resp.status===429){set('⚠ Límite de peticiones — espera un minuto','var(--yellow)');return;}
+    const d=await resp.json().catch(()=>({}));
+    // Un error de Sheets aquí YA significa que la clave pasó: el guard va antes.
+    if(d.error){set(`✅ Clave OK (Sheets responde: ${d.error})`,'var(--yellow)');return;}
+    set(`✅ Todo OK — hoja "${d.hoja||'?'}"`,'var(--green)');
+  }catch(e){
+    set(`❌ No se pudo conectar: ${e.message}`,'var(--red)');
+  }
+}
+
 function saveCfgFinnhub(){
   const k=(document.getElementById('cfg-finnhubKey').value||'').trim();
   const r=document.getElementById('cfg-finnhubSaved');
@@ -4666,7 +4852,7 @@ function renderMainTickerCards(){
     try{const s=localStorage.getItem('strike_range_'+sym);if(s)range=JSON.parse(s);}catch(e){}
     if(!range.min||!range.max) range=RANGE_DEFAULTS[sym]||{min:'',max:''};
     const rangeStr=range.min&&range.max?`$${range.min}–$${range.max}`:'—';
-    return`<div onclick="openStrikeLog('${sym}','${col}')"
+    return`<div onclick="openStrikeLog('${escJs(sym)}','${escJs(col)}')"
       style="background:var(--bg3);border-radius:var(--r);padding:10px 8px;border-left:2px solid ${col};text-align:center;cursor:pointer;"
       onmouseover="this.style.background='var(--bg4)'" onmouseout="this.style.background='var(--bg3)'">
       <div style="font-size:12px;font-weight:700;color:${col};font-family:var(--mono);margin-bottom:4px;">${sym}</div>
@@ -4681,7 +4867,7 @@ function renderNewsTickerButtons(){
   if(!container)return;
   const all=_signalTickers.filter((v,i,a)=>a.indexOf(v)===i); // dedupe
   container.innerHTML=all.map(sym=>
-    `<button onclick="loadNews('${sym}')" class="news-ticker-btn" id="nbtn-${sym}">${sym}</button>`
+    `<button onclick="loadNews('${escJs(sym)}')" class="news-ticker-btn" id="nbtn-${esc(sym)}">${esc(sym)}</button>`
   ).join('')+
   `<button onclick="loadNews('ALL')" class="news-ticker-btn" id="nbtn-ALL" style="color:var(--yellow);">ALL</button>`;
   _renderEarningsBadges(); // reaplica badge + borde de earnings tras reconstruir los botones
@@ -5073,7 +5259,7 @@ async function _crPost(rows){
   const proxy=(localStorage.getItem('proxy_url')||'').trim();
   if(!proxy||!proxy.startsWith('http'))throw new Error('Falta el Proxy URL en Configuración → APIs');
   const r=await fetch(`${proxy}/sheets-log`,{
-    method:'POST',headers:{'Content-Type':'application/json'},
+    method:'POST',headers:_wh(),
     body:JSON.stringify({trades:rows}),signal:AbortSignal.timeout(15000)
   });
   const d=await r.json().catch(()=>({}));
@@ -5161,7 +5347,7 @@ async function crProbarConexion(){
   set('⟳ Probando…','var(--text3)');
   try{
     const r=await fetch(`${proxy}/sheets-log`,{
-      method:'POST',headers:{'Content-Type':'application/json'},
+      method:'POST',headers:_wh(),
       body:JSON.stringify({ping:true}),signal:AbortSignal.timeout(20000)
     });
     const d=await r.json().catch(()=>({}));
@@ -5341,13 +5527,13 @@ function renderLogPanel(){
   list.innerHTML=filtered.map(l=>{
     const col=colMap[l.level]||'var(--text3)';
     const time=l.time||'';
-    const detail=l.detail?`<div style="color:var(--text3);padding-left:12px;margin-top:1px;">${l.detail}</div>`:'';
+    const detail=l.detail?`<div style="color:var(--text3);padding-left:12px;margin-top:1px;">${esc(l.detail)}</div>`:'';
     return`<div style="border-bottom:1px solid var(--border);padding:6px 0;">
       <div style="display:flex;gap:8px;align-items:baseline;">
         <span style="color:${col};font-weight:700;min-width:44px;">[${(l.level||'').toUpperCase()}]</span>
         <span style="color:var(--text3);min-width:70px;">${time}</span>
         <span style="color:var(--blue);min-width:80px;">${l.category||''}</span>
-        <span style="color:var(--text);">${l.message||''}</span>
+        <span style="color:var(--text);">${esc(l.message||'')}</span>
       </div>
       ${detail}
     </div>`;
@@ -6817,6 +7003,26 @@ async function runTestMode(){
 // PREMARKET REPORT — Generado con Claude API + web search
 // C-02: Anthropic key handled — proxy preferred, direct fallback with warning
 // ═══════════════════════════════════════════════════════════════
+// ── CLAVE DEL WORKER (2026-08-15) ───────────────────────────────────────────
+// El Worker pasó a exigir la cabecera X-TDP-Key en todos sus endpoints. Antes
+// estaban TODOS abiertos: cualquiera con la URL —que está en este mismo HTML—
+// podía gastar la cuenta de Anthropic, leer el balance de la cuenta con un POST
+// a /sheets-log, o volcar las notas privadas del bot de Telegram.
+//
+// Se guarda en localStorage (⚙️ → APIs → Clave del Worker) y va como cabecera.
+// Sin ella el Worker responde 401.
+//
+// ⚠ Esto NO hace privado al Worker: el navegador tiene que conocer la clave, y
+// quien lea el código o mire la pestaña Red del navegador la ve. Lo que cierra
+// es el rastreo automático de bots, que es el riesgo real hoy. El cierre de
+// verdad sería poner Cloudflare Access delante.
+function getWorkerKey(){return (localStorage.getItem('tdp_worker_key')||'').trim();}
+function _wh(extra){
+  const h=Object.assign({'Content-Type':'application/json'},extra||{});
+  const k=getWorkerKey();
+  if(k)h['X-TDP-Key']=k;
+  return h;
+}
 function getAnthropicKey(){return _loadKey('anthropic_api_key')||'';}
 function saveAnthropicKey(){
   const k=document.getElementById('pmKeyInput').value.trim();
@@ -6841,7 +7047,7 @@ function openPremarketModal(){
   const cachedDate=localStorage.getItem('pm_report_date');
   const today=new Date().toLocaleDateString('es-PR');
   if(cached&&cachedDate){
-    document.getElementById('pmContent').innerHTML=cached;
+    document.getElementById('pmContent').innerHTML=sanitizeHtml(cached);
     document.getElementById('pmLastGenerated').textContent=`Generado el ${cachedDate}${cachedDate===today?' · HOY':' · (no es de hoy)'}`;
   }
 }
@@ -6921,7 +7127,7 @@ Sé directo, concreto y accionable. Sin introducciones. Sin disclaimers. Solo el
     // W-03b: proxy solo válido si es URL real (empieza con http) — evita falso positivo con valor vacío/inválido
     const _proxyValid=proxyUrl.startsWith('http');
     const endpoint=_proxyValid?`${proxyUrl}/anthropic`:'https://api.anthropic.com/v1/messages';
-    const headers={'Content-Type':'application/json'};
+    const headers=_proxyValid?_wh():{'Content-Type':'application/json'};
     if(!_proxyValid){
       // Direct — key exposed in browser (only until proxy is configured)
       headers['x-api-key']=key;
@@ -6968,7 +7174,9 @@ Sé directo, concreto y accionable. Sin introducciones. Sin disclaimers. Solo el
       return;
     }
 
-    content.innerHTML=reportHtml;
+    // sanitizeHtml: el reporte viene de una API que hace búsqueda web, así que
+    // su HTML no es de fiar. Ver el comentario del saneador.
+    content.innerHTML=sanitizeHtml(reportHtml);
 
     // Cache the report
     const today=new Date().toLocaleDateString('es-PR');
@@ -7250,7 +7458,7 @@ RULES:
     const proxyUrl=(localStorage.getItem('proxy_url')||'').trim();
     const _proxyValid=proxyUrl.startsWith('http');
     const endpoint=_proxyValid?`${proxyUrl}/anthropic`:'https://api.anthropic.com/v1/messages';
-    const headers={'Content-Type':'application/json'};
+    const headers=_proxyValid?_wh():{'Content-Type':'application/json'};
     if(!_proxyValid){
       headers['x-api-key']=key;
       headers['anthropic-version']='2023-06-01';
@@ -8362,7 +8570,7 @@ Sin introducciones. Sin disclaimers. Directo al punto.`;
     const proxyUrl=(localStorage.getItem('proxy_url')||'').trim();
     const _proxyValid=proxyUrl.startsWith('http');
     const endpoint=_proxyValid?`${proxyUrl}/anthropic`:'https://api.anthropic.com/v1/messages';
-    const headers={'Content-Type':'application/json'};
+    const headers=_proxyValid?_wh():{'Content-Type':'application/json'};
     if(!_proxyValid){
       headers['x-api-key']=key;
       headers['anthropic-version']='2023-06-01';
@@ -8380,8 +8588,11 @@ Sin introducciones. Sin disclaimers. Directo al punto.`;
     const isEvitar=txt.includes('EVITAR');
     const verdictColor=isOperar?'var(--green)':isEvitar?'var(--red)':'var(--yellow)';
 
+    // esc() primero: txt es la respuesta cruda de Claude y el análisis puede
+    // incluir texto leído de un chart adjunto, que es un canal de inyección.
+    // Los .replace() de abajo añaden el marcado ya sobre texto neutralizado.
     outEl.innerHTML=`<div style="font-size:11px;line-height:1.8;color:var(--text);">${
-      txt.replace(/🎯 VEREDICTO:/g,`<span style="font-weight:700;color:${verdictColor};">🎯 VEREDICTO:</span>`)
+      esc(txt).replace(/🎯 VEREDICTO:/g,`<span style="font-weight:700;color:${verdictColor};">🎯 VEREDICTO:</span>`)
          .replace(/📊 CONTEXTO:/g,'<span style="font-weight:700;color:var(--blue);">📊 CONTEXTO:</span>')
          .replace(/⚠️ RIESGO PRINCIPAL:/g,'<span style="font-weight:700;color:var(--yellow);">⚠️ RIESGO PRINCIPAL:</span>')
          .replace(/💡 ACCIÓN:/g,'<span style="font-weight:700;color:rgba(139,92,246,.9);">💡 ACCIÓN:</span>')
@@ -8407,7 +8618,7 @@ Sin introducciones. Sin disclaimers. Directo al punto.`;
 // Luego limpia imagen y análisis de la tarjeta
 async function downloadSignalCardPDF(sym,code,name,type,confidence,price,reqsEncoded){
   const jspdf=window.jspdf;
-  if(!jspdf){alert('jsPDF no cargado. Verifica conexión.');return;}
+  if(!jspdf){alert('jsPDF no cargado.\n\nCausas posibles:\n• Sin conexión\n• El CDN cambió el archivo y el hash de integridad (SRI) lo bloqueó — mira la consola del navegador; si es esto, avísame y actualizo el hash.');return;}
   const {jsPDF}=jspdf;
 
   const outEl=document.getElementById(`claude-out-${sym}-${code}`);
@@ -8447,7 +8658,7 @@ Sin explicaciones adicionales. Solo el fix.`;
       const proxyUrl=(localStorage.getItem('proxy_url')||'').trim();
       const _proxyValid=proxyUrl.startsWith('http');
       const endpoint=_proxyValid?`${proxyUrl}/anthropic`:'https://api.anthropic.com/v1/messages';
-      const headers={'Content-Type':'application/json'};
+      const headers=_proxyValid?_wh():{'Content-Type':'application/json'};
       if(!_proxyValid){headers['x-api-key']=key;headers['anthropic-version']='2023-06-01';headers['anthropic-dangerous-direct-browser-access']='true';}
       const r=await fetch(endpoint,{method:'POST',headers,
         body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:300,
@@ -8651,7 +8862,7 @@ async function sendFixToGithub(btn, sym, code, type){
   try{
     const resp=await fetch(`${proxyUrl}/github-fix`,{
       method:'POST',
-      headers:{'Content-Type':'application/json'},
+      headers:_wh(),
       body:JSON.stringify({
         sym, code, type,
         fixText,
@@ -8680,8 +8891,8 @@ async function sendFixToGithub(btn, sym, code, type){
       outEl.style.display='block';
       outEl.innerHTML=`<div style="font-size:11px;line-height:1.7;">
         <div style="color:var(--green);font-weight:700;margin-bottom:6px;">✅ Pull Request creado exitosamente</div>
-        <div style="color:var(--text2);margin-bottom:4px;">PR #${data.pr_number} en rama <code style="background:rgba(255,255,255,.1);padding:1px 5px;border-radius:3px;">${data.branch}</code></div>
-        <a href="${data.pr_url}" target="_blank"
+        <div style="color:var(--text2);margin-bottom:4px;">PR #${esc(data.pr_number)} en rama <code style="background:rgba(255,255,255,.1);padding:1px 5px;border-radius:3px;">${esc(data.branch)}</code></div>
+        <a href="${escUrl(data.pr_url)}" target="_blank"
           style="display:inline-block;margin-top:6px;padding:5px 12px;background:rgba(139,92,246,.2);border:1px solid rgba(139,92,246,.4);border-radius:6px;color:rgba(139,92,246,.9);font-size:11px;text-decoration:none;">
           🔗 Ver PR en GitHub →
         </a>
@@ -8689,13 +8900,13 @@ async function sendFixToGithub(btn, sym, code, type){
       </div>`;
     }
 
-    addLog('debug','GitHub',`PR #${data.pr_number} creado: ${data.pr_url}`);
+    addLog('debug','GitHub',`PR #${esc(data.pr_number)} creado: ${data.pr_url}`);
 
     // Enviar link por Telegram también
     const tok=getTgToken(),chat=getTgChat();
     if(tok&&chat){
       const msg=`🔧 *Fix pendiente — ${sym} ${(type||'').toUpperCase()} · ${code}*\n\n`+
-        `PR #${data.pr_number} creado en GitHub\n`+
+        `PR #${esc(data.pr_number)} creado en GitHub\n`+
         `🔗 [Ver Pull Request](${data.pr_url})\n\n`+
         `_Revisa y aprueba el merge si el fix es correcto_`;
       sendTelegram(msg,tok,chat);
@@ -9079,7 +9290,7 @@ async function loadNews(ticker){
       const timeStr=dt?dt.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true,timeZone:'America/New_York'})+' ET':'';
       const dateStr=dt?dt.toLocaleDateString('es-PR',{month:'short',day:'numeric'}):'';
       const relStr=dt?_relTime(item.pubDate):'';
-      return `<div class="news-card" onclick="window.open('${esc(item.link)}','_blank')">
+      return `<div class="news-card" onclick="window.open('${escJs(escUrl(item.link))}','_blank')">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;">
           <div style="display:flex;gap:4px;flex-wrap:wrap;">${tickerBadges}</div>
           <div style="text-align:right;white-space:nowrap;">
@@ -9739,6 +9950,7 @@ const _TDP_EXPORT_KEYS=[
   'github_token',
   'app_pin',
   'tdp_cfg_pw',
+  'tdp_worker_key',
   'cfg_main_tickers','cfg_signal_tickers',
   'strat_enabled',
   'gainPct','paperBalance',
@@ -9772,7 +9984,12 @@ const _SENSITIVE_KEYS=['schwab_client_id','schwab_client_secret','schwab_access_
   'schwab_refresh_token','schwab_token_expiry','schwab_refresh_expiry',
   'finnhub_key','levetf_apikey','ms_fh_key',
   'tg_token','tg_chat_id','tg_enabled','telegram_bot_token','telegram_chat_id',
-  'anthropic_api_key','github_token','app_pin'];
+  'anthropic_api_key','github_token','app_pin',
+  // (2026-08-15) Faltaban. `tdp_cfg_pw` es el hash de la contraseña de
+  // Configuración: estaba viajando en la sección EN CLARO del .tdpconfig, así
+  // que cualquiera con el archivo podía atacarlo sin conexión. `proxy_url` no
+  // es un secreto en sí, pero publica la dirección de tu Worker.
+  'tdp_cfg_pw','proxy_url','tdp_worker_key'];
 
 function _isSensitive(key){
   return _SENSITIVE_KEYS.some(s=>key.toLowerCase()===s.toLowerCase());
@@ -9902,11 +10119,46 @@ function importTDPConfig(input){
         return;
       }
 
-      // Aplicar claves no sensibles
-      let count=0;
+      // ── LISTA BLANCA (2026-08-15 — auditoría de seguridad) ───────────────
+      // Antes este bucle escribía CUALQUIER clave del archivo en localStorage,
+      // sin lista blanca y sin pedir contraseña (la contraseña solo protegía la
+      // sección cifrada, que se procesa DESPUÉS). Un .tdpconfig trucado —y el
+      // formato está pensado para pasarse entre PCs, o sea que es un vehículo
+      // realista— podía cambiar `proxy_url` a un servidor del atacante, y a
+      // partir de ahí el refresh token de Schwab (7 días de acceso al bróker)
+      // se lo enviaba la propia app. También podía plantar `pm_report_cache`
+      // con HTML malicioso. Comprobado en navegador.
+      //
+      // Ahora solo entran claves conocidas, y `proxy_url` —que no es un dato
+      // sino el destino de todas las llamadas— se confirma aparte, mostrando
+      // el valor.
+      const _permitidas=new Set(_TDP_EXPORT_KEYS);
+      const _permitidaDinamica=k=>/^(levels_|strike_range_|fundamental_|strikelog_)/.test(k);
+      let count=0, rechazadas=[];
+      const _pendienteProxy=(config.data&&config.data.proxy_url)||null;
       Object.entries(config.data).forEach(([k,v])=>{
+        if(k==='proxy_url')return; // se trata aparte, abajo
+        if(!_permitidas.has(k)&&!_permitidaDinamica(k)){rechazadas.push(k);return;}
+        if(typeof v!=='string')  {rechazadas.push(k);return;}
         try{localStorage.setItem(k,v);count++;}catch(err){}
       });
+      if(_pendienteProxy){
+        const _actual=localStorage.getItem('proxy_url')||'(ninguno)';
+        if(_pendienteProxy===_actual){/* sin cambio */}
+        else if(confirm(
+          '⚠ Este archivo quiere cambiar el Proxy URL del Worker.\n\n'+
+          `Actual:  ${_actual}\n`+
+          `Nuevo:   ${_pendienteProxy}\n\n`+
+          'Por ahí pasan tus llamadas a Schwab, Claude y GitHub. Acéptalo SOLO si '+
+          'esa dirección es tuya y la reconoces.\n\n¿Aplicar el cambio?')){
+          try{localStorage.setItem('proxy_url',_pendienteProxy);count++;}catch(err){}
+        }else{
+          rechazadas.push('proxy_url (rechazado por ti)');
+        }
+      }
+      if(rechazadas.length){
+        addLog('warn','Import',`${rechazadas.length} clave(s) no reconocida(s) descartada(s)`,rechazadas.join(', '));
+      }
 
       // Descifrar y aplicar API keys si existen
       let secretCount=0;
@@ -10491,7 +10743,7 @@ function _pmInjectUI(cardEl,sig){
       <span style="font-size:15px;">📸</span>
       <span id="pm-lbl-${sig.id}" style="font-size:11px;color:var(--text3);">Subir chart TOS — post-mortem</span>
       <input type="file" id="pm-file-${sig.id}" accept="image/*" style="display:none"
-        onchange="_pmFile(event,'${sig.id}')">
+        onchange="_pmFile(event,'${escJs(sig.id)}')">
     </div>
 
     <div id="pm-prev-${sig.id}" style="display:none;margin-top:7px;position:relative;">
@@ -10602,7 +10854,7 @@ Directo y concreto para un trader experimentado. Sin explicar conceptos básicos
     // W-03b: proxy solo válido si es URL real (empieza con http) — evita falso positivo con valor vacío/inválido
     const _proxyValid=proxyUrl.startsWith('http');
     const endpoint=_proxyValid?`${proxyUrl}/anthropic`:'https://api.anthropic.com/v1/messages';
-    const headers={'Content-Type':'application/json'};
+    const headers=_proxyValid?_wh():{'Content-Type':'application/json'};
     if(!_proxyValid){
       headers['x-api-key']=key;
       headers['anthropic-version']='2023-06-01';
@@ -11108,6 +11360,24 @@ async function updateFuturesSemaphore(){
         <div class="cfg-label">Proxy URL <span style="color:var(--text3);font-weight:400;">(opcional — mayor seguridad)</span></div>
         <input id="cfg-proxyUrl" type="text" placeholder="https://tu-proxy.workers.dev"
           class="cfg-input" style="margin-bottom:14px;">
+        <div class="cfg-label">Clave del Worker (X-TDP-Key)</div>
+        <div style="font-size:11px;color:var(--text3);margin-bottom:6px;line-height:1.6;">
+          Debe coincidir con el secret <strong style="color:#fff;">API_SECRET</strong> del Worker en Cloudflare.
+          Sin ella el Worker responde <strong style="color:var(--red);">401</strong> y no habrá señales ni escritura a Sheets.
+        </div>
+        <input id="cfg-workerKey" type="password" placeholder="La misma clave que pusiste en API_SECRET"
+          class="cfg-input" style="margin-bottom:8px;">
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
+          <button onclick="saveCfgWorkerKey()"
+            style="background:rgba(61,139,255,.2);border:1px solid rgba(61,139,255,.5);color:var(--blue);border-radius:var(--r);padding:6px 14px;font-size:12px;font-weight:700;cursor:pointer;">
+            💾 Guardar solo la clave
+          </button>
+          <button onclick="probarWorker()"
+            style="background:var(--bg4);border:1px solid var(--border2);color:var(--text2);border-radius:var(--r);padding:6px 14px;font-size:12px;cursor:pointer;">
+            🔌 Probar Worker
+          </button>
+          <span id="cfg-workerKeyResult" style="font-size:12px;"></span>
+        </div>
         <button onclick="saveCfgSchwab()"
           style="background:var(--green);color:#001a0e;border:none;border-radius:var(--r);padding:8px 18px;font-size:13px;font-weight:700;cursor:pointer;">
           🔗 Guardar Schwab

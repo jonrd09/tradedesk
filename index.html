@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- TradeDeskPro v5 | build:20260814_strikelog_ledger | B1:_wsSessionCandle_per15min B2:BB-REGRESO_strategy B3:intentoBull_loose B4:bbCallTrigger_connected B5:dedup_distVars B6:setup_gate_bbw B7:stochPutOk_noFloor A1:bbSessionOk_isMarketHours A2:schwabToken_firstTicker M1:momentumToLower_gate M2:bbwExpandActive M3:aviso_stricter M4:intento_volOk M5:unified_setup_card M6:bbwSqueezeBreakout M7:multiTF_regreso M8:BB-MTF_panel_replaces_noticias M9:setup_levels_removed M10:atr_velocity_gate M11:piercing_only_trigger M12:score_base60_no_double_filter M13:minmove_pct_of_price M14:casi_senal_diag M15:diferencia_abs M16:1h_derived_from_15m M17:meta_added M18:cuenta_real_ledger M19:sheets_autosync M20:strikelog_is_ledger M21:exportStrikeLog_fixed M22:paper_entries_flagged M23:delete_confirm_and_refresh M24:comision_neta M25:panel_limpio M26:orden_cronologico M27:poda_local_5dias M28:probar_conexion M29:sin_lugares M30:log_ancho_scroll_unico M31:export_csv_robusto M32:config_ancho_tabs_visibles M33:strikelog_grid_full_width M34:debug_radiografia_gate M35:viewer_mode_eliminado M36:cfg_password M37:candados_por_campo M38:sec_xss_escapes M39:sec_sanitizeHtml M40:sec_import_allowlist M41:sec_csp_sri M42:sec_pinhash_fix M43:worker_key_boton_propio -->
+<!-- TradeDeskPro v5 | build:20260814_strikelog_ledger | B1:_wsSessionCandle_per15min B2:BB-REGRESO_strategy B3:intentoBull_loose B4:bbCallTrigger_connected B5:dedup_distVars B6:setup_gate_bbw B7:stochPutOk_noFloor A1:bbSessionOk_isMarketHours A2:schwabToken_firstTicker M1:momentumToLower_gate M2:bbwExpandActive M3:aviso_stricter M4:intento_volOk M5:unified_setup_card M6:bbwSqueezeBreakout M7:multiTF_regreso M8:BB-MTF_panel_replaces_noticias M9:setup_levels_removed M10:atr_velocity_gate M11:piercing_only_trigger M12:score_base60_no_double_filter M13:minmove_pct_of_price M14:casi_senal_diag M15:diferencia_abs M16:1h_derived_from_15m M17:meta_added M18:cuenta_real_ledger M19:sheets_autosync M20:strikelog_is_ledger M21:exportStrikeLog_fixed M22:paper_entries_flagged M23:delete_confirm_and_refresh M24:comision_neta M25:panel_limpio M26:orden_cronologico M27:poda_local_5dias M28:probar_conexion M29:sin_lugares M30:log_ancho_scroll_unico M31:export_csv_robusto M32:config_ancho_tabs_visibles M33:strikelog_grid_full_width M34:debug_radiografia_gate M35:viewer_mode_eliminado M36:cfg_password M37:candados_por_campo M38:sec_xss_escapes M39:sec_sanitizeHtml M40:sec_import_allowlist M41:sec_csp_sri M42:sec_pinhash_fix M43:worker_key_boton_propio M44:descargas_robustas M45:respaldo_todos_tickers -->
 <html lang="es">
 <head>
 <meta charset="UTF-8">
@@ -4435,7 +4435,17 @@ async function probarWorker(){
     if(d.error){set(`✅ Clave OK (Sheets responde: ${d.error})`,'var(--yellow)');return;}
     set(`✅ Todo OK — hoja "${d.hoja||'?'}"`,'var(--green)');
   }catch(e){
-    set(`❌ No se pudo conectar: ${e.message}`,'var(--red)');
+    // "Failed to fetch" NO significa que el Worker respondiera mal: significa
+    // que el navegador ni siquiera llegó a mandar la petición. La causa más
+    // común, con diferencia, es que el Worker todavía sea el VIEJO: al añadir
+    // la cabecera X-TDP-Key el navegador manda antes una consulta de permiso
+    // (preflight), y el Worker viejo solo autoriza Content-Type y
+    // Authorization, así que la bloquea. Se arregla desplegando el Worker
+    // nuevo, que sí lista X-TDP-Key entre las cabeceras permitidas.
+    const _esRed=/failed to fetch|load failed|networkerror/i.test(e.message||'');
+    set(_esRed
+      ? '❌ La petición no llegó a salir. Casi seguro: falta desplegar el Worker NUEVO en Cloudflare (el viejo no autoriza la cabecera X-TDP-Key). Revisa también el Proxy URL.'
+      : `❌ No se pudo conectar: ${e.message}`,'var(--red)');
   }
 }
 
@@ -5403,14 +5413,29 @@ async function crSyncPendientes(){
 // parece muerto. Ahora: se inserta el <a>, se hace click, y el revoke va en un
 // setTimeout. Adem\u00e1s todo va dentro de try/catch \u2014 si algo falla el usuario ve
 // el motivo en vez de un bot\u00f3n que no responde.
+// Descarga genérica y robusta. TODAS las exportaciones de la app pasan por aquí.
+// El patrón importa: insertar el <a> en el documento, hacer click, y revocar el
+// objectURL en un setTimeout. Varias funciones lo hacían mal (creaban el <a>
+// suelto y revocaban en la misma vuelta del event loop), y el botón parecía
+// muerto sin dar ningún error.
+function _descargarArchivo(nombre,contenido,mime){
+  try{
+    const blob=new Blob([contenido],{type:mime||'application/octet-stream'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url;a.download=nombre;a.style.display='none';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(()=>{try{document.body.removeChild(a);URL.revokeObjectURL(url);}catch(e){}},1500);
+    return true;
+  }catch(e){
+    console.error('_descargarArchivo',e);
+    alert('No se pudo generar la descarga: '+(e&&e.message?e.message:e));
+    return false;
+  }
+}
 function _descargarCSV(nombre,lines){
-  const blob=new Blob(['\ufeff'+lines.join('\r\n')],{type:'text/csv;charset=utf-8;'});
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement('a');
-  a.href=url;a.download=nombre;a.style.display='none';
-  document.body.appendChild(a);
-  a.click();
-  setTimeout(()=>{try{document.body.removeChild(a);URL.revokeObjectURL(url);}catch(e){}},1500);
+  return _descargarArchivo(nombre,'\ufeff'+lines.join('\r\n'),'text/csv;charset=utf-8;');
 }
 function exportStrikeLog(){
   try{
@@ -6574,22 +6599,38 @@ function updateCardAverages(){
 // EXPORT / IMPORT
 // ═══════════════════════════════════════════════════════════════
 function exportData(){
-  const data={version:'1.0',exportDate:new Date().toISOString(),
+  // ── (2026-08-17) DOS FALLOS CORREGIDOS ─────────────────────────────────────
+  // 1. La descarga no salía: el <a> se creaba suelto (sin insertarlo en el
+  //    documento) y el objectURL se revocaba en la misma vuelta del event loop,
+  //    con el botón cerrando el modal justo encima. Parecía muerto y no daba
+  //    ningún error.
+  // 2. MÁS GRAVE — el "respaldo" solo incluía GOOG, TSLA y SPY, con los nombres
+  //    escritos a mano. Todo lo de PLTR, QQQ, AAPL, NVDA, COIN y META se quedaba
+  //    fuera EN SILENCIO. Un respaldo que uno cree completo y no lo es, es peor
+  //    que no tener respaldo. Ahora barre localStorage y se lleva todas las
+  //    claves de operaciones, niveles, rangos y fundamentales que existan.
+  const data={version:'1.1',exportDate:new Date().toISOString(),
     paperBalance:localStorage.getItem('paperBalance')||'',
     tdp_ajustes:localStorage.getItem('tdp_ajustes')||'',
     tdp_capital_inicial:localStorage.getItem('tdp_capital_inicial')||'',
+    tdp_comision_contrato:localStorage.getItem('tdp_comision_contrato')||'',
     gainPct:localStorage.getItem('gainPct')||'35',
-    strikelog_GOOG:localStorage.getItem('strikelog_GOOG')||'[]',
-    strikelog_TSLA:localStorage.getItem('strikelog_TSLA')||'[]',
-    strikelog_SPY:localStorage.getItem('strikelog_SPY')||'[]',
-    fundamental_GOOG:localStorage.getItem('fundamental_GOOG')||'{}',
-    fundamental_TSLA:localStorage.getItem('fundamental_TSLA')||'{}',
-    fundamental_SPY:localStorage.getItem('fundamental_SPY')||'{}',
+    cfg_main_tickers:localStorage.getItem('cfg_main_tickers')||'',
+    cfg_signal_tickers:localStorage.getItem('cfg_signal_tickers')||'',
+    tdp_notes:localStorage.getItem('tdp_notes')||'',
   };
-  const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
-  const url=URL.createObjectURL(blob);const a=document.createElement('a');
-  a.href=url;a.download='tradedesk-backup-'+new Date().toISOString().split('T')[0]+'.json';
-  a.click();URL.revokeObjectURL(url);
+  let _n=0;
+  Object.keys(localStorage)
+    .filter(k=>/^(strikelog_|fundamental_|levels_|strike_range_)/.test(k))
+    .sort()
+    .forEach(k=>{data[k]=localStorage.getItem(k)||'';_n++;});
+  const _tickers=Object.keys(data).filter(k=>k.startsWith('strikelog_'))
+    .map(k=>k.replace('strikelog_',''));
+  const ok=_descargarArchivo(
+    'tradedesk-backup-'+new Date().toISOString().split('T')[0]+'.json',
+    JSON.stringify(data,null,2),'application/json');
+  if(ok)addLog('warn','Respaldo',
+    `Respaldo generado: ${_n} clave(s) · tickers: ${_tickers.join(', ')||'ninguno'}`);
 }
 function importData(event){
   const file=event.target.files[0];if(!file)return;
@@ -6598,13 +6639,29 @@ function importData(event){
     try{
       const data=JSON.parse(e.target.result);
       if(!data.version)throw new Error('Archivo inválido');
-      ['paperBalance','tdp_ajustes','tdp_capital_inicial','gainPct','strikelog_GOOG','strikelog_TSLA','strikelog_SPY','fundamental_GOOG','fundamental_TSLA','fundamental_SPY'].forEach(k=>{if(data[k])localStorage.setItem(k,data[k]);});
+      // (2026-08-17) Antes restauraba una lista FIJA de 10 claves con GOOG,
+      // TSLA y SPY escritos a mano: un respaldo con PLTR o NVDA se importaba
+      // "correctamente" y esos tickers no volvían. Ahora se recorre el archivo,
+      // aceptando solo claves conocidas (mismo criterio que el .tdpconfig, para
+      // que un archivo manipulado no pueda escribir donde no debe).
+      const _fijas=new Set(['paperBalance','tdp_ajustes','tdp_capital_inicial',
+        'tdp_comision_contrato','gainPct','cfg_main_tickers','cfg_signal_tickers','tdp_notes']);
+      const _din=k=>/^(strikelog_|fundamental_|levels_|strike_range_)/.test(k);
+      let _rest=0;
+      Object.entries(data).forEach(([k,v])=>{
+        if(k==='version'||k==='exportDate')return;
+        if(!_fijas.has(k)&&!_din(k))return;
+        if(typeof v!=='string'||v==='')return;
+        try{localStorage.setItem(k,v);_rest++;}catch(err){}
+      });
       const pb=localStorage.getItem('paperBalance');
       if(pb){const el=document.getElementById('paperBalance');if(el){el.value=parseInt(pb).toLocaleString('en-US');calcTradeSize();}}
       const gp=localStorage.getItem('gainPct');
       if(gp){const el=document.getElementById('gainPct');if(el)el.value=gp;}
       updateCardAverages();
-      alert('Datos importados correctamente. Fecha: '+(data.exportDate||'desconocida'));
+      renderStrikeLog&&(typeof _strikeTicker!=='undefined'&&_strikeTicker?renderStrikeLog():0);
+      renderCuentaRealPanel&&renderCuentaRealPanel();
+      alert(`Datos importados: ${_rest} clave(s) restaurada(s).\n\nFecha del respaldo: `+(data.exportDate||'desconocida'));
     }catch(err){alert('Error al importar: '+err.message);}
     event.target.value='';
   };
@@ -9028,12 +9085,8 @@ function _exportHistorialTxt(){
   txt+='\n═══════════════════════════════════════════════════════\n';
   txt+=`Exportado: ${et.toLocaleString('es-PR',{timeZone:'America/New_York'})}\n`;
 
-  const blob=new Blob([txt],{type:'text/plain;charset=utf-8'});
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement('a');
   const fname=`TDP_historial_${et.getFullYear()}-${String(et.getMonth()+1).padStart(2,'0')}-${String(et.getDate()).padStart(2,'0')}.txt`;
-  a.href=url;a.download=fname;a.click();
-  URL.revokeObjectURL(url);
+  _descargarArchivo(fname,txt,'text/plain;charset=utf-8');
   addLog('debug','Historial',`📄 Exportado: ${fname} — ${entries.length} señales`);
 }
 
@@ -11660,7 +11713,7 @@ async function updateFuturesSemaphore(){
           Usa esto antes de cambiar de PC o como respaldo periódico.
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:24px;">
-          <button onclick="exportData();closeConfigModal()"
+          <button onclick="exportData()"
             style="background:var(--green-bg);border:1px solid rgba(0,209,122,.4);border-radius:var(--r);
             color:var(--green);padding:9px 14px;font-size:12px;font-weight:700;cursor:pointer;">
             ⬇ Exportar datos
@@ -11668,7 +11721,7 @@ async function updateFuturesSemaphore(){
           <label style="background:var(--blue-bg);border:1px solid rgba(61,139,255,.4);border-radius:var(--r);
             color:var(--blue);padding:9px 14px;font-size:12px;font-weight:700;cursor:pointer;text-align:center;display:block;">
             ⬆ Importar datos
-            <input type="file" accept=".json" onchange="importData(event);closeConfigModal()" style="display:none;">
+            <input type="file" id="importDataInput" accept=".json" onchange="importData(event)" style="display:none;">
           </label>
         </div>
 

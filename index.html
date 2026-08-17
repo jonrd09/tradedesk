@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- TradeDeskPro v5 | build:20260814_strikelog_ledger | B1:_wsSessionCandle_per15min B2:BB-REGRESO_strategy B3:intentoBull_loose B4:bbCallTrigger_connected B5:dedup_distVars B6:setup_gate_bbw B7:stochPutOk_noFloor A1:bbSessionOk_isMarketHours A2:schwabToken_firstTicker M1:momentumToLower_gate M2:bbwExpandActive M3:aviso_stricter M4:intento_volOk M5:unified_setup_card M6:bbwSqueezeBreakout M7:multiTF_regreso M8:BB-MTF_panel_replaces_noticias M9:setup_levels_removed M10:atr_velocity_gate M11:piercing_only_trigger M12:score_base60_no_double_filter M13:minmove_pct_of_price M14:casi_senal_diag M15:diferencia_abs M16:1h_derived_from_15m M17:meta_added M18:cuenta_real_ledger M19:sheets_autosync M20:strikelog_is_ledger M21:exportStrikeLog_fixed M22:paper_entries_flagged M23:delete_confirm_and_refresh M24:comision_neta M25:panel_limpio M26:orden_cronologico M27:poda_local_5dias M28:probar_conexion M29:sin_lugares M30:log_ancho_scroll_unico M31:export_csv_robusto M32:config_ancho_tabs_visibles M33:strikelog_grid_full_width M34:debug_radiografia_gate M35:viewer_mode_eliminado M36:cfg_password M37:candados_por_campo M38:sec_xss_escapes M39:sec_sanitizeHtml M40:sec_import_allowlist M41:sec_csp_sri M42:sec_pinhash_fix M43:worker_key_boton_propio M44:descargas_robustas M45:respaldo_todos_tickers M46:pnl_archivado_poda M47:paper_nunca_es_dinero M48:reintento_automatico M49:verifica_escritura_real M50:diagnostico_pestanas M51:detecta_script_viejo M52:avisa_restos_hoja M53:no_doble_init M54:upsert_al_editar M55:modelo_claude M56:hoja_unica_panel_auto M57:ping_recalcula_y_cuadra M58:telegram_cors_y_chatid M59:calculadora_arriba -->
+<!-- TradeDeskPro v5 | build:20260814_strikelog_ledger | B1:_wsSessionCandle_per15min B2:BB-REGRESO_strategy B3:intentoBull_loose B4:bbCallTrigger_connected B5:dedup_distVars B6:setup_gate_bbw B7:stochPutOk_noFloor A1:bbSessionOk_isMarketHours A2:schwabToken_firstTicker M1:momentumToLower_gate M2:bbwExpandActive M3:aviso_stricter M4:intento_volOk M5:unified_setup_card M6:bbwSqueezeBreakout M7:multiTF_regreso M8:BB-MTF_panel_replaces_noticias M9:setup_levels_removed M10:atr_velocity_gate M11:piercing_only_trigger M12:score_base60_no_double_filter M13:minmove_pct_of_price M14:casi_senal_diag M15:diferencia_abs M16:1h_derived_from_15m M17:meta_added M18:cuenta_real_ledger M19:sheets_autosync M20:strikelog_is_ledger M21:exportStrikeLog_fixed M22:paper_entries_flagged M23:delete_confirm_and_refresh M24:comision_neta M25:panel_limpio M26:orden_cronologico M27:poda_local_5dias M28:probar_conexion M29:sin_lugares M30:log_ancho_scroll_unico M31:export_csv_robusto M32:config_ancho_tabs_visibles M33:strikelog_grid_full_width M34:debug_radiografia_gate M35:viewer_mode_eliminado M36:cfg_password M37:candados_por_campo M38:sec_xss_escapes M39:sec_sanitizeHtml M40:sec_import_allowlist M41:sec_csp_sri M42:sec_pinhash_fix M43:worker_key_boton_propio M44:descargas_robustas M45:respaldo_todos_tickers M46:pnl_archivado_poda M47:paper_nunca_es_dinero M48:reintento_automatico M49:verifica_escritura_real M50:diagnostico_pestanas M51:detecta_script_viejo M52:avisa_restos_hoja M53:no_doble_init M54:upsert_al_editar M55:modelo_claude M56:hoja_unica_panel_auto M57:ping_recalcula_y_cuadra M58:telegram_cors_y_chatid M59:calculadora_arriba M60:edicion_alineada -->
 <html lang="es">
 <head>
 <meta charset="UTF-8">
@@ -6615,25 +6615,44 @@ function editStrikeEntry(ticker,idx){
   try{log=JSON.parse(localStorage.getItem(key)||'[]');}catch(e){}
   const e=log[idx];if(!e)return;
   const el=document.getElementById('sentry-'+idx);if(!el)return;
-  // El formulario de edición no tiene las mismas celdas que la rejilla, así que
-  // la fila cambia a flujo libre mientras se edita (renderStrikeLog la repinta).
-  el.className='slog-editing';
+  // ── (2026-08-17) EL FORMULARIO USA LA MISMA REJILLA QUE LA FILA ─────────────
+  // Antes la fila pasaba a flujo libre (`slog-editing`) mientras se editaba: el
+  // desplegable del Día se estiraba y ocupaba media pantalla, y los campos
+  // quedaban desalineados de sus encabezados. Con dinero real, editar sin ver
+  // bajo qué columna estás escribiendo es una invitación a meter el dato en el
+  // sitio equivocado.
+  // Ahora el formulario mantiene la clase .slog-row, así que cada campo cae
+  // EXACTAMENTE bajo su encabezado. Las columnas calculadas (% Gan., P&L neto,
+  // Mov. $) quedan vacías porque se recalculan al guardar, y Fecha y Hora se
+  // muestran como texto: no se editan a proposito, son el sello del registro.
+  el.className='slog-row';
   const days=['Lunes','Martes','Miércoles','Jueves','Viernes'];
   const opts=days.map(d=>`<option value="${d}" ${d===e.day?'selected':''}>${d}</option>`).join('');
-  el.innerHTML=`<select id="ed-${idx}" style="background:var(--bg4);border:1px solid var(--blue);border-radius:6px;color:var(--text);padding:3px 6px;font-size:12px;flex:1;">${opts}</select>
-    <input type="number" id="ec-${idx}" value="${e.costo||0}" step="0.01" placeholder="Costo $" style="background:var(--bg4);border:1px solid var(--blue);border-radius:6px;color:var(--yellow);padding:3px 6px;font-size:12px;width:65px;text-align:center;">
-    <input type="number" id="ew-${idx}" value="${e.venta!=null?e.venta:''}" step="0.01" placeholder="Venta $" style="background:var(--bg4);border:1px solid var(--blue);border-radius:6px;color:var(--green);padding:3px 6px;font-size:12px;width:65px;text-align:center;">
-    <input type="number" id="een-${idx}" value="${e.entrada!=null?e.entrada:''}" step="0.01" placeholder="Entrada $" style="background:var(--bg4);border:1px solid var(--blue);border-radius:6px;color:var(--blue);padding:3px 6px;font-size:12px;width:70px;text-align:center;">
-    <select id="et-${idx}" style="background:var(--bg4);border:1px solid var(--border2);border-radius:6px;color:var(--text);padding:3px 4px;font-size:11px;font-weight:700;width:60px;">
+  // Estilo común: width:100% para que cada campo llene su celda de la rejilla.
+  const _b='background:var(--bg4);border:1px solid var(--blue);border-radius:5px;padding:3px 2px;font-size:12px;font-family:var(--mono);width:100%;box-sizing:border-box;text-align:center;outline:none;';
+  el.innerHTML=`
+    <select id="ed-${idx}" title="Día" style="background:var(--bg4);border:1px solid var(--blue);border-radius:5px;color:var(--text);padding:3px 2px;font-size:11px;width:100%;box-sizing:border-box;outline:none;">${opts}</select>
+    <span style="font-size:11px;color:var(--text3);font-family:var(--mono);" title="La fecha no se edita: es el sello del registro">${esc(e.date||'')}</span>
+    <span style="font-size:11px;color:var(--text3);font-family:var(--mono);" title="La hora no se edita: es el sello del registro">${esc(e.time||'')}</span>
+    <select id="et-${idx}" title="Tipo" style="background:var(--bg4);border:1px solid var(--border2);border-radius:5px;color:var(--text);padding:3px 1px;font-size:10px;font-weight:700;width:100%;box-sizing:border-box;outline:none;">
       <option value="call" ${e.tipo!=='put'?'selected':''}>CALL</option><option value="put" ${e.tipo==='put'?'selected':''}>PUT</option>
     </select>
-    <input type="number" id="eq-${idx}" value="${e.qty||1}" min="1" step="1" placeholder="Contr." style="background:var(--bg4);border:1px solid var(--green);border-radius:6px;color:var(--green);padding:3px 6px;font-size:12px;width:56px;text-align:center;font-weight:700;">
-    <input type="number" id="esal-${idx}" value="${e.salida!=null?e.salida:''}" step="0.01" placeholder="Salida $" style="background:var(--bg4);border:1px solid var(--blue);border-radius:6px;color:var(--blue);padding:3px 6px;font-size:12px;width:70px;text-align:center;">
-    <input type="number" id="es-${idx}" value="${e.spread||''}" step="0.01" placeholder="Spread" style="background:var(--bg4);border:1px solid var(--blue);border-radius:6px;color:var(--purple);padding:3px 6px;font-size:12px;width:60px;text-align:center;">
-    <button onclick="saveStrikeEdit('${ticker}',${idx})" style="background:var(--green);border:none;border-radius:6px;color:#001a0e;padding:3px 10px;font-size:12px;font-weight:700;cursor:pointer;">✓</button>
-    <button onclick="renderStrikeLog()" style="background:none;border:1px solid var(--border);border-radius:6px;color:var(--text3);padding:3px 8px;font-size:12px;cursor:pointer;">✕</button>`;
+    <input type="number" id="eq-${idx}" title="Contratos" value="${e.qty||1}" min="1" step="1" style="${_b}border-color:var(--green);color:var(--green);font-weight:700;">
+    <input type="number" id="ec-${idx}" title="Costo de la prima" value="${e.costo||0}" step="0.01" style="${_b}color:var(--yellow);">
+    <input type="number" id="ew-${idx}" title="Venta de la prima" value="${e.venta!=null?e.venta:''}" step="0.01" style="${_b}color:var(--green);">
+    <input type="number" id="een-${idx}" title="Precio de la acción al comprar" value="${e.entrada!=null?e.entrada:''}" step="0.01" style="${_b}color:var(--blue);">
+    <input type="number" id="esal-${idx}" title="Precio de la acción al vender" value="${e.salida!=null?e.salida:''}" step="0.01" style="${_b}color:var(--blue);">
+    <input type="number" id="es-${idx}" title="Spread Bid/Ask" value="${e.spread!=null?e.spread:''}" step="0.01" style="${_b}color:var(--purple);">
+    <span style="font-size:10px;color:var(--text3);text-align:right;" title="Se recalcula al guardar">·</span>
+    <span style="font-size:10px;color:var(--text3);text-align:right;" title="Se recalcula al guardar">·</span>
+    <span style="font-size:10px;color:var(--text3);text-align:right;" title="Se recalcula al guardar">·</span>
+    <span></span>
+    <button onclick="saveStrikeEdit('${ticker}',${idx})" title="Guardar" style="background:var(--green);border:none;border-radius:5px;color:#001a0e;padding:3px 0;font-size:12px;font-weight:700;cursor:pointer;width:100%;">✓</button>
+    <button onclick="renderStrikeLog()" title="Cancelar" style="background:none;border:1px solid var(--border);border-radius:5px;color:var(--text3);padding:3px 0;font-size:12px;cursor:pointer;width:100%;">✕</button>`;
   document.getElementById('ec-'+idx)?.focus();
+  document.getElementById('ec-'+idx)?.select();
 }
+
 function saveStrikeEdit(ticker,idx){
   const day=document.getElementById('ed-'+idx)?.value;
   const costo=parseFloat(document.getElementById('ec-'+idx)?.value)||0;

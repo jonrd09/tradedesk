@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- TradeDeskPro v5 | build:20260814_strikelog_ledger | B1:_wsSessionCandle_per15min B2:BB-REGRESO_strategy B3:intentoBull_loose B4:bbCallTrigger_connected B5:dedup_distVars B6:setup_gate_bbw B7:stochPutOk_noFloor A1:bbSessionOk_isMarketHours A2:schwabToken_firstTicker M1:momentumToLower_gate M2:bbwExpandActive M3:aviso_stricter M4:intento_volOk M5:unified_setup_card M6:bbwSqueezeBreakout M7:multiTF_regreso M8:BB-MTF_panel_replaces_noticias M9:setup_levels_removed M10:atr_velocity_gate M11:piercing_only_trigger M12:score_base60_no_double_filter M13:minmove_pct_of_price M14:casi_senal_diag M15:diferencia_abs M16:1h_derived_from_15m M17:meta_added M18:cuenta_real_ledger M19:sheets_autosync M20:strikelog_is_ledger M21:exportStrikeLog_fixed M22:paper_entries_flagged M23:delete_confirm_and_refresh M24:comision_neta M25:panel_limpio M26:orden_cronologico M27:poda_local_5dias M28:probar_conexion M29:sin_lugares M30:log_ancho_scroll_unico M31:export_csv_robusto M32:config_ancho_tabs_visibles M33:strikelog_grid_full_width M34:debug_radiografia_gate M35:viewer_mode_eliminado M36:cfg_password M37:candados_por_campo M38:sec_xss_escapes M39:sec_sanitizeHtml M40:sec_import_allowlist M41:sec_csp_sri M42:sec_pinhash_fix M43:worker_key_boton_propio M44:descargas_robustas M45:respaldo_todos_tickers -->
+<!-- TradeDeskPro v5 | build:20260814_strikelog_ledger | B1:_wsSessionCandle_per15min B2:BB-REGRESO_strategy B3:intentoBull_loose B4:bbCallTrigger_connected B5:dedup_distVars B6:setup_gate_bbw B7:stochPutOk_noFloor A1:bbSessionOk_isMarketHours A2:schwabToken_firstTicker M1:momentumToLower_gate M2:bbwExpandActive M3:aviso_stricter M4:intento_volOk M5:unified_setup_card M6:bbwSqueezeBreakout M7:multiTF_regreso M8:BB-MTF_panel_replaces_noticias M9:setup_levels_removed M10:atr_velocity_gate M11:piercing_only_trigger M12:score_base60_no_double_filter M13:minmove_pct_of_price M14:casi_senal_diag M15:diferencia_abs M16:1h_derived_from_15m M17:meta_added M18:cuenta_real_ledger M19:sheets_autosync M20:strikelog_is_ledger M21:exportStrikeLog_fixed M22:paper_entries_flagged M23:delete_confirm_and_refresh M24:comision_neta M25:panel_limpio M26:orden_cronologico M27:poda_local_5dias M28:probar_conexion M29:sin_lugares M30:log_ancho_scroll_unico M31:export_csv_robusto M32:config_ancho_tabs_visibles M33:strikelog_grid_full_width M34:debug_radiografia_gate M35:viewer_mode_eliminado M36:cfg_password M37:candados_por_campo M38:sec_xss_escapes M39:sec_sanitizeHtml M40:sec_import_allowlist M41:sec_csp_sri M42:sec_pinhash_fix M43:worker_key_boton_propio M44:descargas_robustas M45:respaldo_todos_tickers M46:pnl_archivado_poda M47:paper_nunca_es_dinero -->
 <html lang="es">
 <head>
 <meta charset="UTF-8">
@@ -5052,7 +5052,22 @@ function _strikePodar(ticker){
   });
   const quitadas=antes-limpio.length;
   if(quitadas){
+    // ANTES de borrar: guardar el P&L de lo que se va en el acumulado
+    // permanente. Sin esto el balance del panel baja solo cada día (ver el
+    // comentario extenso de crPnlTotal).
+    const _idsVivos=new Set(limpio.map(e=>e&&e.id).filter(Boolean));
+    let _pnlIdo=0,_opsIdas=0;
+    log.forEach(e=>{
+      if(!e||e.paper===true)return;                 // paper nunca fue dinero
+      if(e.id&&_idsVivos.has(e.id))return;          // sigue viva
+      if(!e.id&&limpio.includes(e))return;          // sin id: comparación por referencia
+      const p=_strikePnlDollars(e);
+      if(p!=null){_pnlIdo+=p;_opsIdas++;}
+    });
+    _crArchivar(+_pnlIdo.toFixed(2),_opsIdas);
     try{localStorage.setItem(key,JSON.stringify(limpio));}catch(e){}
+    if(_opsIdas)addLog('warn','Cuenta Real',
+      `${ticker}: ${_opsIdas} operación(es) archivada(s) · ${_pnlIdo>=0?'+':''}$${_pnlIdo.toFixed(2)} conservados en el acumulado`);
   }
   return quitadas;
 }
@@ -5179,12 +5194,50 @@ function crBorrarPaper(){
   alert(`✅ ${borradas} entrada(s) de paper borradas.`);
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// BUG CRÍTICO CORREGIDO (2026-08-17): EL BALANCE PERDÍA DINERO SOLO
+// ════════════════════════════════════════════════════════════════════════════
+// crPnlTotal() sumaba únicamente las operaciones que quedan en localStorage.
+// Pero _strikePodar() BORRA las filas de más de N días en cuanto están en
+// Sheets (synced:true). Resultado: cada día que una operación salía de la
+// ventana de 5 días, su ganancia desaparecía del balance del panel — en
+// silencio, sin aviso, y a la baja.
+//
+// Reproducido en simulación: 8 operaciones ganadoras de $11.70, balance real
+// $493.60. Tras la poda quedaban 5 filas y el panel mostraba $458.50.
+// $35.10 evaporados. Y el efecto CRECE cada día que pasa.
+//
+// La solución: antes de borrar, el P&L de esas filas se suma a un acumulado
+// permanente (tdp_pnl_archivado) que crPnlTotal() incluye. El dinero deja de
+// depender de que la fila siga visible.
+//
+// Nota sobre `paper`: estas funciones tampoco excluían las filas de paper
+// trading. Bastaba editar una y guardarla —el formulario precarga contratos
+// con `e.qty||1`— para que empezara a contar como dinero real. Simulado:
+// +$33.70 inventados. Ahora se filtran aquí, que es el sitio correcto: da
+// igual lo que tengan esas filas, nunca son dinero.
+const _CR_ARCH_KEY='tdp_pnl_archivado';
+function _crArchivado(){
+  try{const a=JSON.parse(localStorage.getItem(_CR_ARCH_KEY)||'{}');
+    return {pnl:+a.pnl||0,ops:+a.ops||0};}catch(e){return {pnl:0,ops:0};}
+}
+function _crArchivar(pnl,ops){
+  if(!pnl&&!ops)return;
+  const a=_crArchivado();
+  try{localStorage.setItem(_CR_ARCH_KEY,JSON.stringify({
+    pnl:+(a.pnl+pnl).toFixed(2),ops:a.ops+ops}));}catch(e){}
+}
+// Operaciones que SÍ son dinero real: nunca las de paper.
+function _crTradesReales(){return _crAllTrades().filter(e=>e&&e.paper!==true);}
 function crPnlTotal(){
-  return +_crAllTrades().reduce((s,e)=>s+(_strikePnlDollars(e)||0),0).toFixed(2);
+  const vivo=_crTradesReales().reduce((s,e)=>s+(_strikePnlDollars(e)||0),0);
+  return +(vivo+_crArchivado().pnl).toFixed(2);
 }
 function crPnlHoy(){
   const hoy=_crHoyLocal();
-  return +_crAllTrades().filter(e=>e.date===hoy).reduce((s,e)=>s+(_strikePnlDollars(e)||0),0).toFixed(2);
+  // Hoy NO lleva archivado: lo archivado es por definición de días anteriores.
+  return +_crTradesReales().filter(e=>e.date===hoy)
+    .reduce((s,e)=>s+(_strikePnlDollars(e)||0),0).toFixed(2);
 }
 function crBalance(){
   const aj=_crAjustes().reduce((s,a)=>s+(+a.amount||0),0);
@@ -5199,7 +5252,10 @@ function renderCuentaRealPanel(){
   const bal=crBalance(), pnl=crPnlTotal(), hoy=crPnlHoy();
   const ret=cap>0?(bal-cap)/cap*100:0;
   const all=_crAllTrades();
-  const cerradas=all.filter(e=>_strikePnlDollars(e)!=null);
+  // cerradas: solo reales. Antes incluía las de paper, así que el total de
+  // comisiones de abajo cobraba comisión por operaciones que nunca existieron.
+  const cerradas=all.filter(e=>e.paper!==true&&_strikePnlDollars(e)!=null);
+  const _arch=_crArchivado();
   // paper:true = registro de la época de paper trading; no es una operación real
   const sinQty=all.filter(e=>e.paper!==true&&!e.qty&&e.venta!=null).length;
   const pend=all.filter(e=>e.paper!==true&&e.synced!==true&&_strikePnlDollars(e)!=null).length;
@@ -5228,7 +5284,8 @@ function renderCuentaRealPanel(){
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;">
       <div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);padding:6px 8px;text-align:center;">
         <div style="font-size:9px;color:var(--text3);">P&amp;L TOTAL</div>
-        <div style="font-family:var(--mono);font-size:13px;font-weight:700;color:${col(pnl)};">${pnl>0?'+':''}${_crMoney(pnl)}</div>
+        <div style="font-family:var(--mono);font-size:13px;font-weight:700;color:${col(pnl)};"
+          title="${cerradas.length} operación(es) visible(s) en la ventana local${_arch.ops?` + ${_arch.ops} archivada(s) (${_arch.pnl>=0?'+':''}${_crMoney(_arch.pnl)}) que ya salieron de los últimos ${getDiasLocal()} días pero SÍ cuentan en el balance`:''}">${pnl>0?'+':''}${_crMoney(pnl)}</div>
       </div>
       <div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);padding:6px 8px;text-align:center;">
         <div style="font-size:9px;color:var(--text3);">RETORNO</div>
@@ -6552,7 +6609,7 @@ function renderStrikeLog(){
   const _ganadoras=_cerradas.filter(p=>p>0).length;
   const _winRate=_cerradas.length?Math.round(_ganadoras/_cerradas.length*100):null;
   const _sinEnviar=log.filter(e=>e.paper!==true&&e.synced!==true&&_strikePnlDollars(e)!=null).length;
-  const _notaVentana=`<div style="font-size:10px;color:var(--text3);margin-top:6px;">📅 TD Pro muestra los últimos ${getDiasLocal()} días · el histórico completo está en Google Sheets${_sinEnviar?` · <span style="color:var(--yellow);">⏳ ${_sinEnviar} sin enviar (no se borran hasta confirmarse)</span>`:''}</div>`;
+  const _notaVentana=`<div style="font-size:10px;color:var(--text3);margin-top:6px;">📅 TD Pro muestra los últimos ${getDiasLocal()} días · el histórico completo está en Google Sheets${(()=>{const a=_crArchivado();return a.ops?` · <span style="color:var(--green);">${a.ops} operación(es) más antiguas siguen contando en el balance (${a.pnl>=0?'+':''}$${a.pnl.toFixed(2)})</span>`:'';})()}${_sinEnviar?` · <span style="color:var(--yellow);">⏳ ${_sinEnviar} sin enviar (no se borran hasta confirmarse)</span>`:''}</div>`;
   const avgGlbHTML=`<span style="font-size:13px;color:var(--text)">Total ${_strikeTicker}: <strong style="font-size:15px;font-family:var(--mono);color:${_totNeto>=0?'var(--green)':'var(--red)'}">${_totNeto>=0?'+$':'-$'}${Math.abs(_totNeto).toFixed(2)}</strong> neto`+
     (_winRate!=null?` · <span style="color:var(--text3)">${_ganadoras}/${_cerradas.length} ganadoras (${_winRate}%)</span>`:'')+`</span>`;
   // Promedio de cuántos $ corre el precio de la ACCIÓN entre entrada y salida

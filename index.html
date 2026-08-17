@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- TradeDeskPro v5 | build:20260814_strikelog_ledger | B1:_wsSessionCandle_per15min B2:BB-REGRESO_strategy B3:intentoBull_loose B4:bbCallTrigger_connected B5:dedup_distVars B6:setup_gate_bbw B7:stochPutOk_noFloor A1:bbSessionOk_isMarketHours A2:schwabToken_firstTicker M1:momentumToLower_gate M2:bbwExpandActive M3:aviso_stricter M4:intento_volOk M5:unified_setup_card M6:bbwSqueezeBreakout M7:multiTF_regreso M8:BB-MTF_panel_replaces_noticias M9:setup_levels_removed M10:atr_velocity_gate M11:piercing_only_trigger M12:score_base60_no_double_filter M13:minmove_pct_of_price M14:casi_senal_diag M15:diferencia_abs M16:1h_derived_from_15m M17:meta_added M18:cuenta_real_ledger M19:sheets_autosync M20:strikelog_is_ledger M21:exportStrikeLog_fixed M22:paper_entries_flagged M23:delete_confirm_and_refresh M24:comision_neta M25:panel_limpio M26:orden_cronologico M27:poda_local_5dias M28:probar_conexion M29:sin_lugares M30:log_ancho_scroll_unico M31:export_csv_robusto M32:config_ancho_tabs_visibles M33:strikelog_grid_full_width M34:debug_radiografia_gate M35:viewer_mode_eliminado M36:cfg_password M37:candados_por_campo M38:sec_xss_escapes M39:sec_sanitizeHtml M40:sec_import_allowlist M41:sec_csp_sri M42:sec_pinhash_fix M43:worker_key_boton_propio M44:descargas_robustas M45:respaldo_todos_tickers M46:pnl_archivado_poda M47:paper_nunca_es_dinero M48:reintento_automatico M49:verifica_escritura_real M50:diagnostico_pestanas M51:detecta_script_viejo M52:avisa_restos_hoja M53:no_doble_init M54:upsert_al_editar M55:modelo_claude M56:hoja_unica_panel_auto M57:ping_recalcula_y_cuadra M58:telegram_cors_y_chatid M59:calculadora_arriba M60:edicion_alineada M61:pruebas_worker M62:tg_token_alias -->
+<!-- TradeDeskPro v5 | build:20260814_strikelog_ledger | B1:_wsSessionCandle_per15min B2:BB-REGRESO_strategy B3:intentoBull_loose B4:bbCallTrigger_connected B5:dedup_distVars B6:setup_gate_bbw B7:stochPutOk_noFloor A1:bbSessionOk_isMarketHours A2:schwabToken_firstTicker M1:momentumToLower_gate M2:bbwExpandActive M3:aviso_stricter M4:intento_volOk M5:unified_setup_card M6:bbwSqueezeBreakout M7:multiTF_regreso M8:BB-MTF_panel_replaces_noticias M9:setup_levels_removed M10:atr_velocity_gate M11:piercing_only_trigger M12:score_base60_no_double_filter M13:minmove_pct_of_price M14:casi_senal_diag M15:diferencia_abs M16:1h_derived_from_15m M17:meta_added M18:cuenta_real_ledger M19:sheets_autosync M20:strikelog_is_ledger M21:exportStrikeLog_fixed M22:paper_entries_flagged M23:delete_confirm_and_refresh M24:comision_neta M25:panel_limpio M26:orden_cronologico M27:poda_local_5dias M28:probar_conexion M29:sin_lugares M30:log_ancho_scroll_unico M31:export_csv_robusto M32:config_ancho_tabs_visibles M33:strikelog_grid_full_width M34:debug_radiografia_gate M35:viewer_mode_eliminado M36:cfg_password M37:candados_por_campo M38:sec_xss_escapes M39:sec_sanitizeHtml M40:sec_import_allowlist M41:sec_csp_sri M42:sec_pinhash_fix M43:worker_key_boton_propio M44:descargas_robustas M45:respaldo_todos_tickers M46:pnl_archivado_poda M47:paper_nunca_es_dinero M48:reintento_automatico M49:verifica_escritura_real M50:diagnostico_pestanas M51:detecta_script_viejo M52:avisa_restos_hoja M53:no_doble_init M54:upsert_al_editar M55:modelo_claude M56:hoja_unica_panel_auto M57:ping_recalcula_y_cuadra M58:telegram_cors_y_chatid M59:calculadora_arriba M60:edicion_alineada M61:pruebas_worker M62:tg_token_alias M63:frase_recuperacion -->
 <html lang="es">
 <head>
 <meta charset="UTF-8">
@@ -1423,6 +1423,41 @@ function getStoredPin(){return localStorage.getItem('app_pin')||'';}
 // no lo trates como seguridad frente a terceros: la contraseña sirve contra un
 // descuido (alguien que se sienta en tu PC), no contra alguien que sepa el 2122.
 const _CFG_MASTER='2122';
+
+// ════════════════════════════════════════════════════════════════════════════
+// FRASE DE RECUPERACIÓN  (2026-08-17)
+// ════════════════════════════════════════════════════════════════════════════
+// La llave maestra estaba escrita a la vista en cinco sitios de la interfaz: en
+// el texto de ayuda, en el título del campo, en su placeholder, en el mensaje al
+// crear la contraseña y en el diagnóstico. Cualquiera que mirara la pantalla —o
+// una captura, o una grabación— la tenía.
+//
+// Ahora la interfaz NO la menciona. Para recuperarla hay que escribir una FRASE
+// que solo tú conoces; entonces se muestra durante 15 segundos y desaparece. Esa
+// misma frase habilita el cambio de contraseña, así que en el uso normal no
+// necesitas ni ver la llave.
+//
+// ⚠ LÍMITE HONESTO: el valor de _CFG_MASTER sigue siendo una constante de este
+// archivo, que es público en GitHub Pages. Esto te protege de una mirada de
+// reojo, de una captura y de un vídeo — NO de alguien que abra el código fuente.
+// Para cerrarlo de verdad hay que dejar de tener la llave en el código; se puede
+// hacer, y está explicado al final de este bloque.
+const _CFG_FRASE_KEY='tdp_frase_recuperacion';
+function getFraseHash(){return localStorage.getItem(_CFG_FRASE_KEY)||'';}
+async function setFraseRecuperacion(f){
+  const h=await _hashPin('frase:'+f);   // prefijo para que no colisione con la contraseña
+  try{localStorage.setItem(_CFG_FRASE_KEY,h);}catch(e){}
+  return h;
+}
+async function verifyFrase(f){
+  const st=getFraseHash();
+  if(!st||!f)return false;
+  return await _verifyPin('frase:'+f,st);
+}
+// Estado de desbloqueo por frase. Vive solo en memoria: cerrar la pestaña lo
+// borra, y no se persiste en ningún sitio a propósito.
+let _fraseOk=false;
+let _fraseTimer=null;
 const _CFG_PW_KEY='tdp_cfg_pw';
 function getCfgPw(){return localStorage.getItem(_CFG_PW_KEY)||'';}
 async function setCfgPw(pw){
@@ -1449,14 +1484,14 @@ async function _cfgPwUnlock(motivo){
     const n2=prompt('🔐 Confírmala:');
     if(n1!==n2){alert('❌ No coinciden. Intenta de nuevo.');return false;}
     await setCfgPw(n1);
-    alert('✅ Contraseña creada.\n\nLa vas a necesitar para abrir Configuración y para editar las API keys.\n\nSi la olvidas, 2122 siempre funciona como llave maestra.');
+    alert('✅ Contraseña creada.\n\nLa vas a necesitar para abrir Configuración y para editar las API keys.\n\nSi la olvidas, hay una llave maestra de recuperación: configúrala en ⚙️ → Clave para poder recuperarla con una frase tuya.');
     return true;
   }
   const pw=prompt(`🔐 Contraseña de Configuración${motivo?`\n\n${motivo}`:''}`);
   if(pw===null)return false;
   const r=await verifyCfgPw(pw);
   if(r==='bad'){alert('❌ Contraseña incorrecta.');return false;}
-  if(r==='master')addLog('warn','Config','Acceso con llave maestra (2122)');
+  if(r==='master')addLog('warn','Config','Acceso con la llave maestra de recuperación');
   return true;
 }
 
@@ -1542,24 +1577,28 @@ function closePinModal(){document.getElementById('pinModal').style.display='none
 function resetPin(){if(confirm('¿Resetear PIN? Deberás configurar uno nuevo la próxima vez.'))try{localStorage.removeItem('app_pin');alert('PIN reseteado.');}catch(e){}}
 
 function emergencyPinReset(){
-  if(!confirm('¿Resetear PIN de emergencia?\n\nEl PIN se establecerá en 2122.\nPodrás cambiarlo en Configuration → PIN después de entrar.'))return;
+  // (2026-08-17) Se quitó el número del mensaje: la llave maestra ya no se
+  // escribe en ninguna parte de la interfaz. Este bloque es codigo muerto —
+  // el modal del PIN no se muestra desde ningun sitio — pero si algun dia
+  // revive, no debe imprimir la llave.
+  if(!confirm('¿Resetear PIN de emergencia?\n\nEl PIN volverá al valor de fábrica.\nPodrás cambiarlo en Configuración → Clave después de entrar.'))return;
   _hashPin('2122').then(h=>{
     try{localStorage.setItem('app_pin',h);}catch(e){}
     _pinFailCount=0;
     const emg=document.getElementById('pinEmergency');
     if(emg)emg.style.display='none';
-    document.getElementById('pinError').textContent='✅ PIN reseteado a 2122';
+    document.getElementById('pinError').textContent='✅ PIN reseteado al valor de fábrica';
     document.getElementById('pinError').style.color='var(--green)';
     setTimeout(()=>{
       document.getElementById('pinError').textContent='';
       document.getElementById('pinError').style.color='';
     },2000);
-    addLog('debug','PIN','Emergency PIN reset → 2122 (PBKDF2)');
+    addLog('debug','PIN','Emergency PIN reset → valor de fábrica (PBKDF2)');
   });
 }
 
 function resetPinFull(){
-  if(!confirm('¿Resetear PIN completamente?\n\nSe eliminará el PIN actual. La próxima vez que abras Configuración se te pedirá crear uno nuevo.\n\nPIN por defecto después del reset: 2122'))return;
+  if(!confirm('¿Resetear PIN completamente?\n\nSe eliminará el PIN actual. La próxima vez que abras Configuración se te pedirá crear uno nuevo.'))return;
   try{localStorage.removeItem('app_pin');}catch(e){}
   // Set fresh default 2122
   _hashPin('2122').then(h=>{
@@ -1567,9 +1606,9 @@ function resetPinFull(){
     const diag=document.getElementById('pinStatusDiag');
     if(diag){
       diag.style.color='var(--green)';
-      diag.textContent='✅ PIN reseteado. Nuevo PIN: 2122 (cámbialo arriba después de entrar)';
+      diag.textContent='✅ PIN reseteado al valor de fábrica (cámbialo arriba después de entrar)';
     }
-    alert('✅ PIN reseteado a 2122\n\nPuedes cambiarlo en la sección "Cambiar PIN" de arriba.');
+    alert('✅ PIN reseteado al valor de fábrica.\n\nPuedes cambiarlo en ⚙️ → Clave.');
   });
 }
 
@@ -1580,10 +1619,14 @@ function _renderPinDiag(){
   const stored=getCfgPw();
   const _n=_CFG_LOCKED_FIELDS.length;
   if(!stored){
-    diag.innerHTML=`⚠️ Todavía no hay contraseña en esta PC — se te pedirá crear una la próxima vez que abras Configuración. Mientras tanto, <strong>2122</strong> es la única llave.`;
+    diag.innerHTML=`⚠️ Todavía no hay contraseña en esta PC — se te pedirá crear una la próxima vez que abras Configuración. Mientras tanto solo entra la llave maestra.`;
     diag.style.color='var(--yellow)';
   }else{
-    diag.innerHTML=`✅ Contraseña activa, guardada como hash <strong>PBKDF2</strong> (100.000 iteraciones) — nunca en texto plano.<br>🔒 Protege: abrir Configuración · ${_n} campos sensibles (API keys, secrets, Proxy URL, Telegram) · cambiar esta misma contraseña.`;
+    diag.innerHTML=`✅ Contraseña activa, guardada como hash <strong>PBKDF2</strong> (100.000 iteraciones) — nunca en texto plano.<br>`+
+      `🔒 Protege: abrir Configuración · ${_n} campos sensibles (API keys, secrets, Proxy URL, Telegram) · cambiar esta misma contraseña.<br>`+
+      (getFraseHash()
+        ? `🔑 Frase de recuperación <strong style="color:var(--green)">configurada</strong> — con ella recuperas la llave maestra y cambias la contraseña.`
+        : `🔑 Frase de recuperación <strong style="color:var(--yellow)">sin configurar</strong> — créala abajo para no depender de recordar la llave maestra.`);
     diag.style.color='var(--green)';
   }
 }
@@ -4743,22 +4786,112 @@ function _renderCfgHistorial(){
 // ── PIN ───────────────────────────────────────────────────────
 // Cambia la contraseña de Configuración. Acepta la actual O la llave maestra
 // 2122 — así nunca te quedas fuera si la olvidas.
+// ── FUNCIONES DE LA FRASE DE RECUPERACIÓN (2026-08-17) ──────────────────────
+// usarFrase(): valida la frase y, si acierta, (a) muestra la llave maestra 15
+// segundos con cuenta atrás y (b) habilita el cambio de contraseña sin conocer
+// la actual. El desbloqueo vive solo en memoria — cerrar la pestaña lo borra.
+async function usarFrase(){
+  const el=document.getElementById('cfg-frase');
+  const r=document.getElementById('cfg-fraseResult');
+  const set=(t,c)=>{if(r){r.style.color=c;r.innerHTML=t;}};
+  const f=(el?.value||'');
+  if(!f){set('⚠ Escribe tu frase','var(--yellow)');return;}
+  if(!getFraseHash()){
+    set('⚠ Todavía no has creado una frase. Créala abajo, en "Cambiar la frase de recuperación", '+
+        'usando tu contraseña de Configuración o la llave maestra para autorizar.','var(--yellow)');
+    return;
+  }
+  if(!await verifyFrase(f)){
+    set('❌ Frase incorrecta','var(--red)');
+    addLog('warn','Config','Intento fallido con la frase de recuperación');
+    return;
+  }
+  if(el)el.value='';
+  _fraseOk=true;
+  set('✅ Desbloqueado — ya puedes cambiar la contraseña sin la actual','var(--green)');
+  mostrarLlave();
+  addLog('warn','Config','Llave maestra revelada con la frase de recuperación');
+}
+
+// Muestra la llave 15 segundos con cuenta atrás y la borra del DOM al terminar.
+function mostrarLlave(){
+  const box=document.getElementById('cfg-llaveBox');
+  const val=document.getElementById('cfg-llaveValor');
+  const cta=document.getElementById('cfg-llaveCuenta');
+  if(!box||!val)return;
+  if(_fraseTimer){clearInterval(_fraseTimer);_fraseTimer=null;}
+  val.textContent=_CFG_MASTER;
+  box.style.display='block';
+  let seg=15;
+  const pinta=()=>{if(cta)cta.textContent=`Se oculta en ${seg} segundo${seg===1?'':'s'}…`;};
+  pinta();
+  _fraseTimer=setInterval(()=>{
+    seg--;
+    if(seg<=0){
+      clearInterval(_fraseTimer);_fraseTimer=null;
+      // Se vacía el nodo, no solo se esconde: si queda el texto en el DOM,
+      // sigue estando a un clic de distancia en el inspector.
+      val.textContent='';
+      box.style.display='none';
+      if(cta)cta.textContent='';
+    }else pinta();
+  },1000);
+}
+
+// Crea o cambia la frase. Autoriza la frase actual, la contraseña de
+// Configuración, o la llave maestra — cualquiera de las tres, para que no exista
+// un estado del que no se pueda salir.
+async function cambiarFrase(){
+  const a=(document.getElementById('cfg-fraseAuth')?.value||'');
+  const n1=(document.getElementById('cfg-fraseNueva')?.value||'');
+  const n2=(document.getElementById('cfg-fraseNueva2')?.value||'');
+  const r=document.getElementById('cfg-fraseCambioResult');
+  const set=(t,c)=>{if(r){r.style.color=c;r.innerHTML=t;}};
+  if(!a||!n1||!n2){set('⚠ Completa los tres campos','var(--yellow)');return;}
+  let autorizado=false;
+  if(a===_CFG_MASTER)autorizado=true;
+  if(!autorizado&&getCfgPw()&&await verifyCfgPw(a)!=='bad')autorizado=true;
+  if(!autorizado&&getFraseHash()&&await verifyFrase(a))autorizado=true;
+  if(!autorizado){set('❌ No autorizado: no coincide con tu frase actual, ni con la contraseña, ni con la llave maestra','var(--red)');return;}
+  if(n1.length<8){set('⚠ La frase debe tener al menos 8 caracteres','var(--yellow)');return;}
+  if(n1!==n2){set('⚠ Las frases nuevas no coinciden','var(--yellow)');return;}
+  if(n1===_CFG_MASTER){set('⚠ La frase no puede ser la propia llave maestra','var(--yellow)');return;}
+  await setFraseRecuperacion(n1);
+  ['cfg-fraseAuth','cfg-fraseNueva','cfg-fraseNueva2'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
+  set('✅ Frase guardada — con ella podrás recuperar la llave maestra y cambiar la contraseña','var(--green)');
+  addLog('warn','Config','Frase de recuperación configurada');
+  _renderPinDiag();
+}
+
 async function changeCfgPw(){
   const old=(document.getElementById('cfg-pwOld').value||'');
   const n1=(document.getElementById('cfg-pwNew1').value||'');
   const n2=(document.getElementById('cfg-pwNew2').value||'');
   const r=document.getElementById('cfg-pwResult');
   const set=t=>{if(r){r.style.color=t.startsWith('✅')?'var(--green)':'var(--red)';r.textContent=t;}};
-  if(!old||!n1||!n2){set('⚠ Completa los tres campos');return;}
+  // Con la frase ya validada (_fraseOk) no hace falta la contraseña actual: es
+  // justo el caso "la olvidé". Se pide igualmente la nueva dos veces.
+  if(_fraseOk&&n1&&n2){
+    if(n1.length<4){set('⚠ La nueva debe tener al menos 4 caracteres');return;}
+    if(n1!==n2){set('⚠ Las contraseñas nuevas no coinciden');return;}
+    if(n1===_CFG_MASTER){set('⚠ Esa no puede ser tu contraseña: ya es la llave maestra');return;}
+    await setCfgPw(n1);
+    ['cfg-pwOld','cfg-pwNew1','cfg-pwNew2'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
+    set('✅ Contraseña cambiada con la frase de recuperación');
+    addLog('warn','Config','Contraseña cambiada usando la frase de recuperación');
+    setTimeout(()=>{if(r)r.textContent='';},5000);
+    return;
+  }
+  if(!old||!n1||!n2){set('⚠ Completa los tres campos, o desbloquea con tu frase de recuperación');return;}
   // Si todavía no hay contraseña en esta PC, solo se acepta la maestra.
   if(getCfgPw()){
     if(await verifyCfgPw(old)==='bad'){set('❌ La contraseña actual no es correcta');return;}
   }else if(old!==_CFG_MASTER){
-    set('⚠ Aún no hay contraseña en esta PC — usa 2122 para crear la primera');return;
+    set('⚠ Aún no hay contraseña en esta PC — usa la llave maestra para crear la primera');return;
   }
   if(n1.length<4){set('⚠ La nueva debe tener al menos 4 caracteres');return;}
   if(n1!==n2){set('⚠ Las contraseñas nuevas no coinciden');return;}
-  if(n1===_CFG_MASTER){set('⚠ No uses 2122 como contraseña — ya es la llave maestra');return;}
+  if(n1===_CFG_MASTER){set('⚠ Esa no puede ser tu contraseña: ya es la llave maestra');return;}
   await setCfgPw(n1);
   document.getElementById('cfg-pwOld').value='';
   document.getElementById('cfg-pwNew1').value='';
@@ -10662,7 +10795,7 @@ async function init(){
     // Primer uso — guardar PIN default 2122 en PBKDF2
     _hashPin('2122').then(h=>{
       try{localStorage.setItem('app_pin',h);}catch(e){}
-      addLog('debug','PIN','PIN default 2122 configurado (PBKDF2)');
+      addLog('debug','PIN','PIN de fábrica configurado (PBKDF2)');
     });
   }else if(_isLegacyPin(_existingPin)){
     // PIN legacy detectado — NO migrar automáticamente en init
@@ -11960,11 +12093,11 @@ async function updateFuturesSemaphore(){
         <div class="cfg-section-title">Contraseña de Configuración</div>
         <div style="font-size:12px;color:var(--text3);margin-bottom:16px;line-height:1.6;">
           Es la contraseña que abre este panel y la que desbloquea cada campo de API, secret y URL.
-          Para cambiarla escribe la actual — o <strong style="color:var(--yellow);">2122</strong>, que siempre funciona como llave maestra si la olvidaste.
+          Para cambiarla escribe la actual — o desbloquea con tu frase de recuperación, más abajo.
         </div>
 
-        <div class="cfg-label">Contraseña actual (o 2122)</div>
-        <input id="cfg-pwOld" type="password" placeholder="Contraseña actual o 2122"
+        <div class="cfg-label">Contraseña actual</div>
+        <input id="cfg-pwOld" type="password" placeholder="Tu contraseña actual"
           class="cfg-input" style="max-width:320px;margin-bottom:12px;">
         <div class="cfg-label">Contraseña nueva</div>
         <input id="cfg-pwNew1" type="password" placeholder="Mínimo 4 caracteres"
@@ -11978,17 +12111,64 @@ async function updateFuturesSemaphore(){
         </button>
         <div id="cfg-pwResult" style="font-size:12px;margin-top:8px;min-height:16px;"></div>
 
+        <!-- ── FRASE DE RECUPERACIÓN ──────────────────────────────────────── -->
+        <div style="border-top:1px solid var(--border);margin-top:22px;padding-top:16px;">
+          <div class="cfg-section-title">🔑 Frase de recuperación</div>
+          <div style="font-size:12px;color:var(--text3);margin-bottom:12px;line-height:1.6;">
+            Una frase que solo tú conoces. Sirve para dos cosas: <strong style="color:#fff;">cambiar la contraseña
+            sin saber la actual</strong>, y <strong style="color:#fff;">ver la llave maestra durante 15 segundos</strong>
+            si necesitas memorizarla. La llave ya no aparece escrita en ninguna parte de esta pantalla.
+          </div>
+
+          <div id="cfg-fraseSetup">
+            <div class="cfg-label">Escribe tu frase para desbloquear</div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
+              <input id="cfg-frase" type="password" placeholder="Tu frase de recuperación"
+                class="cfg-input" style="max-width:320px;">
+              <button onclick="usarFrase()"
+                style="background:rgba(61,139,255,.2);border:1px solid rgba(61,139,255,.5);color:var(--blue);border-radius:var(--r);padding:8px 16px;font-size:12px;font-weight:700;cursor:pointer;">
+                🔓 Desbloquear
+              </button>
+            </div>
+            <div id="cfg-fraseResult" style="font-size:12px;min-height:16px;line-height:1.6;"></div>
+          </div>
+
+          <div id="cfg-llaveBox" style="display:none;margin-top:12px;padding:14px 16px;border:1px solid rgba(255,194,52,.5);border-radius:var(--r);background:rgba(255,194,52,.08);">
+            <div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;">Llave maestra — memorízala</div>
+            <div id="cfg-llaveValor" style="font-family:var(--mono);font-size:26px;font-weight:700;color:var(--yellow);letter-spacing:.14em;"></div>
+            <div id="cfg-llaveCuenta" style="font-size:11px;color:var(--text3);margin-top:6px;"></div>
+          </div>
+
+          <div style="border-top:1px solid var(--border);margin-top:18px;padding-top:14px;">
+            <div class="cfg-label">Cambiar la frase de recuperación</div>
+            <div style="font-size:11px;color:var(--text3);margin-bottom:8px;line-height:1.6;">
+              Necesitas la frase actual, o la contraseña de Configuración, o la llave maestra.
+            </div>
+            <input id="cfg-fraseAuth" type="password" placeholder="Frase actual, contraseña o llave maestra"
+              class="cfg-input" style="max-width:320px;margin-bottom:8px;">
+            <input id="cfg-fraseNueva" type="password" placeholder="Frase nueva (mínimo 8 caracteres)"
+              class="cfg-input" style="max-width:320px;margin-bottom:8px;">
+            <input id="cfg-fraseNueva2" type="password" placeholder="Repite la frase nueva"
+              class="cfg-input" style="max-width:320px;margin-bottom:10px;">
+            <button onclick="cambiarFrase()"
+              style="background:var(--bg4);border:1px solid var(--border2);color:var(--text2);border-radius:var(--r);padding:7px 15px;font-size:12px;font-weight:700;cursor:pointer;">
+              💾 Guardar frase
+            </button>
+            <div id="cfg-fraseCambioResult" style="font-size:12px;margin-top:8px;min-height:16px;line-height:1.6;"></div>
+          </div>
+        </div>
+
         <div style="border-top:1px solid var(--border);margin-top:20px;padding-top:14px;">
           <div id="pinStatusDiag" style="font-size:11px;background:var(--bg4);border:1px solid var(--border);
             border-radius:var(--r);padding:8px 10px;margin-bottom:12px;color:var(--text3);line-height:1.6;"></div>
           <div style="font-size:11px;color:var(--text3);line-height:1.7;">
-            <strong style="color:var(--yellow);">Sobre el 2122:</strong> abre Configuración, desbloquea campos y cambia la contraseña,
-            siempre. Es a propósito, para que nunca te quedes fuera de tu propia plataforma. Pero por lo mismo
-            no protege frente a alguien que conozca ese número: la contraseña te cubre de un descuido, no de terceros.
+            <strong style="color:var(--yellow);">Alcance real de esto:</strong> la llave maestra ya no se muestra en
+            pantalla, así que nadie la ve de reojo ni queda en una captura o un vídeo. Pero sigue estando dentro del
+            código de esta página, que es pública — quien abra el código fuente la encuentra. Te cubre de un descuido,
+            no de alguien que vaya a buscarla a propósito.
           </div>
         </div>
       </div>
-
 
       <!-- ── TAB: Tickers ───────────────────────────────────── -->
       <div id="cfgPanel-tickers" style="display:none;">

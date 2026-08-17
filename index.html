@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- TradeDeskPro v5 | build:20260814_strikelog_ledger | B1:_wsSessionCandle_per15min B2:BB-REGRESO_strategy B3:intentoBull_loose B4:bbCallTrigger_connected B5:dedup_distVars B6:setup_gate_bbw B7:stochPutOk_noFloor A1:bbSessionOk_isMarketHours A2:schwabToken_firstTicker M1:momentumToLower_gate M2:bbwExpandActive M3:aviso_stricter M4:intento_volOk M5:unified_setup_card M6:bbwSqueezeBreakout M7:multiTF_regreso M8:BB-MTF_panel_replaces_noticias M9:setup_levels_removed M10:atr_velocity_gate M11:piercing_only_trigger M12:score_base60_no_double_filter M13:minmove_pct_of_price M14:casi_senal_diag M15:diferencia_abs M16:1h_derived_from_15m M17:meta_added M18:cuenta_real_ledger M19:sheets_autosync M20:strikelog_is_ledger M21:exportStrikeLog_fixed M22:paper_entries_flagged M23:delete_confirm_and_refresh M24:comision_neta M25:panel_limpio M26:orden_cronologico M27:poda_local_5dias M28:probar_conexion M29:sin_lugares M30:log_ancho_scroll_unico M31:export_csv_robusto M32:config_ancho_tabs_visibles M33:strikelog_grid_full_width M34:debug_radiografia_gate M35:viewer_mode_eliminado M36:cfg_password M37:candados_por_campo M38:sec_xss_escapes M39:sec_sanitizeHtml M40:sec_import_allowlist M41:sec_csp_sri M42:sec_pinhash_fix M43:worker_key_boton_propio M44:descargas_robustas M45:respaldo_todos_tickers M46:pnl_archivado_poda M47:paper_nunca_es_dinero M48:reintento_automatico M49:verifica_escritura_real M50:diagnostico_pestanas M51:detecta_script_viejo M52:avisa_restos_hoja M53:no_doble_init M54:upsert_al_editar M55:modelo_claude M56:hoja_unica_panel_auto -->
+<!-- TradeDeskPro v5 | build:20260814_strikelog_ledger | B1:_wsSessionCandle_per15min B2:BB-REGRESO_strategy B3:intentoBull_loose B4:bbCallTrigger_connected B5:dedup_distVars B6:setup_gate_bbw B7:stochPutOk_noFloor A1:bbSessionOk_isMarketHours A2:schwabToken_firstTicker M1:momentumToLower_gate M2:bbwExpandActive M3:aviso_stricter M4:intento_volOk M5:unified_setup_card M6:bbwSqueezeBreakout M7:multiTF_regreso M8:BB-MTF_panel_replaces_noticias M9:setup_levels_removed M10:atr_velocity_gate M11:piercing_only_trigger M12:score_base60_no_double_filter M13:minmove_pct_of_price M14:casi_senal_diag M15:diferencia_abs M16:1h_derived_from_15m M17:meta_added M18:cuenta_real_ledger M19:sheets_autosync M20:strikelog_is_ledger M21:exportStrikeLog_fixed M22:paper_entries_flagged M23:delete_confirm_and_refresh M24:comision_neta M25:panel_limpio M26:orden_cronologico M27:poda_local_5dias M28:probar_conexion M29:sin_lugares M30:log_ancho_scroll_unico M31:export_csv_robusto M32:config_ancho_tabs_visibles M33:strikelog_grid_full_width M34:debug_radiografia_gate M35:viewer_mode_eliminado M36:cfg_password M37:candados_por_campo M38:sec_xss_escapes M39:sec_sanitizeHtml M40:sec_import_allowlist M41:sec_csp_sri M42:sec_pinhash_fix M43:worker_key_boton_propio M44:descargas_robustas M45:respaldo_todos_tickers M46:pnl_archivado_poda M47:paper_nunca_es_dinero M48:reintento_automatico M49:verifica_escritura_real M50:diagnostico_pestanas M51:detecta_script_viejo M52:avisa_restos_hoja M53:no_doble_init M54:upsert_al_editar M55:modelo_claude M56:hoja_unica_panel_auto M57:ping_recalcula_y_cuadra M58:telegram_cors_y_chatid -->
 <html lang="es">
 <head>
 <meta charset="UTF-8">
@@ -4469,8 +4469,19 @@ async function probarWorker(){
       const _f=new Date(d.panel_actualizado);
       if(!isNaN(_f))_sello=` · Panel actualizado ${_f.toLocaleString('es-PR',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:true})}`;
     }
-    set(`✅ Todo OK — script v${_sv} · "${d.hoja||'?'}" · ${d.filas_registradas??'?'} operación(es) · balance en la hoja ${d.balance!=null?_crMoney(d.balance):'?'}${_sello}${_restos}`,
-      _restos?'var(--yellow)':'var(--green)');
+    // Comparar el balance de la hoja con el de TD Pro. Si no cuadran, algo no
+    // llegó — y eso es más útil verlo aquí que descubrirlo semanas después.
+    let _desc='';
+    if(d.balance!=null){
+      const _local=crBalance();
+      const _dif=+(_local-d.balance).toFixed(2);
+      if(Math.abs(_dif)>=0.01){
+        _desc=` · ⚠ DESCUADRE de ${_crMoney(Math.abs(_dif))}: TD Pro dice ${_crMoney(_local)} y la hoja ${_crMoney(d.balance)}`;
+        addLog('error','Sheets',`Descuadre de ${_crMoney(Math.abs(_dif))} entre TD Pro (${_crMoney(_local)}) y la hoja (${_crMoney(d.balance)}) — falta enviar alguna operación o hay filas de más`);
+      }
+    }
+    set(`✅ Todo OK — script v${_sv} · "${d.hoja||'?'}" · ${d.filas_registradas??'?'} operación(es) · balance en la hoja ${d.balance!=null?_crMoney(d.balance):'?'}${_sello}${_desc}${_restos}`,
+      (_restos||_desc)?'var(--yellow)':'var(--green)');
     addLog('warn','Sheets',`Conexión OK · script v${_sv} · "${d.hoja}" · ${d.filas_registradas} operación(es)${_ocup!=null?` · ${_ocup} fila(s) ocupadas`:''} · balance ${d.balance!=null?_crMoney(d.balance):'?'}`);
   }catch(e){
     // "Failed to fetch" NO significa que el Worker respondiera mal: significa
@@ -4532,11 +4543,37 @@ function forgetCfgGithub(){
   if(r){r.style.color='var(--text3)';r.textContent='Token eliminado';r.style.display='block';setTimeout(()=>r.style.display='none',2000);}
 }
 // ── Telegram ──────────────────────────────────────────────────
+// ── VALIDACIÓN DEL CHAT ID (2026-08-17) ─────────────────────────────────────
+// Error real y facilísimo de cometer: el token tiene la forma
+// <ID_DEL_BOT>:<secreto>, y es natural pensar que ese primer número es el
+// "ID" que hay que poner en Chat ID. No lo es — ese es el ID del propio bot,
+// y mandarle un mensaje a sí mismo falla. El Chat ID es TU id de usuario de
+// Telegram, un número distinto.
+// Esta función detecta esa confusión concreta y lo dice con nombre y apellido,
+// en vez del genérico "verifica Token y Chat ID".
+function _tgChatIdProblema(tok,chat){
+  if(!tok||!chat)return '';
+  const idBot=String(tok).split(':')[0].trim();
+  if(idBot&&idBot===String(chat).trim()){
+    return 'El Chat ID que pusiste es el ID DEL BOT (el número antes de los dos puntos del token), no el de tu chat. '+
+           'Escríbele a @userinfobot en Telegram y usa el número que te devuelva.';
+  }
+  if(!/^-?\d+$/.test(String(chat).trim())){
+    return 'El Chat ID debe ser solo números (puede empezar con - si es un grupo).';
+  }
+  if(!/^\d+:[A-Za-z0-9_-]{20,}$/.test(String(tok).trim())){
+    return 'El Token no tiene el formato de Telegram (números, dos puntos, y una cadena larga). Cópialo de @BotFather → /mybots → API Token.';
+  }
+  return '';
+}
+
 function saveCfgTelegram(){
   const tok=(document.getElementById('cfg-tgToken').value||'').trim();
   const chat=(document.getElementById('cfg-tgChat').value||'').trim();
   const r=document.getElementById('cfg-tgResult');
   if(!tok||!chat){if(r){r.style.color='var(--red)';r.textContent='⚠ Token y Chat ID son requeridos';}return;}
+  const _prob=_tgChatIdProblema(tok,chat);
+  if(_prob){if(r){r.style.color='var(--red)';r.textContent='⚠ '+_prob;}return;}
   try{localStorage.setItem('tg_token',_tgEncode(tok));localStorage.setItem('tg_chat_id',chat);}catch(e){}
   if(r){r.style.color='var(--green)';r.textContent='✅ Telegram guardado';}
   setTimeout(()=>{if(r)r.textContent='';},2500);
@@ -4547,8 +4584,12 @@ async function testCfgTelegram(){
   const tok=(document.getElementById('cfg-tgToken').value||'').trim()||getTgToken();
   const chat=(document.getElementById('cfg-tgChat').value||'').trim()||getTgChat();
   if(!tok||!chat){if(r){r.style.color='var(--red)';r.textContent='⚠ Completa Token y Chat ID primero';}return;}
+  const _prob=_tgChatIdProblema(tok,chat);
+  if(_prob){if(r){r.style.color='var(--red)';r.textContent='⚠ '+_prob;}return;}
   const ok=await sendTelegram('🧪 *TradeDesk Pro* — Test de conexión ✅',tok,chat);
-  if(r){r.style.color=ok?'var(--green)':'var(--red)';r.textContent=ok?'✅ Mensaje enviado':'❌ Error — verifica Token y Chat ID';}
+  if(r){r.style.color=ok?'var(--green)':'var(--red)';
+    r.textContent=ok?'✅ Mensaje enviado — míralo en Telegram'
+      :'❌ Telegram rechazó el envío. Revisa 📋 Logs para ver su respuesta exacta.';}
 }
 function saveCfgTgEnabled(){
   const v=document.getElementById('cfg-tgEnabled').checked;
@@ -7595,10 +7636,19 @@ async function sendTelegram(msg, token, chatId){
     return false;
   }
   try{
+    // ── BUG CORREGIDO (2026-08-17): CORS BLOQUEABA TODO ENVÍO DESDE EL NAVEGADOR
+    // Se enviaba con 'Content-Type: application/json'. Ese encabezado convierte
+    // la petición en "no simple", así que el navegador manda antes un preflight
+    // OPTIONS — y la API de Telegram no responde a preflights. Resultado en
+    // consola: "Response to preflight request doesn't pass access control check".
+    // O sea que el envío de Telegram DESDE EL NAVEGADOR nunca funcionó; los
+    // mensajes que llegaban eran todos del cron del Worker, que no pasa por CORS.
+    //
+    // Con application/x-www-form-urlencoded la petición vuelve a ser "simple",
+    // no hay preflight, y Telegram la acepta. Mismos datos, otro envoltorio.
     const r=await fetch(`https://api.telegram.org/bot${token}/sendMessage`,{
       method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({chat_id:chatId,text:msg,parse_mode:'Markdown'}),
+      body:new URLSearchParams({chat_id:chatId,text:msg,parse_mode:'Markdown'}),
       signal:AbortSignal.timeout(6000)
     });
     if(!r.ok){
@@ -9591,8 +9641,12 @@ async function _sendNewsAlert(ticker, headline, pubDateStr){
   // Marcar como enviada ANTES de hacer fetch para evitar doble envío
   _newsAlertSent.add(hash);
 
-  const tgToken=localStorage.getItem('telegram_bot_token')||'';
-  const tgChat=localStorage.getItem('telegram_chat_id')||'';
+  // (2026-08-17) Antes leía 'telegram_bot_token'/'telegram_chat_id', claves que
+  // NINGÚN sitio de la app escribe — la configuración guarda 'tg_token' y
+  // 'tg_chat_id'. Así que estas alertas nunca podían enviarse. Ahora usan las
+  // mismas funciones que el resto de la app.
+  const tgToken=getTgToken();
+  const tgChat=getTgChat();
   if(!tgToken||!tgChat)return;
 
   const dirIcon=result.direction==='BULLISH'?'🟢 CALL':'🔴 PUT';
@@ -9614,10 +9668,11 @@ async function _sendNewsAlert(ticker, headline, pubDateStr){
   ].join('\n');
 
   try{
+    // Sin Content-Type JSON: dispararía un preflight que Telegram no contesta.
+    // Ver el comentario extenso en sendTelegram().
     await fetch(`https://api.telegram.org/bot${tgToken}/sendMessage`,{
       method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({chat_id:tgChat,text:msg,parse_mode:'Markdown'})
+      body:new URLSearchParams({chat_id:tgChat,text:msg,parse_mode:'Markdown'})
     });
     addLog('info','Noticias TG',`${result.emoji} ${ticker} — ${result.category} enviado a Telegram`);
   }catch(e){
@@ -11405,7 +11460,7 @@ async function updateFuturesSemaphore(){
           2. Escribe <strong style="color:#fff">/newbot</strong> y sigue los pasos<br>
           3. Copia el token y pégalo arriba<br>
           4. Escribe <strong style="color:#fff">/start</strong> a tu bot<br>
-          5. Obtén tu Chat ID en: api.telegram.org/botTOKEN/getUpdates
+          5. Chat ID: escríbele a @userinfobot y usa el número que te dé. NO es el número que va antes de los dos puntos del token — ese es el ID del bot.
         </div>
       </div>
       <div style="margin-top:12px;display:flex;align-items:center;justify-content:space-between;">
@@ -11758,7 +11813,8 @@ async function updateFuturesSemaphore(){
             2. Escribe <strong style="color:#fff">/newbot</strong> y sigue los pasos<br>
             3. Copia el token y pégalo arriba<br>
             4. Escribe <strong style="color:#fff">/start</strong> a tu bot<br>
-            5. Obtén tu Chat ID en: <span style="color:var(--blue);">api.telegram.org/botTOKEN/getUpdates</span>
+            5. Chat ID: escríbele a <span style="color:var(--blue);">@userinfobot</span> y usa el número que te dé.<br>
+          <span style="color:var(--yellow);">⚠ NO es el número que va antes de los dos puntos del token — ese es el ID del bot.</span>
           </div>
         </div>
       </div>

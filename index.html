@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- TradeDeskPro v5 | build:20260814_strikelog_ledger | B1:_wsSessionCandle_per15min B2:BB-REGRESO_strategy B3:intentoBull_loose B4:bbCallTrigger_connected B5:dedup_distVars B6:setup_gate_bbw B7:stochPutOk_noFloor A1:bbSessionOk_isMarketHours A2:schwabToken_firstTicker M1:momentumToLower_gate M2:bbwExpandActive M3:aviso_stricter M4:intento_volOk M5:unified_setup_card M6:bbwSqueezeBreakout M7:multiTF_regreso M8:BB-MTF_panel_replaces_noticias M9:setup_levels_removed M10:atr_velocity_gate M11:piercing_only_trigger M12:score_base60_no_double_filter M13:minmove_pct_of_price M14:casi_senal_diag M15:diferencia_abs M16:1h_derived_from_15m M17:meta_added M18:cuenta_real_ledger M19:sheets_autosync M20:strikelog_is_ledger M21:exportStrikeLog_fixed M22:paper_entries_flagged M23:delete_confirm_and_refresh M24:comision_neta M25:panel_limpio M26:orden_cronologico M27:poda_local_5dias M28:probar_conexion M29:sin_lugares M30:log_ancho_scroll_unico M31:export_csv_robusto M32:config_ancho_tabs_visibles M33:strikelog_grid_full_width M34:debug_radiografia_gate M35:viewer_mode_eliminado M36:cfg_password M37:candados_por_campo M38:sec_xss_escapes M39:sec_sanitizeHtml M40:sec_import_allowlist M41:sec_csp_sri M42:sec_pinhash_fix M43:worker_key_boton_propio M44:descargas_robustas M45:respaldo_todos_tickers M46:pnl_archivado_poda M47:paper_nunca_es_dinero -->
+<!-- TradeDeskPro v5 | build:20260814_strikelog_ledger | B1:_wsSessionCandle_per15min B2:BB-REGRESO_strategy B3:intentoBull_loose B4:bbCallTrigger_connected B5:dedup_distVars B6:setup_gate_bbw B7:stochPutOk_noFloor A1:bbSessionOk_isMarketHours A2:schwabToken_firstTicker M1:momentumToLower_gate M2:bbwExpandActive M3:aviso_stricter M4:intento_volOk M5:unified_setup_card M6:bbwSqueezeBreakout M7:multiTF_regreso M8:BB-MTF_panel_replaces_noticias M9:setup_levels_removed M10:atr_velocity_gate M11:piercing_only_trigger M12:score_base60_no_double_filter M13:minmove_pct_of_price M14:casi_senal_diag M15:diferencia_abs M16:1h_derived_from_15m M17:meta_added M18:cuenta_real_ledger M19:sheets_autosync M20:strikelog_is_ledger M21:exportStrikeLog_fixed M22:paper_entries_flagged M23:delete_confirm_and_refresh M24:comision_neta M25:panel_limpio M26:orden_cronologico M27:poda_local_5dias M28:probar_conexion M29:sin_lugares M30:log_ancho_scroll_unico M31:export_csv_robusto M32:config_ancho_tabs_visibles M33:strikelog_grid_full_width M34:debug_radiografia_gate M35:viewer_mode_eliminado M36:cfg_password M37:candados_por_campo M38:sec_xss_escapes M39:sec_sanitizeHtml M40:sec_import_allowlist M41:sec_csp_sri M42:sec_pinhash_fix M43:worker_key_boton_propio M44:descargas_robustas M45:respaldo_todos_tickers M46:pnl_archivado_poda M47:paper_nunca_es_dinero M48:reintento_automatico M49:verifica_escritura_real -->
 <html lang="es">
 <head>
 <meta charset="UTF-8">
@@ -5366,11 +5366,36 @@ async function _crSyncStrike(ticker,id){
     return false;
   }
   try{
-    await _crPost([_crStrikeToRow(ticker,e)]);
+    // ── (2026-08-17) SE COMPRUEBA QUE DE VERDAD SE ESCRIBIÓ ──────────────────
+    // Antes bastaba con que _crPost() no lanzara error para marcar la fila ✓.
+    // Pero el Apps Script responde {ok:true, escritos:0, duplicados:1} cuando
+    // se salta una fila por id repetido — sin error. O sea que la app podía
+    // decir "enviado" cuando NO se había escrito nada en la hoja. Ahora se lee
+    // la respuesta y se distingue entre escrito, ya estaba, y nada.
+    const _res=await _crPost([_crStrikeToRow(ticker,e)]);
+    const _esc=+(_res&&_res.escritos)||0;
+    const _dup=+(_res&&_res.duplicados)||0;
+    if(!_esc&&!_dup){
+      // Ni escrita ni duplicada: el script recibió la petición pero no hizo
+      // nada. No se marca como enviada — mentir aquí es peor que reintentar.
+      addLog('error','Cuenta Real',
+        `${ticker} — el Apps Script respondió sin escribir nada (escritos 0, duplicados 0). Queda pendiente.`,
+        JSON.stringify(_res||{}));
+      renderStrikeLog();renderCuentaRealPanel();
+      return false;
+    }
     let log2=[];try{log2=JSON.parse(localStorage.getItem(key)||'[]');}catch(_){}
     const e2=log2.find(x=>x.id===id);
     if(e2){e2.synced=true;try{localStorage.setItem(key,JSON.stringify(log2));}catch(_){}}
-    addLog('info','Cuenta Real',`✅ ${ticker} enviado a Google Sheets (${_crMoney(_strikePnlDollars(e))})`);
+    if(_dup&&!_esc){
+      addLog('warn','Cuenta Real',
+        `${ticker} — ya estaba en la hoja (id repetido), no se duplicó. Si no la ves, busca el id ${id} en "Registro de Trades" y baja con Ctrl+Fin: puede estar en una fila muy abajo.`);
+    }else{
+      // 'warn' y no 'info' a propósito: addLog descarta todos los 'info', así
+      // que la confirmación de que una operación llegó a la hoja era invisible.
+      // Con dinero real, la confirmación tiene que verse.
+      addLog('warn','Cuenta Real',`✅ ${ticker} escrito en Google Sheets (${_crMoney(_strikePnlDollars(e))}) · balance en la hoja: ${_res&&_res.balance!=null?_crMoney(_res.balance):'?'}`);
+    }
     _strikePodar(ticker); // ya está a salvo en Sheets: se puede podar lo viejo
     renderStrikeLog();renderCuentaRealPanel();updateCardAverages();
     return true;
@@ -5436,6 +5461,46 @@ async function crProbarConexion(){
 }
 
 // Reintenta todo lo pendiente: operaciones cerradas de todos los tickers + ajustes.
+// ════════════════════════════════════════════════════════════════════════════
+// REINTENTO AUTOMÁTICO  (2026-08-17)
+// ════════════════════════════════════════════════════════════════════════════
+// Hueco de diseño real: si el envío a Sheets fallaba por cualquier motivo
+// pasajero —sin conexión, un 401 mientras se despliega, Sheets lento— la fila
+// se quedaba en ⏳ esperando a que el usuario se acordara de pulsar un botón que
+// además vivía en otro panel. Caso real: una operación de META del 08/17 con
+// +$87.70 se quedó sin enviar durante el despliegue del Worker.
+//
+// Ahora se reintenta solo. Sin ruido: solo actúa si hay algo pendiente, no
+// muestra ventanas, y deja constancia en los logs.
+let _crAutoSyncHecho=false;
+async function crAutoSyncPendientes(){
+  if(_crAutoSyncHecho)return;           // una vez por carga, no en cada refresco
+  _crAutoSyncHecho=true;
+  const pend=_crAllTrades().filter(e=>e.paper!==true&&e.synced!==true&&_strikePnlDollars(e)!=null);
+  const ajs=_crAjustes().filter(a=>a.synced!==true);
+  if(!pend.length&&!ajs.length)return;
+  const proxy=(localStorage.getItem('proxy_url')||'').trim();
+  if(!proxy.startsWith('http')){
+    addLog('warn','Cuenta Real',`${pend.length+ajs.length} registro(s) sin enviar, pero falta el Proxy URL`);
+    return;
+  }
+  addLog('warn','Cuenta Real',`Reintentando en segundo plano: ${pend.length+ajs.length} registro(s) sin enviar`);
+  let ok=0,fail=0;
+  for(const t of pend){
+    try{(await _crSyncStrike(t._ticker,t.id))?ok++:fail++;}catch(e){fail++;}
+    await new Promise(r=>setTimeout(r,600));
+  }
+  for(const a of ajs){
+    try{(await _crSyncAjuste(a.id))?ok++:fail++;}catch(e){fail++;}
+    await new Promise(r=>setTimeout(r,600));
+  }
+  addLog(fail?'error':'warn','Cuenta Real',
+    fail?`Reintento automático: ${ok} enviada(s), ${fail} siguen pendientes — usa ⟳ para ver el motivo`
+        :`Reintento automático: ${ok} registro(s) enviado(s) a Google Sheets`);
+  renderCuentaRealPanel();
+  try{renderStrikeLog();}catch(e){}
+}
+
 async function crSyncPendientes(){
   const trades=_crAllTrades().filter(e=>e.paper!==true&&e.synced!==true&&_strikePnlDollars(e)!=null);
   const ajs=_crAjustes().filter(a=>a.synced!==true);
@@ -6609,7 +6674,7 @@ function renderStrikeLog(){
   const _ganadoras=_cerradas.filter(p=>p>0).length;
   const _winRate=_cerradas.length?Math.round(_ganadoras/_cerradas.length*100):null;
   const _sinEnviar=log.filter(e=>e.paper!==true&&e.synced!==true&&_strikePnlDollars(e)!=null).length;
-  const _notaVentana=`<div style="font-size:10px;color:var(--text3);margin-top:6px;">📅 TD Pro muestra los últimos ${getDiasLocal()} días · el histórico completo está en Google Sheets${(()=>{const a=_crArchivado();return a.ops?` · <span style="color:var(--green);">${a.ops} operación(es) más antiguas siguen contando en el balance (${a.pnl>=0?'+':''}$${a.pnl.toFixed(2)})</span>`:'';})()}${_sinEnviar?` · <span style="color:var(--yellow);">⏳ ${_sinEnviar} sin enviar (no se borran hasta confirmarse)</span>`:''}</div>`;
+  const _notaVentana=`<div style="font-size:10px;color:var(--text3);margin-top:6px;">📅 TD Pro muestra los últimos ${getDiasLocal()} días · el histórico completo está en Google Sheets${(()=>{const a=_crArchivado();return a.ops?` · <span style="color:var(--green);">${a.ops} operación(es) más antiguas siguen contando en el balance (${a.pnl>=0?'+':''}$${a.pnl.toFixed(2)})</span>`:'';})()}${_sinEnviar?` · <button onclick="crSyncPendientes()" title="Reintentar el envío a Google Sheets ahora" style="background:rgba(255,194,52,.14);border:1px solid rgba(255,194,52,.45);border-radius:12px;color:var(--yellow);padding:2px 9px;font-size:10px;font-weight:700;cursor:pointer;font-family:var(--sans);">⟳ ${_sinEnviar} sin enviar — reintentar</button>`:''}</div>`;
   const avgGlbHTML=`<span style="font-size:13px;color:var(--text)">Total ${_strikeTicker}: <strong style="font-size:15px;font-family:var(--mono);color:${_totNeto>=0?'var(--green)':'var(--red)'}">${_totNeto>=0?'+$':'-$'}${Math.abs(_totNeto).toFixed(2)}</strong> neto`+
     (_winRate!=null?` · <span style="color:var(--text3)">${_ganadoras}/${_cerradas.length} ganadoras (${_winRate}%)</span>`:'')+`</span>`;
   // Promedio de cuántos $ corre el precio de la ACCIÓN entre entrada y salida
@@ -10396,6 +10461,9 @@ async function init(){
   loadTickerConfig();
   _crMigrarPaper();
   _strikePodarTodos();
+  // Reintento en segundo plano de lo que quedó sin enviar a Sheets. Con retraso
+  // para no competir con la carga de precios y señales del arranque.
+  setTimeout(()=>{crAutoSyncPendientes().catch(e=>console.error('autoSync',e));},9000);
   renderCuentaRealPanel();
   renderMainTickerCards();
   renderSignalTickerChips();

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- TradeDeskPro v5 | build:20260814_strikelog_ledger | B1:_wsSessionCandle_per15min B2:BB-REGRESO_strategy B3:intentoBull_loose B4:bbCallTrigger_connected B5:dedup_distVars B6:setup_gate_bbw B7:stochPutOk_noFloor A1:bbSessionOk_isMarketHours A2:schwabToken_firstTicker M1:momentumToLower_gate M2:bbwExpandActive M3:aviso_stricter M4:intento_volOk M5:unified_setup_card M6:bbwSqueezeBreakout M7:multiTF_regreso M8:BB-MTF_panel_replaces_noticias M9:setup_levels_removed M10:atr_velocity_gate M11:piercing_only_trigger M12:score_base60_no_double_filter M13:minmove_pct_of_price M14:casi_senal_diag M15:diferencia_abs M16:1h_derived_from_15m M17:meta_added M18:cuenta_real_ledger M19:sheets_autosync M20:strikelog_is_ledger M21:exportStrikeLog_fixed M22:paper_entries_flagged M23:delete_confirm_and_refresh M24:comision_neta M25:panel_limpio M26:orden_cronologico M27:poda_local_5dias M28:probar_conexion M29:sin_lugares M30:log_ancho_scroll_unico M31:export_csv_robusto M32:config_ancho_tabs_visibles M33:strikelog_grid_full_width M34:debug_radiografia_gate M35:viewer_mode_eliminado M36:cfg_password M37:candados_por_campo M38:sec_xss_escapes M39:sec_sanitizeHtml M40:sec_import_allowlist M41:sec_csp_sri M42:sec_pinhash_fix M43:worker_key_boton_propio M44:descargas_robustas M45:respaldo_todos_tickers M46:pnl_archivado_poda M47:paper_nunca_es_dinero M48:reintento_automatico M49:verifica_escritura_real M50:diagnostico_pestanas M51:detecta_script_viejo M52:avisa_restos_hoja M53:no_doble_init M54:upsert_al_editar M55:modelo_claude M56:hoja_unica_panel_auto M57:ping_recalcula_y_cuadra M58:telegram_cors_y_chatid M59:calculadora_arriba M60:edicion_alineada -->
+<!-- TradeDeskPro v5 | build:20260814_strikelog_ledger | B1:_wsSessionCandle_per15min B2:BB-REGRESO_strategy B3:intentoBull_loose B4:bbCallTrigger_connected B5:dedup_distVars B6:setup_gate_bbw B7:stochPutOk_noFloor A1:bbSessionOk_isMarketHours A2:schwabToken_firstTicker M1:momentumToLower_gate M2:bbwExpandActive M3:aviso_stricter M4:intento_volOk M5:unified_setup_card M6:bbwSqueezeBreakout M7:multiTF_regreso M8:BB-MTF_panel_replaces_noticias M9:setup_levels_removed M10:atr_velocity_gate M11:piercing_only_trigger M12:score_base60_no_double_filter M13:minmove_pct_of_price M14:casi_senal_diag M15:diferencia_abs M16:1h_derived_from_15m M17:meta_added M18:cuenta_real_ledger M19:sheets_autosync M20:strikelog_is_ledger M21:exportStrikeLog_fixed M22:paper_entries_flagged M23:delete_confirm_and_refresh M24:comision_neta M25:panel_limpio M26:orden_cronologico M27:poda_local_5dias M28:probar_conexion M29:sin_lugares M30:log_ancho_scroll_unico M31:export_csv_robusto M32:config_ancho_tabs_visibles M33:strikelog_grid_full_width M34:debug_radiografia_gate M35:viewer_mode_eliminado M36:cfg_password M37:candados_por_campo M38:sec_xss_escapes M39:sec_sanitizeHtml M40:sec_import_allowlist M41:sec_csp_sri M42:sec_pinhash_fix M43:worker_key_boton_propio M44:descargas_robustas M45:respaldo_todos_tickers M46:pnl_archivado_poda M47:paper_nunca_es_dinero M48:reintento_automatico M49:verifica_escritura_real M50:diagnostico_pestanas M51:detecta_script_viejo M52:avisa_restos_hoja M53:no_doble_init M54:upsert_al_editar M55:modelo_claude M56:hoja_unica_panel_auto M57:ping_recalcula_y_cuadra M58:telegram_cors_y_chatid M59:calculadora_arriba M60:edicion_alineada M61:pruebas_worker -->
 <html lang="es">
 <head>
 <meta charset="UTF-8">
@@ -4580,6 +4580,68 @@ function saveCfgTelegram(){
   if(r){r.style.color='var(--green)';r.textContent='✅ Telegram guardado';}
   setTimeout(()=>{if(r)r.textContent='';},2500);
 }
+// ── PRUEBAS DEL CANAL DEL WORKER (2026-08-17) ───────────────────────────────
+// El botón "Probar" de arriba usa el token guardado en ESTE navegador. Las
+// señales reales las manda el cron del Worker con TG_TOKEN/TG_CHAT de Cloudflare
+// — otra copia. Durante días se probó el canal del navegador creyendo que decía
+// algo sobre las señales, y no.
+async function probarTelegramWorker(){
+  const r=document.getElementById('cfg-tgWorkerResult');
+  const set=(t,c)=>{if(r){r.style.color=c;r.innerHTML=t;}};
+  const proxy=(localStorage.getItem('proxy_url')||'').trim();
+  if(!proxy.startsWith('http')){set('⚠ Falta el Proxy URL en ⚙️ → APIs','var(--yellow)');return;}
+  set('⏳ Enviando desde el Worker…','var(--text3)');
+  try{
+    const resp=await fetch(`${proxy}/test-telegram`,{method:'POST',headers:_wh(),
+      body:JSON.stringify({}),signal:AbortSignal.timeout(20000)});
+    const d=await resp.json().catch(()=>({}));
+    if(resp.status===401){set('❌ 401 — la Clave del Worker no coincide','var(--red)');return;}
+    if(d.error){set(`❌ ${esc(d.error)}${d.detalle?`<br><span style="color:var(--text3);">${esc(d.detalle)}</span>`:''}`,'var(--red)');return;}
+    set(`✅ Enviado desde el Worker al chat ${esc(d.chat_id||'?')} — míralo en Telegram`,'var(--green)');
+  }catch(e){
+    set(`❌ No se pudo conectar: ${esc(e.message)}`,'var(--red)');
+  }
+}
+
+// Fuerza un ciclo de señales AHORA. Sirve para no esperar los 10 minutos del
+// cron, y sobre todo para ver POR QUÉ no llegan: el informe dice si Schwab
+// respondió, cuántos tickers se evaluaron y qué errores hubo.
+async function forzarCicloSenales(){
+  const r=document.getElementById('cfg-tgWorkerResult');
+  const set=(t,c)=>{if(r){r.style.color=c;r.innerHTML=t;}};
+  const proxy=(localStorage.getItem('proxy_url')||'').trim();
+  if(!proxy.startsWith('http')){set('⚠ Falta el Proxy URL en ⚙️ → APIs','var(--yellow)');return;}
+  set('⏳ Evaluando los 9 tickers… puede tardar ~30s','var(--text3)');
+  try{
+    const resp=await fetch(`${proxy}/test-signals`,{method:'POST',headers:_wh(),
+      body:JSON.stringify({forzar:true}),signal:AbortSignal.timeout(120000)});
+    const d=await resp.json().catch(()=>({}));
+    if(resp.status===401){set('❌ 401 — la Clave del Worker no coincide','var(--red)');return;}
+    if(d.error){set(`❌ ${esc(d.error)}`,'var(--red)');return;}
+    const partes=[];
+    partes.push(`Hora ET del Worker: <strong>${esc(d.hora_et||'?')}</strong>`);
+    partes.push(d.mercado_abierto?'mercado <strong style="color:var(--green)">abierto</strong>'
+                                 :'mercado <strong style="color:var(--yellow)">cerrado</strong> (forzado igualmente)');
+    partes.push(d.schwab_ok?'Schwab <strong style="color:var(--green)">OK</strong>'
+                           :'Schwab <strong style="color:var(--red)">SIN TOKEN</strong>');
+    partes.push(`${(d.tickers||[]).length} ticker(s) evaluados`);
+    let color=d.schwab_ok?'var(--green)':'var(--red)';
+    let txt=partes.join(' · ');
+    if((d.errores||[]).length){
+      color='var(--yellow)';
+      txt+=`<br><span style="color:var(--red);">${d.errores.map(x=>esc(x)).join('<br>')}</span>`;
+    }
+    if(d.schwab_ok&&!(d.errores||[]).length){
+      txt+='<br><span style="color:var(--text3);">Si no llegó ningún mensaje, es que ninguna ruptura pasó el filtro de calidad. Usa 🔍 Debug para ver qué condición frena a cada ticker.</span>';
+    }
+    set(txt,color);
+    addLog('warn','Señales',`Ciclo forzado: Schwab ${d.schwab_ok?'OK':'sin token'} · ${(d.tickers||[]).length} tickers · ${(d.errores||[]).length} error(es)`,
+      (d.errores||[]).join(' | '));
+  }catch(e){
+    set(`❌ ${esc(e.message)}`,'var(--red)');
+  }
+}
+
 async function testCfgTelegram(){
   const r=document.getElementById('cfg-tgResult');
   if(r)r.textContent='Enviando...';
@@ -11815,10 +11877,33 @@ async function updateFuturesSemaphore(){
             style="background:var(--green);color:#001a0e;border:none;border-radius:var(--r);padding:8px 18px;font-size:13px;font-weight:700;cursor:pointer;">
             💾 Guardar
           </button>
-          <button onclick="testCfgTelegram()"
+          <button onclick="testCfgTelegram()" title="Envía desde el NAVEGADOR con el token de arriba"
             style="background:rgba(41,182,246,.15);border:1px solid rgba(41,182,246,.4);color:#29b6f6;border-radius:var(--r);padding:8px 18px;font-size:13px;font-weight:700;cursor:pointer;">
-            🧪 Probar
+            🧪 Probar navegador
           </button>
+        </div>
+        <!-- ── (2026-08-17) PRUEBAS DEL WORKER ────────────────────────────────
+             Las señales reales las manda el cron del Worker con SUS propias
+             credenciales (TG_TOKEN/TG_CHAT de Cloudflare), que son otra copia
+             distinta de la de arriba. Probar el navegador no dice nada sobre
+             ese canal, y era el único que existía. -->
+        <div style="border-top:1px solid var(--border);margin-top:14px;padding-top:12px;">
+          <div class="cfg-section-title">Canal del Worker (el de las señales)</div>
+          <div style="font-size:11px;color:var(--text3);margin-bottom:10px;line-height:1.6;">
+            Las señales las manda el <strong style="color:#fff;">cron del Worker</strong> con las credenciales
+            de Cloudflare, no con el token de arriba. Son dos canales distintos: probar uno no prueba el otro.
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+            <button onclick="probarTelegramWorker()" title="Manda un mensaje usando TG_TOKEN y TG_CHAT del Worker"
+              style="background:rgba(41,182,246,.15);border:1px solid rgba(41,182,246,.4);color:#29b6f6;border-radius:var(--r);padding:7px 14px;font-size:12px;font-weight:700;cursor:pointer;">
+              🧪 Probar Telegram del Worker
+            </button>
+            <button onclick="forzarCicloSenales()" title="Ejecuta AHORA un ciclo completo de evaluación de señales, sin esperar al cron"
+              style="background:rgba(167,139,250,.15);border:1px solid rgba(167,139,250,.45);color:var(--purple);border-radius:var(--r);padding:7px 14px;font-size:12px;font-weight:700;cursor:pointer;">
+              ⚡ Forzar ciclo de señales
+            </button>
+          </div>
+          <div id="cfg-tgWorkerResult" style="font-size:12px;margin-top:8px;min-height:16px;line-height:1.6;"></div>
         </div>
         <div id="cfg-tgResult" style="font-size:12px;min-height:16px;"></div>
 

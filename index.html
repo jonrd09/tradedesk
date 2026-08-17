@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- TradeDeskPro v5 | build:20260814_strikelog_ledger | B1:_wsSessionCandle_per15min B2:BB-REGRESO_strategy B3:intentoBull_loose B4:bbCallTrigger_connected B5:dedup_distVars B6:setup_gate_bbw B7:stochPutOk_noFloor A1:bbSessionOk_isMarketHours A2:schwabToken_firstTicker M1:momentumToLower_gate M2:bbwExpandActive M3:aviso_stricter M4:intento_volOk M5:unified_setup_card M6:bbwSqueezeBreakout M7:multiTF_regreso M8:BB-MTF_panel_replaces_noticias M9:setup_levels_removed M10:atr_velocity_gate M11:piercing_only_trigger M12:score_base60_no_double_filter M13:minmove_pct_of_price M14:casi_senal_diag M15:diferencia_abs M16:1h_derived_from_15m M17:meta_added M18:cuenta_real_ledger M19:sheets_autosync M20:strikelog_is_ledger M21:exportStrikeLog_fixed M22:paper_entries_flagged M23:delete_confirm_and_refresh M24:comision_neta M25:panel_limpio M26:orden_cronologico M27:poda_local_5dias M28:probar_conexion M29:sin_lugares M30:log_ancho_scroll_unico M31:export_csv_robusto M32:config_ancho_tabs_visibles M33:strikelog_grid_full_width M34:debug_radiografia_gate M35:viewer_mode_eliminado M36:cfg_password M37:candados_por_campo M38:sec_xss_escapes M39:sec_sanitizeHtml M40:sec_import_allowlist M41:sec_csp_sri M42:sec_pinhash_fix M43:worker_key_boton_propio M44:descargas_robustas M45:respaldo_todos_tickers M46:pnl_archivado_poda M47:paper_nunca_es_dinero M48:reintento_automatico M49:verifica_escritura_real M50:diagnostico_pestanas M51:detecta_script_viejo M52:avisa_restos_hoja -->
+<!-- TradeDeskPro v5 | build:20260814_strikelog_ledger | B1:_wsSessionCandle_per15min B2:BB-REGRESO_strategy B3:intentoBull_loose B4:bbCallTrigger_connected B5:dedup_distVars B6:setup_gate_bbw B7:stochPutOk_noFloor A1:bbSessionOk_isMarketHours A2:schwabToken_firstTicker M1:momentumToLower_gate M2:bbwExpandActive M3:aviso_stricter M4:intento_volOk M5:unified_setup_card M6:bbwSqueezeBreakout M7:multiTF_regreso M8:BB-MTF_panel_replaces_noticias M9:setup_levels_removed M10:atr_velocity_gate M11:piercing_only_trigger M12:score_base60_no_double_filter M13:minmove_pct_of_price M14:casi_senal_diag M15:diferencia_abs M16:1h_derived_from_15m M17:meta_added M18:cuenta_real_ledger M19:sheets_autosync M20:strikelog_is_ledger M21:exportStrikeLog_fixed M22:paper_entries_flagged M23:delete_confirm_and_refresh M24:comision_neta M25:panel_limpio M26:orden_cronologico M27:poda_local_5dias M28:probar_conexion M29:sin_lugares M30:log_ancho_scroll_unico M31:export_csv_robusto M32:config_ancho_tabs_visibles M33:strikelog_grid_full_width M34:debug_radiografia_gate M35:viewer_mode_eliminado M36:cfg_password M37:candados_por_campo M38:sec_xss_escapes M39:sec_sanitizeHtml M40:sec_import_allowlist M41:sec_csp_sri M42:sec_pinhash_fix M43:worker_key_boton_propio M44:descargas_robustas M45:respaldo_todos_tickers M46:pnl_archivado_poda M47:paper_nunca_es_dinero M48:reintento_automatico M49:verifica_escritura_real M50:diagnostico_pestanas M51:detecta_script_viejo M52:avisa_restos_hoja M53:no_doble_init M54:upsert_al_editar M55:modelo_claude -->
 <html lang="es">
 <head>
 <meta charset="UTF-8">
@@ -5405,8 +5405,9 @@ async function _crSyncStrike(ticker,id){
     // la respuesta y se distingue entre escrito, ya estaba, y nada.
     const _res=await _crPost([_crStrikeToRow(ticker,e)]);
     const _esc=+(_res&&_res.escritos)||0;
+    const _act=+(_res&&_res.actualizados)||0;   // v2.4+: fila sobreescrita
     const _dup=+(_res&&_res.duplicados)||0;
-    if(!_esc&&!_dup){
+    if(!_esc&&!_act&&!_dup){
       // Ni escrita ni duplicada: el script recibió la petición pero no hizo
       // nada. No se marca como enviada — mentir aquí es peor que reintentar.
       addLog('error','Cuenta Real',
@@ -5418,9 +5419,14 @@ async function _crSyncStrike(ticker,id){
     let log2=[];try{log2=JSON.parse(localStorage.getItem(key)||'[]');}catch(_){}
     const e2=log2.find(x=>x.id===id);
     if(e2){e2.synced=true;try{localStorage.setItem(key,JSON.stringify(log2));}catch(_){}}
-    if(_dup&&!_esc){
+    if(_act){
       addLog('warn','Cuenta Real',
-        `${ticker} — ya estaba en la hoja (id repetido), no se duplicó. Si no la ves, busca el id ${id} en "Registro de Trades" y baja con Ctrl+Fin: puede estar en una fila muy abajo.`);
+        `✏️ ${ticker} — fila ACTUALIZADA en Google Sheets con los datos nuevos (${_crMoney(_strikePnlDollars(e))}) · balance en la hoja: ${_res&&_res.balance!=null?_crMoney(_res.balance):'?'}`);
+    }else if(_dup&&!_esc){
+      // Solo pasa con un Apps Script anterior a la v2.4, que descartaba en vez
+      // de actualizar. Si sale esto, hay que implementar el script nuevo.
+      addLog('error','Cuenta Real',
+        `${ticker} — el Apps Script la descartó por id repetido en vez de actualizarla. Tu script es anterior a la v2.4: implementa la versión nueva o la hoja se queda con los datos viejos.`);
     }else{
       // 'warn' y no 'info' a propósito: addLog descarta todos los 'info', así
       // que la confirmación de que una operación llegó a la hoja era invisible.
@@ -6597,9 +6603,25 @@ function saveStrikeEdit(ticker,idx){
   if(Number.isFinite(_qE)&&_qE>0)log[idx].qty=_qE;
   const _tE=document.getElementById('et-'+idx)?.value;
   if(_tE)log[idx].tipo=_tE;
+  // ── REENVÍO AL EDITAR (2026-08-17) ────────────────────────────────────────
+  // Antes, editar una operación ya enviada NO actualizaba Google Sheets: el
+  // envío ocurría una sola vez y el Apps Script descartaba los reenvíos por id
+  // repetido. La hoja se quedaba con los valores viejos indefinidamente y nada
+  // lo avisaba. Caso real: "Salida $2.79" corregido a $579.00 en TD Pro, y la
+  // hoja siguió mostrando 2.79.
+  // Ahora se marca para reenviar; el script (v2.4+) sobreescribe esa fila.
+  const _yaEstaba=log[idx].synced===true;
+  if(_yaEstaba&&log[idx].paper!==true){
+    log[idx].synced=false;
+    log[idx].reenvio=true;   // solo informativo, para el log
+  }
   // preserve original time when editing
   try{localStorage.setItem(key,JSON.stringify(log));}catch(e){}
   renderStrikeLog();updateCardAverages();renderCuentaRealPanel();
+  if(_yaEstaba&&log[idx].paper!==true&&log[idx].id){
+    addLog('warn','Cuenta Real',`${ticker} editada — reenviando a Google Sheets para actualizar la fila`);
+    _crSyncStrike(ticker,log[idx].id);
+  }
 }
 function renderStrikeLog(){
   const key='strikelog_'+_strikeTicker;let log=[];
@@ -7233,6 +7255,18 @@ function _wh(extra){
   if(k)h['X-TDP-Key']=k;
   return h;
 }
+// ── MODELO DE CLAUDE (2026-08-17) ───────────────────────────────────────────
+// Estaba escrito a mano en 5 sitios como 'claude-sonnet-4-6', que NO ES UN ID
+// VÁLIDO. Consecuencia: TODAS las llamadas a la API de Claude fallaban con 4xx
+// y las cuatro funciones que dependen de ella estaban muertas — el Reporte
+// Premarket, el análisis de señales, el post-mortem y la generación de fixes.
+// Se veía en las métricas del Worker: api.anthropic.com con 11 peticiones,
+// las 11 en 4xx, ninguna en 2xx.
+//
+// Ahora es UNA constante. Los IDs de modelo cambian con el tiempo; cuando toque
+// actualizarlo, se cambia aquí y ya. La lista vigente está en
+// platform.claude.com/docs/en/about-claude/models/overview
+const _CLAUDE_MODEL='claude-sonnet-5';
 function getAnthropicKey(){return _loadKey('anthropic_api_key')||'';}
 function saveAnthropicKey(){
   const k=document.getElementById('pmKeyInput').value.trim();
@@ -7348,7 +7382,7 @@ Sé directo, concreto y accionable. Sin introducciones. Sin disclaimers. Solo el
       method:'POST',
       headers,
       body:JSON.stringify({
-        model:'claude-sonnet-4-6',
+        model:_CLAUDE_MODEL,
         max_tokens:4000,
         tools:[{type:'web_search_20250305',name:'web_search'}],
         messages:[{role:'user',content:prompt}]
@@ -7678,7 +7712,7 @@ RULES:
       method:'POST',headers,
       signal:AbortSignal.timeout(15000),
       body:JSON.stringify({
-        model:'claude-sonnet-4-6',
+        model:_CLAUDE_MODEL,
         max_tokens:120,
         tools:[{type:'web_search_20250305',name:'web_search'}],
         messages:[{role:'user',content:prompt}]
@@ -7999,7 +8033,9 @@ function hideCountdown(){
   document.getElementById('ms-cd-wrap').innerHTML='';
 }
 
-async function init() {
+// Renombrada a msInit (2026-08-17): se llamaba init() igual que la de la app y
+// la sombreaba. Ver el comentario del bloque AUTO-INIT más abajo.
+async function msInit() {
   // Load pre-market technical data immediately
   await runPreAnalysis();
   // Then manage phases based on market time
@@ -8462,26 +8498,24 @@ async function manualScan(){
 /* ═══════════════════════════════
    AUTO-INIT FROM SAVED KEY
 ═══════════════════════════════ */
-(function(){
-  function msAutoInit(){
-    // C-SEC-02: usar _loadKey('finnhub_key') directo — ms_fh_key eliminado
-    const saved =
-      (typeof _loadKey==='function'?_loadKey('finnhub_key'):localStorage.getItem('finnhub_key')) ||
-      (typeof _loadKey==='function'?_loadKey('levetf_apikey'):localStorage.getItem('levetf_apikey')) || '';
-    if(saved && saved.length > 8){
-      APIKEY = saved;
-      saveKey(saved);
-      showKeyPill();
-      setTimeout(init, 300);
-    }
-  }
-  // Wait longer to ensure TradeDesk's getKey() is available
-  if(document.readyState === 'loading'){
-    document.addEventListener('DOMContentLoaded', ()=>setTimeout(msAutoInit, 100));
-  } else {
-    setTimeout(msAutoInit, 100);
-  }
-})();
+// ════════════════════════════════════════════════════════════════════════════
+// BUG CORREGIDO (2026-08-17): LA APP ARRANCABA DOS VECES
+// ════════════════════════════════════════════════════════════════════════════
+// Este IIFE se ejecuta solo al cargar la página, y si había una API key guardada
+// hacía `setTimeout(init, 300)`. La intención era arrancar el init del Morning
+// Scanner (más arriba, línea ~8014), pero hay DOS funciones llamadas init() en
+// el mismo ámbito — la del scanner y la de la app (~10484) — y en JavaScript la
+// última declaración gana. Así que este `init` resolvía a la de la APP.
+//
+// Resultado: la app se inicializaba dos veces en cada carga. Medido en
+// navegador: los setInterval de 15min, 4h y 5min quedaban registrados DOS veces
+// cada uno, y había dos listeners de visibilitychange. Eso significa el doble de
+// llamadas a Finnhub para siempre, contra un límite de 60 por minuto.
+//
+// El bloque se desactiva: el Morning Scanner no tiene su HTML en la página (los
+// elementos ms-* no existen), así que arrancarlo no serviría de nada y lanzaría
+// errores. Se conserva el código para no perderlo, pero ya no se autoejecuta.
+// (function(){ ... })() ← desactivado a propósito, ver comentario de arriba.
 
 // ═══ END MORNING SCANNER ═══
 
@@ -8787,7 +8821,7 @@ Sin introducciones. Sin disclaimers. Directo al punto.`;
       headers['anthropic-dangerous-direct-browser-access']='true';
     }
     const resp=await fetch(endpoint,{method:'POST',headers,
-      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:400,
+      body:JSON.stringify({model:_CLAUDE_MODEL,max_tokens:400,
         messages:[{role:'user',content:msgContent}]})
     });
     if(!resp.ok){const er=await resp.json().catch(()=>({}));throw new Error(er.error?.message||`HTTP ${resp.status}`);}
@@ -8871,7 +8905,7 @@ Sin explicaciones adicionales. Solo el fix.`;
       const headers=_proxyValid?_wh():{'Content-Type':'application/json'};
       if(!_proxyValid){headers['x-api-key']=key;headers['anthropic-version']='2023-06-01';headers['anthropic-dangerous-direct-browser-access']='true';}
       const r=await fetch(endpoint,{method:'POST',headers,
-        body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:300,
+        body:JSON.stringify({model:_CLAUDE_MODEL,max_tokens:300,
           messages:[{role:'user',content:fixPrompt}]})});
       if(r.ok){const d=await r.json();fixText=d.content?.find(b=>b.type==='text')?.text||fixText;}
     }catch(e){fixText='Error generando fix: '+e.message;}
@@ -10544,18 +10578,29 @@ async function init(){
     // Re-solicitar cuando la pestaña vuelve a primer plano (el lock se libera
     // automáticamente cuando el tab pasa a segundo plano — es comportamiento
     // estándar del navegador, no un error)
-    document.addEventListener('visibilitychange',()=>{
-      if(document.visibilityState==='visible'&&(!_wl||_wl.released)){
-        _requestWakeLock();
-      }
-    });
+    // Guarda de idempotencia: con la app arrancando dos veces se registraban
+    // dos listeners y se pedían dos wake locks.
+    if(!window.__tdpVisListo){
+      window.__tdpVisListo=true;
+      document.addEventListener('visibilitychange',()=>{
+        if(document.visibilityState==='visible'&&(!_wl||_wl.released)){
+          _requestWakeLock();
+        }
+      });
+    }
   })();
   initWebNotifications();
   // Init news panel
   initNews();
   // Earnings calendar — load once on start, refresh once a day
   setTimeout(()=>loadEarningsCalendar(),4000);
-  setInterval(()=>loadEarningsCalendar(),4*60*60*1000); // refresh every 4h
+  // Guardas de idempotencia (2026-08-17): si algo vuelve a llamar a init() —por
+  // un bug futuro o una recarga parcial— estos timers y listeners NO se
+  // duplican. Los otros intervalos de la app ya se protegían limpiando su
+  // handle antes (_priceInterval/_sigInterval); estos tres no.
+  if(!window.__tdpTimersListos){
+    window.__tdpTimersListos=true;
+    setInterval(()=>loadEarningsCalendar(),4*60*60*1000); // refresh every 4h
 
   // Índices del día — load after Schwab is ready, refresh every 5min during market
   setTimeout(()=>loadIndicesPanel(),3000);
@@ -10563,7 +10608,8 @@ async function init(){
     const _etI=new Date(new Date().toLocaleString('en-US',{timeZone:'America/New_York'}));
     const _mI=_etI.getHours()*60+_etI.getMinutes(),_dI=_etI.getDay();
     if(_dI>=1&&_dI<=5&&_mI>=570&&_mI<960)loadIndicesPanel();
-  },5*60*1000);
+    },5*60*1000);
+  } // ── fin de la guarda __tdpTimersListos ──
   const _k=getKey();
   if(!_k||_k.length<8){
     // keyModal removed
@@ -11070,7 +11116,7 @@ Directo y concreto para un trader experimentado. Sin explicar conceptos básicos
       headers['anthropic-dangerous-direct-browser-access']='true';
     }
     const resp=await fetch(endpoint,{method:'POST',headers,
-      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:1000,
+      body:JSON.stringify({model:_CLAUDE_MODEL,max_tokens:1000,
         messages:[{role:'user',content:[
           {type:'image',source:{type:'base64',media_type:d.mime,data:d.b64}},
           {type:'text',text:prompt}
